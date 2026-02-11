@@ -433,7 +433,7 @@ class MainWindow(QMainWindow):
         help_menu.addAction(show_program_log_action)
 
         help_menu.addSeparator()
-
+        
         about_action = QAction("&About", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
