@@ -18,8 +18,13 @@ class Tank:
     ship_id: int | None = None
     name: str = ""
     description: str = ""
-    volume_m3: float = 0.0
+
+    # Total usable capacity in cubic metres
+    capacity_m3: float = 0.0
     density_t_per_m3: float = 0.0
+
+    # Basic classification (cargo / ballast / fuel / etc.)
+    tank_type: TankType = TankType.CARGO
 
     # Simple longitudinal position for now (relative 0–1)
     longitudinal_pos: float = 0.5

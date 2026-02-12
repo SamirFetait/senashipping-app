@@ -437,7 +437,28 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
 
+    def _create_toolbar(self) -> None:
+        """Create a simple navigation toolbar."""
+        toolbar = QToolBar("Main Toolbar", self)
+        toolbar.setMovable(False)
+        toolbar.setFloatable(False)
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        self.addToolBar(toolbar)
 
+        def add_nav_button(text: str, page_index: int, status: str) -> None:
+            action = toolbar.addAction(text)
+            action.triggered.connect(lambda: self._switch_page(page_index, status))
+
+        add_nav_button("Ship Manager", self._page_indexes.ship_manager, "Ship Manager")
+        add_nav_button(
+            "Voyage Planner", self._page_indexes.voyage_planner, "Voyage Planner"
+        )
+        add_nav_button(
+            "Loading Condition",
+            self._page_indexes.condition_editor,
+            "Loading Condition",
+        )
+        add_nav_button("Results", self._page_indexes.results, "Results")
 
     def _switch_page(self, index: int, status_message: str) -> None:
         self._stack.setCurrentIndex(index)
