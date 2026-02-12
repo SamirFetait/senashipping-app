@@ -1100,10 +1100,10 @@ class MainWindow(QMainWindow):
         """Show about dialog."""
         QMessageBox.about(
             self,
-            "About CargoMax",
-            "<h2>CargoMax for Livestock</h2>"
+            "About Sena Marine",
+            "<h2>Sena Marine</h2>"
             "<p>Version 1.0.0</p>"
             "<p>Maritime loading condition calculator for livestock carriers.</p>"
-            "<p>&copy; 2025 Sena</p>"
+            "<p>&copy; 2026 Sena Marine</p>"
         )
 
