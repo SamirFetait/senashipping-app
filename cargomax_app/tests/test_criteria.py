@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from cargomax_app.models import Ship, Tank, TankType, LoadingCondition
-from cargomax_app.services.stability_service import compute_condition
-from cargomax_app.services.validation import validate_condition
-from cargomax_app.services.condition_service import ConditionService
-from cargomax_app.services.criteria_rules import (
+from senashipping_app.models import Ship, Tank, TankType, LoadingCondition
+from senashipping_app.services.stability_service import compute_condition
+from senashipping_app.services.validation import validate_condition
+from senashipping_app.services.condition_service import ConditionService
+from senashipping_app.services.criteria_rules import (
     evaluate_all_criteria,
     evaluate_imo_criteria,
     evaluate_livestock_criteria,

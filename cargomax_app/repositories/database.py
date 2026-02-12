@@ -1,5 +1,5 @@
 """
-SQLAlchemy database setup for the CargoMax desktop app.
+SQLAlchemy database setup for the senashipping desktop app.
 """
 
 from __future__ import annotations

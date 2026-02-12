@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import pytest
 
-from cargomax_app.models import Ship, Tank, TankType, LoadingCondition
-from cargomax_app.services.stability_service import compute_condition, ConditionResults
-from cargomax_app.services.hydrostatics import (
+from senashipping_app.models import Ship, Tank, TankType, LoadingCondition
+from senashipping_app.services.stability_service import compute_condition, ConditionResults
+from senashipping_app.services.hydrostatics import (
     displacement_to_draft,
     draft_to_displacement,
     compute_trim,
     compute_kb,
     compute_bm_t,
 )
-from cargomax_app.services.longitudinal_strength import compute_strength
-from cargomax_app.services.ship_service import ShipService, ShipValidationError
-from cargomax_app.repositories.ship_repository import ShipRepository
+from senashipping_app.services.longitudinal_strength import compute_strength
+from senashipping_app.services.ship_service import ShipService, ShipValidationError
+from senashipping_app.repositories.ship_repository import ShipRepository
 
 
 class TestHydrostatics:

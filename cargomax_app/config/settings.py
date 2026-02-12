@@ -1,5 +1,5 @@
 """
-Basic settings and logging configuration for the CargoMax desktop app.
+Basic settings and logging configuration for the senashipping desktop app.
 """
 
 from __future__ import annotations
@@ -21,15 +21,15 @@ class Settings:
     def default(cls) -> "Settings":
         """Create default settings based on the current file location."""
         project_root = Path(__file__).resolve().parents[2]
-        data_dir = project_root / "cargomax_app_data"
+        data_dir = project_root / "senashipping_app_data"
         data_dir.mkdir(exist_ok=True)
-        db_path = data_dir / "cargomax.db"
+        db_path = data_dir / "senashipping.db"
         return cls(project_root=project_root, data_dir=data_dir, db_path=db_path)
 
 
 def init_logging(settings: Settings) -> None:
     """Configure basic logging to console and optional file."""
-    log_file = settings.data_dir / "cargomax.log"
+    log_file = settings.data_dir / "senashipping.log"
 
     logging.basicConfig(
         level=logging.INFO,

@@ -1,5 +1,5 @@
 """
-Application entry point for the CargoMax desktop app.
+Application entry point for the senashipping desktop app.
 
 This sets up the Qt application, main window, and high-level navigation.
 """
@@ -15,7 +15,7 @@ from .repositories.database import init_database
 
 
 def main() -> None:
-    """Bootstraps the CargoMax desktop application."""
+    """Bootstraps the senashipping desktop application."""
     # Initialize logging & settings
     settings = Settings.default()
     init_logging(settings)
@@ -35,8 +35,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # Allow running as a script: `python -m cargomax_app.main`
-    # or `python cargomax_app/main.py` (when cwd is project root)
+    # Allow running as a script: `python -m senashipping_app.main`
+    # or `python senashipping_app/main.py` (when cwd is project root)
     # Ensure working directory is project root for relative paths
     project_root = Path(__file__).resolve().parents[1]
     if project_root.exists():

@@ -1,5 +1,5 @@
 """
-Domain models for the CargoMax desktop application.
+Domain models for the senashipping desktop application.
 
 These are pure Python/domain classes, separate from ORM mappings.
 """

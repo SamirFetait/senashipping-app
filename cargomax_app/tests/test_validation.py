@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from cargomax_app.models import Ship, Tank, TankType, LoadingCondition
-from cargomax_app.services.stability_service import compute_condition, ConditionResults
-from cargomax_app.services.validation import (
+from senashipping_app.models import Ship, Tank, TankType, LoadingCondition
+from senashipping_app.services.stability_service import compute_condition, ConditionResults
+from senashipping_app.services.validation import (
     validate_condition,
     ValidationSeverity,
     safe_divide,
     compute_free_surface_correction,
 )
-from cargomax_app.services.hydrostatics import displacement_to_draft, compute_kg_from_tanks
+from senashipping_app.services.hydrostatics import displacement_to_draft, compute_kg_from_tanks
 
 
 class TestSafeDivide:

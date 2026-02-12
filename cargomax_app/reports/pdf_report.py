@@ -43,7 +43,7 @@ def export_condition_to_pdf(
     )
 
     story = []
-    story.append(Paragraph("CargoMax - Loading Condition Report", title_style))
+    story.append(Paragraph("senashipping - Loading Condition Report", title_style))
     story.append(Spacer(1, 0.5 * cm))
 
     story.append(Paragraph(f"Ship: {ship.name} (IMO: {ship.imo_number})", styles["Normal"]))

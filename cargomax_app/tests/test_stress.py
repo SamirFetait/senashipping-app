@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from cargomax_app.models import Ship, Tank, TankType, Voyage, LoadingCondition
-from cargomax_app.repositories.ship_repository import ShipRepository
-from cargomax_app.repositories.voyage_repository import VoyageRepository, ConditionRepository
-from cargomax_app.services.voyage_service import VoyageService
+from senashipping_app.models import Ship, Tank, TankType, Voyage, LoadingCondition
+from senashipping_app.repositories.ship_repository import ShipRepository
+from senashipping_app.repositories.voyage_repository import VoyageRepository, ConditionRepository
+from senashipping_app.services.voyage_service import VoyageService
 
 
 class TestCorruptedData:
@@ -21,7 +21,7 @@ class TestCorruptedData:
         cond = LoadingCondition(voyage_id=voyage.id, name="C1", tank_volumes_m3={1: 50.0})
         cond_repo.create(cond)
         # Manually corrupt JSON in DB (bypass ORM)
-        from cargomax_app.repositories.voyage_repository import LoadingConditionORM
+        from senashipping_app.repositories.voyage_repository import LoadingConditionORM
         obj = db_session.get(LoadingConditionORM, cond.id)
         obj.tank_volumes_json = "not valid json"
         db_session.commit()

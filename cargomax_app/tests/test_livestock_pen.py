@@ -2,8 +2,8 @@
 
 import pytest
 
-from cargomax_app.models import LivestockPen, Ship, LoadingCondition
-from cargomax_app.services.stability_service import compute_condition
+from senashipping_app.models import LivestockPen, Ship, LoadingCondition
+from senashipping_app.services.stability_service import compute_condition
 
 
 def test_livestock_pen_dataclass() -> None:

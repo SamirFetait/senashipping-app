@@ -13,8 +13,8 @@ _project_root = Path(__file__).resolve().parents[2]
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from cargomax_app.repositories.database import init_database
-from cargomax_app.models import Ship, Tank, TankType, Voyage, LoadingCondition
+from senashipping_app.repositories.database import init_database
+from senashipping_app.models import Ship, Tank, TankType, Voyage, LoadingCondition
 
 
 @pytest.fixture
@@ -33,10 +33,10 @@ def temp_db():
 def db_session(temp_db):
     """Provide a database session with initialized schema."""
     from sqlalchemy import create_engine
-    from cargomax_app.repositories.database import Base
-    from cargomax_app.repositories.ship_repository import ShipORM
-    from cargomax_app.repositories.tank_repository import TankORM
-    from cargomax_app.repositories.voyage_repository import VoyageORM, LoadingConditionORM
+    from senashipping_app.repositories.database import Base
+    from senashipping_app.repositories.ship_repository import ShipORM
+    from senashipping_app.repositories.tank_repository import TankORM
+    from senashipping_app.repositories.voyage_repository import VoyageORM, LoadingConditionORM
 
     engine = create_engine(f"sqlite:///{temp_db}", future=True)
     Base.metadata.create_all(bind=engine)

@@ -5,7 +5,7 @@ One-time initializer for the static Osama Bay ship, tanks, and livestock pens.
 
 Run from the project root (where main.py lives) with:
 
-    python -m cargomax_app.init_osama_bay
+    python -m senashipping_app.init_osama_bay
 
 This will:
 - create the ship "OSAMA BAY" if it does not exist,

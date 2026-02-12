@@ -1,5 +1,5 @@
 """
-Reporting utilities (PDF/Excel) for CargoMax.
+Reporting utilities (PDF/Excel) for senashipping.
 """
 
 from .simple_text_report import build_condition_summary_text

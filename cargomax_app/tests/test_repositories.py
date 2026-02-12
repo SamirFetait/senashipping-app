@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from cargomax_app.models import Ship, Tank, TankType, Voyage, LoadingCondition
-from cargomax_app.repositories.ship_repository import ShipRepository
-from cargomax_app.repositories.tank_repository import TankRepository
-from cargomax_app.repositories.voyage_repository import VoyageRepository, ConditionRepository
+from senashipping_app.models import Ship, Tank, TankType, Voyage, LoadingCondition
+from senashipping_app.repositories.ship_repository import ShipRepository
+from senashipping_app.repositories.tank_repository import TankRepository
+from senashipping_app.repositories.voyage_repository import VoyageRepository, ConditionRepository
 
 
 class TestShipRepository:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cargomax_app.models import Ship, Tank, TankType, Voyage, LoadingCondition
+from senashipping_app.models import Ship, Tank, TankType, Voyage, LoadingCondition
 
 
 class TestShip:

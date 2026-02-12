@@ -1,5 +1,5 @@
 """
-Qt main window for the CargoMax desktop app.
+Qt main window for the senashipping desktop app.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ class MainWindow(QMainWindow):
     def __init__(self, settings: Settings, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._settings = settings
-        self.setWindowTitle("CargoMax for Livestock Demo")
+        self.setWindowTitle("Sena Marine for Livestock Carriers")
         self.resize(1400, 900)
         self.setWindowIcon(self.style().standardIcon(getattr(QStyle.StandardPixmap, "SP_ComputerIcon")))
 
@@ -456,7 +456,7 @@ class MainWindow(QMainWindow):
 
         help_menu.addSeparator()
         
-        about_action = QAction("&About CargoMax", self)
+        about_action = QAction("&About senashipping", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
         
@@ -536,43 +536,6 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
-        # Edit actions
-        undo_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_ArrowBack), "Undo", self)
-        undo_action.setShortcut("Ctrl+Z")
-        undo_action.setToolTip("Undo (Ctrl+Z)")
-        undo_action.setEnabled(False)  # TODO: Implement undo stack
-        undo_action.triggered.connect(lambda: self._status_bar.showMessage("Undo - Coming soon"))
-        toolbar.addAction(undo_action)
-
-        redo_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_ArrowForward), "Redo", self)
-        redo_action.setShortcut("Ctrl+Y")
-        redo_action.setToolTip("Redo (Ctrl+Y)")
-        redo_action.setEnabled(False)  # TODO: Implement redo stack
-        redo_action.triggered.connect(lambda: self._status_bar.showMessage("Redo - Coming soon"))
-        toolbar.addAction(redo_action)
-
-        toolbar.addSeparator()
-
-        # View actions
-        zoom_in_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView), "Zoom In", self)
-        zoom_in_action.setShortcut("Ctrl++")
-        zoom_in_action.setToolTip("Zoom In (Ctrl++)")
-        zoom_in_action.triggered.connect(self._on_zoom_in)
-        toolbar.addAction(zoom_in_action)
-
-        zoom_out_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_FileDialogListView), "Zoom Out", self)
-        zoom_out_action.setShortcut("Ctrl+-")
-        zoom_out_action.setToolTip("Zoom Out (Ctrl+-)")
-        zoom_out_action.triggered.connect(self._on_zoom_out)
-        toolbar.addAction(zoom_out_action)
-        
-        fit_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_FileDialogInfoView), "Fit to View", self)
-        fit_action.setToolTip("Fit All to View")
-        fit_action.triggered.connect(self._on_fit_to_view)
-        toolbar.addAction(fit_action)
-
-        toolbar.addSeparator()
-
         # Navigation actions with checkable buttons
         nav_group = QActionGroup(self)
         nav_group.setExclusive(True)
@@ -630,39 +593,6 @@ class MainWindow(QMainWindow):
         alarms_btn.clicked.connect(self._on_alarms_clicked)
         status_layout.addWidget(alarms_btn)
 
-        # Log button
-        log_btn = QPushButton("Log", self)
-        log_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #ecf0f1;
-                color: #2c3e50;
-                padding: 6px 12px;
-                border: 1px solid #bdc3c7;
-                border-radius: 3px;
-            }
-            QPushButton:hover {
-                background-color: #d5dbdb;
-            }
-        """)
-        log_btn.clicked.connect(self._on_log_clicked)
-        status_layout.addWidget(log_btn)
-
-        # Offline button
-        offline_btn = QPushButton("Offline", self)
-        offline_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e74c3c;
-                color: white;
-                padding: 6px 12px;
-                border: none;
-                border-radius: 3px;
-            }
-            QPushButton:hover {
-                background-color: #c0392b;
-            }
-        """)
-        offline_btn.clicked.connect(self._on_offline_clicked)
-        status_layout.addWidget(offline_btn)
 
         # Status indicator (green circle)
         status_indicator = QLabel("●", self)
@@ -708,7 +638,7 @@ class MainWindow(QMainWindow):
         if isinstance(current_widget, ConditionEditorView):
             current_widget.new_condition()
             self._current_file_path = None
-            self.setWindowTitle("CargoMax for Livestock Demo - [New]")
+            self.setWindowTitle("senashipping for Livestock Demo - [New]")
             self._status_bar.showMessage("New condition created")
         else:
             self._status_bar.showMessage("Switch to Loading Condition view first")
@@ -733,7 +663,7 @@ class MainWindow(QMainWindow):
             self,
             "Open Loading Condition",
             str(Path.home()),
-            "CargoMax Files (*.cargomax);;JSON Files (*.json);;All Files (*)",
+            "senashipping Files (*.senashipping);;JSON Files (*.json);;All Files (*)",
         )
         
         if not file_path:
@@ -750,7 +680,7 @@ class MainWindow(QMainWindow):
             if isinstance(current_widget, ConditionEditorView):
                 # Load condition into editor
                 self._current_file_path = Path(file_path)
-                self.setWindowTitle(f"CargoMax for Livestock Demo - {Path(file_path).name}")
+                self.setWindowTitle(f"Sena Marine for Livestock Carriers - {Path(file_path).name}")
                 
                 # Set condition name
                 current_widget._condition_name_edit.setText(condition.name)
@@ -855,16 +785,16 @@ class MainWindow(QMainWindow):
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Save Loading Condition",
-            str(self._current_file_path or Path.home() / "condition.cargomax"),
-            "CargoMax Files (*.cargomax);;JSON Files (*.json);;All Files (*)",
+            str(self._current_file_path or Path.home() / "condition.senashipping"),
+            "senashipping Files (*.senashipping);;JSON Files (*.json);;All Files (*)",
         )
         
         if not file_path:
             return
             
-        # Ensure .cargomax extension if not provided
-        if not file_path.endswith(('.cargomax', '.json')):
-            file_path += '.cargomax'
+        # Ensure .senashipping extension if not provided
+        if not file_path.endswith(('.senashipping', '.json')):
+            file_path += '.senashipping'
             
         self._save_to_file(Path(file_path), current_widget)
         
@@ -927,7 +857,7 @@ class MainWindow(QMainWindow):
         try:
             save_condition_to_file(file_path, condition)
             self._current_file_path = file_path
-            self.setWindowTitle(f"CargoMax for Livestock Demo - {file_path.name}")
+            self.setWindowTitle(f"Sena Marine for Livestock Carriers - {file_path.name}")
             self._status_bar.showMessage(f"Condition saved to {file_path.name}", 3000)
         except Exception as e:
             QMessageBox.critical(

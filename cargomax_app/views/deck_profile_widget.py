@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
 from .graphics_views import ShipGraphicsView
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent  # -> cargomax_app
+BASE_DIR = Path(__file__).resolve().parent.parent  # -> senashipping_app
 CAD_DIR = BASE_DIR / "cads"
 
 

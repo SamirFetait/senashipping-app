@@ -2,8 +2,8 @@
 
 import pytest
 
-from cargomax_app.models import Ship
-from cargomax_app.services.ancillary_calculations import (
+from senashipping_app.models import Ship
+from senashipping_app.services.ancillary_calculations import (
     compute_ancillary,
     compute_prop_immersion_pct,
     compute_visibility_m,

@@ -1,1 +1,1 @@
-"""Tests for the CargoMax desktop application."""
+"""Tests for the senashipping desktop application."""

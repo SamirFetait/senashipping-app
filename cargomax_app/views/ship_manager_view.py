@@ -161,9 +161,6 @@ class ShipManagerView(QWidget):
         self._pen_add_btn.clicked.connect(self._on_add_pen_row)
         self._pen_delete_btn.clicked.connect(self._on_delete_selected_pen_row)
         self._pen_save_btn.clicked.connect(self._on_save_pens)
-        self._pen_add_btn.clicked.connect(self._on_add_pen_row)
-        self._pen_delete_btn.clicked.connect(self._on_delete_selected_pen_row)
-        self._pen_save_btn.clicked.connect(self._on_save_pens)
 
     # Data loading -----------------------------------------------------------
     def _load_ships(self) -> None:
