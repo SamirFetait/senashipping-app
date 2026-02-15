@@ -96,9 +96,6 @@ class ConditionEditorView(QWidget):
         # Graphical deck/profile view (left side)
         self._deck_profile_widget = DeckProfileWidget(self)
         
-        # Cross-section widget (middle, between profile and results)
-        # self._cross_section_widget = CrossSectionWidget(self)
-        
         # Results panel (right side)
         self._results_panel = ResultsPanel(self)
         
