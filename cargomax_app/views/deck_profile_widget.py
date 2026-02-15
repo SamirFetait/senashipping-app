@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QRectF, pyqtSignal
-from PyQt6.QtGui import QPen, QBrush, QColor, QFont, QPainterPath
+from PyQt6.QtGui import QPen, QBrush, QColor, QPainterPath
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -19,7 +19,6 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QGraphicsLineItem,
     QGraphicsRectItem,
-    QGraphicsTextItem,
 )
 
 from .graphics_views import ShipGraphicsView
@@ -160,10 +159,9 @@ class TankPolygonItem(QGraphicsPathItem):
 
 class ProfileView(ShipGraphicsView):
     """
-    Top profile view with waterline and frame markers.
+    Top profile view with waterline.
 
-    Shows ship profile with dynamic waterline based on draft,
-    frame markers, and trim indicators.
+    Shows ship profile with dynamic waterline based on draft and trim.
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -175,8 +173,6 @@ class ProfileView(ShipGraphicsView):
         self._waterline_item: QGraphicsLineItem | None = None
         self._waterline_aft_item: QGraphicsLineItem | None = None
         self._waterline_fwd_item: QGraphicsLineItem | None = None
-        self._frame_markers: list[QGraphicsLineItem] = []
-        self._frame_labels: list[QGraphicsTextItem] = []
         
         # Ship dimensions for scaling
         self._ship_length: float = 0.0
@@ -190,8 +186,6 @@ class ProfileView(ShipGraphicsView):
         self._waterline_item = None
         self._waterline_aft_item = None
         self._waterline_fwd_item = None
-        self._frame_markers = []
-        self._frame_labels = []
         
         dxf_path = CAD_DIR / "profile.dxf"
         if not _load_dxf_into_scene(dxf_path, self._scene):
@@ -207,54 +201,10 @@ class ProfileView(ShipGraphicsView):
             bounds = self._scene.itemsBoundingRect()
             self._ship_length = max(bounds.width(), 100.0)
             self._ship_breadth = max(abs(bounds.height()), 20.0)
-            
-        # Add frame markers
-        self._add_frame_markers()
         
         if self._scene.items():
             self.fitInView(self._scene.itemsBoundingRect(), Qt.AspectRatioMode.KeepAspectRatio)
             
-    def _add_frame_markers(self) -> None:
-        """Add frame markers along the ship profile."""
-        if self._ship_length == 0:
-            return
-            
-        # Add frame markers at regular intervals
-        num_frames = 8
-        frame_spacing = self._ship_length / (num_frames - 1)
-        font = QFont("Arial", 8)
-        
-        frame_numbers = [41, 59, 77, 83, 101, 121, 140, 159]  # Example frame numbers
-        
-        for i, frame_num in enumerate(frame_numbers[:num_frames]):
-            x = i * frame_spacing
-            # Vertical line for frame marker
-            marker = self._scene.addLine(
-                x, -self._ship_breadth * 0.6,
-                x, self._ship_breadth * 0.1,
-                QPen(QColor(200, 0, 0), 1, Qt.PenStyle.DashLine)
-            )
-            self._frame_markers.append(marker)
-            
-            # Frame label below
-            label = self._scene.addText(f"F{frame_num}", font)
-            label.setDefaultTextColor(QColor(150, 0, 0))
-            label.setPos(x - 10, self._ship_breadth * 0.15)
-            self._frame_labels.append(label)
-            
-        # Add "Long" label with Aft/Fwd indicators
-        long_label = self._scene.addText("Long", font)
-        long_label.setDefaultTextColor(QColor(100, 100, 100))
-        long_label.setPos(self._ship_length * 0.1, self._ship_breadth * 0.2)
-        
-        aft_label = self._scene.addText("Aft", font)
-        aft_label.setDefaultTextColor(QColor(100, 100, 100))
-        aft_label.setPos(10, self._ship_breadth * 0.2)
-        
-        fwd_label = self._scene.addText("Fwd", font)
-        fwd_label.setDefaultTextColor(QColor(100, 100, 100))
-        fwd_label.setPos(self._ship_length - 30, self._ship_breadth * 0.2)
-        
     def update_waterline(
         self,
         draft_mid: float,
