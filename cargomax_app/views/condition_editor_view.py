@@ -1,8 +1,8 @@
 """
 Loading Condition editor view.
 
-Allows selecting a ship (and optionally voyage/condition) for tank fillings,
-computing stability, and saving conditions to a voyage.
+Single-ship mode: ship and voyage are fixed (configured once via Tools → Ship & data setup).
+User enters cargo type; tanks/pens and ship particulars are static.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtGui import QShowEvent
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -24,9 +25,10 @@ from PyQt6.QtWidgets import (
     QSplitter,
 )
 
-from ..models import Ship, Voyage, LoadingCondition, Tank
+from ..models import Ship, Voyage, LoadingCondition, Tank, CargoType
 from ..repositories import database
 from ..repositories.ship_repository import ShipRepository
+from ..repositories.cargo_type_repository import CargoTypeRepository
 from ..services.condition_service import (
     ConditionService,
     ConditionValidationError,
@@ -36,7 +38,7 @@ from ..services.voyage_service import VoyageService, VoyageValidationError
 from .deck_profile_widget import DeckProfileWidget
 from .results_panel import ResultsPanel
 from .condition_table_widget import ConditionTableWidget
-from .cross_section_widget import CrossSectionWidget
+from .cargo_library_dialog import CargoLibraryDialog
 
 
 class ConditionEditorView(QWidget):
@@ -53,6 +55,7 @@ class ConditionEditorView(QWidget):
         self._ships: List[Ship] = []
         self._voyages: List[Voyage] = []
         self._conditions: List[LoadingCondition] = []
+        self._cargo_types: List[CargoType] = []
         self._current_ship: Optional[Ship] = None
         self._current_voyage: Optional[Voyage] = None
         self._current_condition: Optional[LoadingCondition] = None
@@ -60,6 +63,11 @@ class ConditionEditorView(QWidget):
         self._ship_combo = QComboBox(self)
         self._voyage_combo = QComboBox(self)
         self._condition_combo = QComboBox(self)
+        self._ship_label = QLabel(self)  # read-only ship name (single-ship mode)
+        self._cargo_type_combo = QComboBox(self)  # from cargo library
+        self._cargo_type_combo.setEditable(True)  # allow typing if not in library
+        self._cargo_type_combo.setMinimumWidth(180)
+        self._cargo_library_btn = QPushButton("Edit library...", self)
         self._condition_name_edit = QLineEdit(self)
         self._tank_table = QTableWidget(self)
         self._tank_table.setColumnCount(3)
@@ -89,7 +97,7 @@ class ConditionEditorView(QWidget):
         self._deck_profile_widget = DeckProfileWidget(self)
         
         # Cross-section widget (middle, between profile and results)
-        self._cross_section_widget = CrossSectionWidget(self)
+        # self._cross_section_widget = CrossSectionWidget(self)
         
         # Results panel (right side)
         self._results_panel = ResultsPanel(self)
@@ -102,8 +110,11 @@ class ConditionEditorView(QWidget):
 
         self._build_layout()
         self._connect_signals()
+        # Single-ship: save to voyage disabled; user saves via File → Save
         self._save_condition_btn.setEnabled(False)
+        self._save_condition_btn.setToolTip("Save to file via File → Save")
         self._load_ships()
+        self._refresh_cargo_types()
 
     def _build_layout(self) -> None:
         root = QVBoxLayout(self)
@@ -162,22 +173,22 @@ class ConditionEditorView(QWidget):
             }
         """)
 
-        # Top controls
+        # Top controls – single-ship: ship is read-only, user only enters cargo type
         top = QHBoxLayout()
         top.setSpacing(4)
         top.addWidget(QLabel("Ship:", self))
-        top.addWidget(self._ship_combo, 1)
-        top.addWidget(QLabel("Voyage:", self))
-        top.addWidget(self._voyage_combo, 1)
-        top.addWidget(QLabel("Condition:", self))
-        top.addWidget(self._condition_combo, 1)
+        top.addWidget(self._ship_label, 1)
+        self._ship_label.setStyleSheet("color: #555; padding: 4px;")
+        top.addWidget(QLabel("Cargo type:", self))
+        top.addWidget(self._cargo_type_combo, 2)
+        top.addWidget(self._cargo_library_btn)
+        top.addStretch()
         root.addLayout(top)
-
-        name_row = QHBoxLayout()
-        name_row.setSpacing(4)
-        name_row.addWidget(QLabel("Condition name:", self))
-        name_row.addWidget(self._condition_name_edit, 2)
-        root.addLayout(name_row)
+        # Hide ship/voyage/condition combos (still used internally for load_condition from file)
+        self._ship_combo.hide()
+        self._voyage_combo.hide()
+        self._condition_combo.hide()
+        self._condition_name_edit.hide()
 
         # Main content area: left (profile+deck), middle (cross-section), right (results)
         main_splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -187,8 +198,6 @@ class ConditionEditorView(QWidget):
         main_splitter.addWidget(self._deck_profile_widget)
         
         # Middle: cross-section widget
-        self._cross_section_widget.setMaximumWidth(250)
-        main_splitter.addWidget(self._cross_section_widget)
         
         # Right side: results panel
         main_splitter.addWidget(self._results_panel)
@@ -218,7 +227,9 @@ class ConditionEditorView(QWidget):
         self._condition_combo.currentIndexChanged.connect(self._on_condition_changed)
         self._compute_btn.clicked.connect(self._on_compute)
         self._save_condition_btn.clicked.connect(self._on_save_condition)
-        
+        self._cargo_library_btn.clicked.connect(self._on_edit_cargo_library)
+        self._deck_profile_widget.tank_selected.connect(self._on_tank_selected_from_view)
+
         # Connect table changes for real-time updates
         self._tank_table.itemChanged.connect(self._on_tank_table_changed)
         self._pen_table.itemChanged.connect(self._on_pen_table_changed)
@@ -235,9 +246,53 @@ class ConditionEditorView(QWidget):
         for ship in self._ships:
             self._ship_combo.addItem(ship.name, ship.id)
 
+        # Single-ship: use first ship only, show name in read-only label
         if self._ships:
+            self._current_ship = self._ships[0]
+            self._ship_label.setText(self._current_ship.name or "— No ship —")
             self._ship_combo.setCurrentIndex(0)
-            self._on_ship_changed(0)
+            self._load_voyages()
+            self._set_current_ship(self._current_ship)
+        else:
+            self._ship_label.setText("— No ship — Add one via Tools → Ship & data setup")
+            self._current_ship = None
+
+    def showEvent(self, event: QShowEvent) -> None:
+        """Refresh pens and tanks from DB when view is shown (e.g. returning from Ship Manager)."""
+        super().showEvent(event)
+        if self._current_ship and self._current_ship.id:
+            self._set_current_ship(self._current_ship)
+
+    def _refresh_cargo_types(self) -> None:
+        """Reload cargo type combo from library and keep list for dynamic calculations."""
+        current = self._cargo_type_combo.currentText().strip()
+        self._cargo_type_combo.clear()
+        if database.SessionLocal is None:
+            return
+        with database.SessionLocal() as db:
+            self._cargo_types = CargoTypeRepository(db).list_all()
+            for ct in self._cargo_types:
+                self._cargo_type_combo.addItem(ct.name, ct.id)
+        self._cargo_type_combo.setCurrentText(current)
+
+    def _set_cargo_type_text(self, text: str) -> None:
+        """Set cargo type combo to the given name (e.g. when loading condition)."""
+        self._cargo_type_combo.setCurrentText(text or "")
+
+    def _on_edit_cargo_library(self) -> None:
+        """Open Edit Cargo Library dialog; refresh combo when closed."""
+        dlg = CargoLibraryDialog(self)
+        dlg.exec()
+        self._refresh_cargo_types()
+
+    def _on_tank_selected_from_view(self, tank_id: int) -> None:
+        """When user selects a tank polygon in deck view, focus that tank row in data (for calculation)."""
+        for row in range(self._tank_table.rowCount()):
+            item = self._tank_table.item(row, 0)
+            if item and item.data(Qt.ItemDataRole.UserRole) == tank_id:
+                self._tank_table.setCurrentCell(row, 0)
+                self._tank_table.scrollToItem(item)
+                return
 
     def _load_voyages(self) -> None:
         self._voyage_combo.clear()
@@ -282,6 +337,7 @@ class ConditionEditorView(QWidget):
         with database.SessionLocal() as db:
             cond_service = ConditionService(db)
             tanks = cond_service.get_tanks_for_ship(ship.id)
+            pens = cond_service.get_pens_for_ship(ship.id)
 
         volumes: Dict[int, float] = {}
         pen_loadings: Dict[int, int] = {}
@@ -289,7 +345,6 @@ class ConditionEditorView(QWidget):
             volumes = self._current_condition.tank_volumes_m3
             pen_loadings = getattr(self._current_condition, "pen_loadings", {}) or {}
         self._populate_tanks_table(tanks, volumes)
-        pens = cond_service.get_pens_for_ship(ship.id)
         self._populate_pens_table(pens, pen_loadings)
         
         # Update deck tabs with pens/tanks data
@@ -383,6 +438,8 @@ class ConditionEditorView(QWidget):
         self._condition_combo.blockSignals(False)
 
         self._condition_name_edit.setText(condition.name)
+        self._set_cargo_type_text(condition.name)
+        self._ship_label.setText(ship.name if ship else "—")
         self._save_condition_btn.setEnabled(True)
         if ship:
             with database.SessionLocal() as db:
@@ -435,10 +492,14 @@ class ConditionEditorView(QWidget):
 
     def _on_compute(self) -> None:
         if not self._current_ship or self._current_ship.id is None:
-            QMessageBox.information(self, "No ship", "Please select a ship first.")
+            QMessageBox.information(
+                self, "No ship",
+                "Add a ship first via Tools → Ship & data setup.",
+            )
             return
 
-        condition_name = self._condition_name_edit.text().strip() or "Condition"
+        condition_name = self._cargo_type_combo.currentText().strip() or "Condition"
+        self._condition_name_edit.setText(condition_name)
 
         condition = LoadingCondition(
             id=self._current_condition.id if self._current_condition else None,
@@ -500,9 +561,14 @@ class ConditionEditorView(QWidget):
         condition.tank_volumes_m3 = tank_volumes
         condition.pen_loadings = pen_loadings
 
+        selected_cargo = next(
+            (c for c in self._cargo_types if c.name == self._cargo_type_combo.currentText().strip()),
+            None,
+        )
         try:
             results: ConditionResults = cond_service.compute(
-                self._current_ship, condition, tank_volumes
+                self._current_ship, condition, tank_volumes,
+                cargo_type=selected_cargo,
             )
         except ConditionValidationError as exc:
             QMessageBox.warning(self, "Validation", str(exc))
@@ -610,8 +676,15 @@ class ConditionEditorView(QWidget):
         with database.SessionLocal() as db:
             svc = VoyageService(db)
             cond_svc = ConditionService(db)
+            selected_cargo = next(
+                (c for c in self._cargo_types if c.name == self._cargo_type_combo.currentText().strip()),
+                None,
+            )
             try:
-                results = cond_svc.compute(self._current_ship, condition, tank_volumes)
+                results = cond_svc.compute(
+                    self._current_ship, condition, tank_volumes,
+                    cargo_type=selected_cargo,
+                )
                 condition.displacement_t = results.displacement_t
                 condition.draft_m = results.draft_m
                 condition.trim_m = results.trim_m
@@ -641,8 +714,17 @@ class ConditionEditorView(QWidget):
         pen_loadings: Dict[int, int],
         tank_volumes: Dict[int, float],
     ) -> None:
-        """Helper to update the condition table widget."""
-        self._condition_table.update_data(pens, tanks, pen_loadings, tank_volumes)
+        """Helper to update the condition table widget (uses selected cargo type for dynamic AvW/Area; Cargo column dropdown from library)."""
+        selected_cargo = next(
+            (c for c in self._cargo_types if c.name == self._cargo_type_combo.currentText().strip()),
+            None,
+        )
+        cargo_type_names = [c.name for c in self._cargo_types] if self._cargo_types else None
+        self._condition_table.update_data(
+            pens, tanks, pen_loadings, tank_volumes,
+            cargo_type=selected_cargo,
+            cargo_type_names=cargo_type_names,
+        )
         
     # Public methods for toolbar access
     def compute_condition(self) -> bool:
@@ -673,6 +755,7 @@ class ConditionEditorView(QWidget):
     def new_condition(self) -> None:
         """Create a new condition. Called from toolbar."""
         self._current_condition = None
+        self._cargo_type_combo.setCurrentText("")
         self._condition_name_edit.clear()
         if self._current_ship:
             self._set_current_ship(self._current_ship)

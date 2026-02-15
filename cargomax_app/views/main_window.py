@@ -37,6 +37,7 @@ from .ship_manager_view import ShipManagerView
 from .voyage_planner_view import VoyagePlannerView
 from .condition_editor_view import ConditionEditorView
 from .results_view import ResultsView
+from .cargo_library_dialog import CargoLibraryDialog
 
 
 @dataclass
@@ -74,8 +75,8 @@ class MainWindow(QMainWindow):
         self._create_toolbar()
         self._create_status_panel()
 
-        # Set initial page and update toolbar
-        self._switch_page(self._page_indexes.ship_manager, "Ship Manager")
+        # Single-ship app: open on Loading Condition; Ship/Voyage are setup-only
+        self._switch_page(self._page_indexes.condition_editor, "Loading Condition")
         self._status_bar.showMessage("Ready")
 
     def _create_pages(self) -> _PageIndexes:
@@ -109,6 +110,11 @@ class MainWindow(QMainWindow):
         # Wire voyage planner: when user clicks Edit Condition, switch to editor and load it
         self._voyage_planner.condition_selected.connect(
             self._on_condition_selected_from_voyage
+        )
+
+        # Wire condition table '+' button: switch to Ship & data setup to add tanks/pens
+        self._condition_editor._condition_table.add_requested.connect(
+            lambda: self._switch_page(self._page_indexes.ship_manager, "Ship & data setup – add tanks and pens")
         )
 
         return pages
@@ -285,7 +291,14 @@ class MainWindow(QMainWindow):
         view_menu_action.triggered.connect(lambda: self._status_bar.showMessage("Restore Default Units and Precision"))
         view_menu.addAction(view_menu_action)
 
-        # Tools actions
+        # Tools actions – single-ship: Ship/data setup for one-time config
+        ship_setup_action = QAction("Ship & data setup...", self)
+        ship_setup_action.setToolTip("Configure ship particulars, tanks and pens (one-time setup)")
+        ship_setup_action.triggered.connect(
+            lambda: self._switch_page(self._page_indexes.ship_manager, "Ship & data setup")
+        )
+        tools_menu.addAction(ship_setup_action)
+
         # Tools for Selected Deadweight Items...
         tools_action = QAction("Tools for Selected Deadweight Items...", self)
         tools_action.setShortcut("Ctrl+T")
@@ -321,9 +334,20 @@ class MainWindow(QMainWindow):
 
         tools_menu.addSeparator()
 
+        # Cargo Library – edit cargo types (affects loading condition)
+        cargo_lib_action = QAction("Cargo Library...", self)
+        cargo_lib_action.setToolTip("Edit cargo type library")
+        cargo_lib_action.triggered.connect(self._on_cargo_library)
+        tools_menu.addAction(cargo_lib_action)
+
+        # Import DXF polygons as tank objects (outline + deck; then selectable in deck view)
+        import_dxf_action = QAction("Import tanks from DXF...", self)
+        import_dxf_action.setToolTip("Convert DXF polygons to tanks for this ship")
+        import_dxf_action.triggered.connect(self._on_import_tanks_from_dxf)
+        tools_menu.addAction(import_dxf_action)
+
         # Remaining items
         items = [
-            "Cargo Library...",
             "Observed Drafts...",
             "Draft Survey...",
             "Tank/Weight Transfer...",
@@ -553,10 +577,9 @@ class MainWindow(QMainWindow):
             nav_group.addAction(action)
             self._nav_actions[page_index] = action
 
-        add_nav_action("Ship Manager", "SP_DirHomeIcon", self._page_indexes.ship_manager, "Ship Manager", "F2")
-        add_nav_action("Voyage Planner", "SP_FileDialogListView", self._page_indexes.voyage_planner, "Voyage Planner", "F3")
-        add_nav_action("Loading Condition", "SP_FileDialogDetailedView", self._page_indexes.condition_editor, "Loading Condition", "F4")
-        add_nav_action("Results", "SP_FileDialogInfoView", self._page_indexes.results, "Results", "F5")
+        # Single-ship app: only Loading Condition and Results in main nav
+        add_nav_action("Loading Condition", "SP_FileDialogDetailedView", self._page_indexes.condition_editor, "Loading Condition", "F2")
+        add_nav_action("Results", "SP_FileDialogInfoView", self._page_indexes.results, "Results", "F3")
 
         toolbar.addSeparator()
 
@@ -609,10 +632,76 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentIndex(index)
         self._status_bar.showMessage(status_message)
         
-        # Update toolbar checked state
-        action = self._nav_actions.get(index)
-        if action is not None:
-            action.setChecked(True)
+        # Update toolbar checked state (only Loading Condition / Results have nav buttons)
+        for idx, action in self._nav_actions.items():
+            action.setChecked(idx == index)
+
+    def _on_cargo_library(self) -> None:
+        """Open Edit Cargo Library dialog; refresh condition editor combo when closed."""
+        dlg = CargoLibraryDialog(self)
+        dlg.exec()
+        cond_editor = self._stack.widget(self._page_indexes.condition_editor)
+        if isinstance(cond_editor, ConditionEditorView):
+            cond_editor._refresh_cargo_types()
+
+    def _on_import_tanks_from_dxf(self) -> None:
+        """Import DXF polygons as tank objects for the current ship."""
+        cond_editor = self._stack.widget(self._page_indexes.condition_editor)
+        if not isinstance(cond_editor, ConditionEditorView):
+            self._status_bar.showMessage("Switch to Loading Condition first")
+            return
+        ship = getattr(cond_editor, "_current_ship", None)
+        if not ship or not getattr(ship, "id", None):
+            QMessageBox.information(
+                self,
+                "Import tanks from DXF",
+                "Select a ship first (Tools → Ship & data setup).",
+            )
+            return
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select DXF file",
+            str(Path.home()),
+            "DXF (*.dxf);;All (*)",
+        )
+        if not file_path:
+            return
+        from PyQt6.QtWidgets import QInputDialog
+        deck_name, ok = QInputDialog.getItem(
+            self,
+            "Import tanks from DXF",
+            "Deck name (for tank polygons):",
+            ["A", "B", "C", "D", "E", "F", "G", "H"],
+            0,
+            False,
+        )
+        if not ok:
+            return
+        try:
+            from ..services.dxf_tank_parser import create_tanks_from_dxf
+            from ..repositories import database
+            from ..repositories.tank_repository import TankRepository
+            with database.SessionLocal() as db:
+                tank_repo = TankRepository(db)
+                created = create_tanks_from_dxf(
+                    Path(file_path),
+                    ship.id,
+                    deck_name,
+                    tank_repo,
+                )
+            cond_editor._set_current_ship(ship)
+            QMessageBox.information(
+                self,
+                "Import tanks from DXF",
+                f"Created {len(created)} tank(s). They appear on deck view when you have outline data.",
+            )
+            self._status_bar.showMessage(f"Imported {len(created)} tanks from DXF")
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Failed to import DXF:\n{str(e)}",
+            )
 
     def _on_new_condition(self) -> None:
         """Handle new condition action from toolbar."""
@@ -682,8 +771,9 @@ class MainWindow(QMainWindow):
                 self._current_file_path = Path(file_path)
                 self.setWindowTitle(f"Sena Marine for Livestock Carriers - {Path(file_path).name}")
                 
-                # Set condition name
+                # Set condition name and cargo type (single-ship: user sees cargo type)
                 current_widget._condition_name_edit.setText(condition.name)
+                current_widget._set_cargo_type_text(condition.name)
                 
                 # Load condition data into editor
                 current_widget._current_condition = condition
@@ -804,9 +894,9 @@ class MainWindow(QMainWindow):
         condition = condition_widget._current_condition
         
         if not condition:
-            # Create condition from current form state
+            # Create condition from current form state (single-ship: name = cargo type)
             from ..models import LoadingCondition
-            condition_name = condition_widget._condition_name_edit.text().strip() or "Condition"
+            condition_name = condition_widget._cargo_type_combo.currentText().strip() or condition_widget._condition_name_edit.text().strip() or "Condition"
             condition = LoadingCondition(
                 voyage_id=condition_widget._current_voyage.id if condition_widget._current_voyage else None,
                 name=condition_name,
@@ -984,32 +1074,32 @@ class MainWindow(QMainWindow):
         else:
             self._status_bar.showMessage("Switch to Loading Condition view first")
             
-    def _on_zoom_in(self) -> None:
-        """Handle zoom in action from toolbar."""
-        current_widget = self._stack.currentWidget()
-        if isinstance(current_widget, ConditionEditorView):
-            current_widget.zoom_in_graphics()
-            self._status_bar.showMessage("Zoomed in", 1000)
-        else:
-            self._status_bar.showMessage("Zoom available in Loading Condition view")
+    # def _on_zoom_in(self) -> None:
+    #     """Handle zoom in action from toolbar."""
+    #     current_widget = self._stack.currentWidget()
+    #     if isinstance(current_widget, ConditionEditorView):
+    #         current_widget.zoom_in_graphics()
+    #         self._status_bar.showMessage("Zoomed in", 1000)
+    #     else:
+    #         self._status_bar.showMessage("Zoom available in Loading Condition view")
             
-    def _on_zoom_out(self) -> None:
-        """Handle zoom out action from toolbar."""
-        current_widget = self._stack.currentWidget()
-        if isinstance(current_widget, ConditionEditorView):
-            current_widget.zoom_out_graphics()
-            self._status_bar.showMessage("Zoomed out", 1000)
-        else:
-            self._status_bar.showMessage("Zoom available in Loading Condition view")
+    # def _on_zoom_out(self) -> None:
+    #     """Handle zoom out action from toolbar."""
+    #     current_widget = self._stack.currentWidget()
+    #     if isinstance(current_widget, ConditionEditorView):
+    #         current_widget.zoom_out_graphics()
+    #         self._status_bar.showMessage("Zoomed out", 1000)
+    #     else:
+    #         self._status_bar.showMessage("Zoom available in Loading Condition view")
             
-    def _on_fit_to_view(self) -> None:
-        """Handle fit to view action from toolbar."""
-        current_widget = self._stack.currentWidget()
-        if isinstance(current_widget, ConditionEditorView):
-            current_widget.reset_zoom_graphics()
-            self._status_bar.showMessage("Fitted to view", 1000)
-        else:
-            self._status_bar.showMessage("Fit to view available in Loading Condition view")
+    # def _on_fit_to_view(self) -> None:
+    #     """Handle fit to view action from toolbar."""
+    #     current_widget = self._stack.currentWidget()
+    #     if isinstance(current_widget, ConditionEditorView):
+    #         current_widget.reset_zoom_graphics()
+    #         self._status_bar.showMessage("Fitted to view", 1000)
+    #     else:
+    #         self._status_bar.showMessage("Fit to view available in Loading Condition view")
 
     def _on_alarms_clicked(self) -> None:
         """Handle alarms button click."""

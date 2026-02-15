@@ -22,11 +22,20 @@ class LivestockPenORM(Base):
     )
     name: Mapped[str] = mapped_column(String(64), nullable=False)
     deck: Mapped[str] = mapped_column(String(32), default="")
+    pen_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
     vcg_m: Mapped[float] = mapped_column(Float, default=0.0)
     lcg_m: Mapped[float] = mapped_column(Float, default=0.0)
     tcg_m: Mapped[float] = mapped_column(Float, default=0.0)
     area_m2: Mapped[float] = mapped_column(Float, default=0.0)
     capacity_head: Mapped[int] = mapped_column(Integer, default=0)
+    area_a_m2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    area_b_m2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    area_c_m2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    area_d_m2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tcg_a_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tcg_b_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tcg_c_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tcg_d_m: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class LivestockPenRepository:
@@ -47,11 +56,20 @@ class LivestockPenRepository:
                     ship_id=obj.ship_id,
                     name=obj.name,
                     deck=obj.deck,
+                    pen_no=getattr(obj, "pen_no", None),
                     vcg_m=obj.vcg_m,
                     lcg_m=obj.lcg_m,
                     tcg_m=obj.tcg_m,
                     area_m2=obj.area_m2,
                     capacity_head=obj.capacity_head,
+                    area_a_m2=getattr(obj, "area_a_m2", None),
+                    area_b_m2=getattr(obj, "area_b_m2", None),
+                    area_c_m2=getattr(obj, "area_c_m2", None),
+                    area_d_m2=getattr(obj, "area_d_m2", None),
+                    tcg_a_m=getattr(obj, "tcg_a_m", None),
+                    tcg_b_m=getattr(obj, "tcg_b_m", None),
+                    tcg_c_m=getattr(obj, "tcg_c_m", None),
+                    tcg_d_m=getattr(obj, "tcg_d_m", None),
                 )
             )
         return pens
@@ -65,11 +83,20 @@ class LivestockPenRepository:
             ship_id=obj.ship_id,
             name=obj.name,
             deck=obj.deck,
+            pen_no=getattr(obj, "pen_no", None),
             vcg_m=obj.vcg_m,
             lcg_m=obj.lcg_m,
             tcg_m=obj.tcg_m,
             area_m2=obj.area_m2,
             capacity_head=obj.capacity_head,
+            area_a_m2=getattr(obj, "area_a_m2", None),
+            area_b_m2=getattr(obj, "area_b_m2", None),
+            area_c_m2=getattr(obj, "area_c_m2", None),
+            area_d_m2=getattr(obj, "area_d_m2", None),
+            tcg_a_m=getattr(obj, "tcg_a_m", None),
+            tcg_b_m=getattr(obj, "tcg_b_m", None),
+            tcg_c_m=getattr(obj, "tcg_c_m", None),
+            tcg_d_m=getattr(obj, "tcg_d_m", None),
         )
 
     def create(self, pen: LivestockPen) -> LivestockPen:
@@ -79,11 +106,20 @@ class LivestockPenRepository:
             ship_id=pen.ship_id,
             name=pen.name,
             deck=pen.deck,
+            pen_no=pen.pen_no,
             vcg_m=pen.vcg_m,
             lcg_m=pen.lcg_m,
             tcg_m=pen.tcg_m,
             area_m2=pen.area_m2,
             capacity_head=pen.capacity_head,
+            area_a_m2=pen.area_a_m2,
+            area_b_m2=pen.area_b_m2,
+            area_c_m2=pen.area_c_m2,
+            area_d_m2=pen.area_d_m2,
+            tcg_a_m=pen.tcg_a_m,
+            tcg_b_m=pen.tcg_b_m,
+            tcg_c_m=pen.tcg_c_m,
+            tcg_d_m=pen.tcg_d_m,
         )
         self._db.add(obj)
         self._db.commit()
@@ -99,11 +135,20 @@ class LivestockPenRepository:
             raise ValueError(f"LivestockPen with id {pen.id} not found")
         obj.name = pen.name
         obj.deck = pen.deck
+        obj.pen_no = pen.pen_no
         obj.vcg_m = pen.vcg_m
         obj.lcg_m = pen.lcg_m
         obj.tcg_m = pen.tcg_m
         obj.area_m2 = pen.area_m2
         obj.capacity_head = pen.capacity_head
+        obj.area_a_m2 = pen.area_a_m2
+        obj.area_b_m2 = pen.area_b_m2
+        obj.area_c_m2 = pen.area_c_m2
+        obj.area_d_m2 = pen.area_d_m2
+        obj.tcg_a_m = pen.tcg_a_m
+        obj.tcg_b_m = pen.tcg_b_m
+        obj.tcg_c_m = pen.tcg_c_m
+        obj.tcg_d_m = pen.tcg_d_m
         self._db.commit()
         self._db.refresh(obj)
         return pen

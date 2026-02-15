@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QTableWidget,
     QTableWidgetItem,
+    QComboBox,
     QMessageBox,
 )
 
@@ -31,6 +32,7 @@ from ..repositories import database
 from ..repositories.tank_repository import TankRepository
 from ..repositories.livestock_pen_repository import LivestockPenRepository
 from ..services.ship_service import ShipService, ShipValidationError
+from .condition_table_widget import TANK_CATEGORY_NAMES, TANK_CATEGORY_TYPES
 
 
 class ShipManagerView(QWidget):
@@ -61,26 +63,39 @@ class ShipManagerView(QWidget):
         self._ship_save_btn = QPushButton("Save Ship", self)
         self._ship_delete_btn = QPushButton("Delete Ship", self)
 
-        # Tanks table
+        # Tanks table: Name, Storing (dropdown), Capacity (m³), Long. pos
         self._tanks_table = QTableWidget(self)
-        self._tanks_table.setColumnCount(8)
+        self._tanks_table.setColumnCount(4)
         self._tanks_table.setHorizontalHeaderLabels(
-            ["Name", "Description", "Volume (m³)", "Density (t/m³)", "Weight (t)", "Vsg (m)", "LCG (m)", "TCG (m)"]
+            ["Name", "Storing", "Capacity (m³)", "Long. pos"]
         )
         self._tanks_table.horizontalHeader().setStretchLastSection(False)
-        self._tanks_table.setColumnWidth(0, 200)
-        self._tanks_table.setColumnWidth(1, 400)
+        self._tanks_table.setColumnWidth(0, 180)
+        self._tanks_table.setColumnWidth(1, 140)
 
         self._tank_add_btn = QPushButton("Add Tank", self)
         self._tank_delete_btn = QPushButton("Delete Selected Tank", self)
         self._tank_save_btn = QPushButton("Save Tanks", self)
 
-        # Livestock pens table
+        # Livestock pens table – same columns as loading condition (Livestock-DK tabs)
         self._pens_table = QTableWidget(self)
-        self._pens_table.setColumnCount(7)
-        self._pens_table.setHorizontalHeaderLabels(
-            ["Name", "Deck", "Area (m²)", "VCG (m)", "LCG (m)", "TCG (m)", "Cap. Head"]
-        )
+        self._pens_table.setColumnCount(14)
+        self._pens_table.setHorizontalHeaderLabels([
+            "Name",
+            "Deck",
+            "# Head",
+            "Head %Full",
+            "Head Capacity",
+            "Used Area m2",
+            "Total Area m2",
+            "Area/Head",
+            "AvW/Head MT",
+            "Weight MT",
+            "VCG m-BL",
+            "LCG m-[FR]",
+            "TCG m-CL",
+            "LS Moment m-MT",
+        ])
         self._pens_table.horizontalHeader().setStretchLastSection(True)
         self._pen_add_btn = QPushButton("Add Pen", self)
         self._pen_delete_btn = QPushButton("Delete Selected Pen", self)
@@ -199,6 +214,7 @@ class ShipManagerView(QWidget):
             self._populate_pens_table(pens)
 
     def _populate_pens_table(self, pens: list[LivestockPen]) -> None:
+        """Fill pens table with same column layout as loading condition (Livestock-DK)."""
         self._pens_table.setRowCount(0)
         for pen in pens:
             row = self._pens_table.rowCount()
@@ -207,11 +223,18 @@ class ShipManagerView(QWidget):
             name_item.setData(Qt.ItemDataRole.UserRole, pen.id)
             self._pens_table.setItem(row, 0, name_item)
             self._pens_table.setItem(row, 1, QTableWidgetItem(pen.deck))
-            self._pens_table.setItem(row, 2, QTableWidgetItem(f"{pen.area_m2:.2f}"))
-            self._pens_table.setItem(row, 3, QTableWidgetItem(f"{pen.vcg_m:.2f}"))
-            self._pens_table.setItem(row, 4, QTableWidgetItem(f"{pen.lcg_m:.2f}"))
-            self._pens_table.setItem(row, 5, QTableWidgetItem(f"{pen.tcg_m:.2f}"))
-            self._pens_table.setItem(row, 6, QTableWidgetItem(str(pen.capacity_head)))
+            self._pens_table.setItem(row, 2, QTableWidgetItem("0"))       # # Head (set in condition)
+            self._pens_table.setItem(row, 3, QTableWidgetItem("0.0"))   # Head %Full
+            self._pens_table.setItem(row, 4, QTableWidgetItem(str(pen.capacity_head)))
+            self._pens_table.setItem(row, 5, QTableWidgetItem("0.00"))   # Used Area (from condition)
+            self._pens_table.setItem(row, 6, QTableWidgetItem(f"{pen.area_m2:.2f}"))
+            self._pens_table.setItem(row, 7, QTableWidgetItem(""))       # Area/Head
+            self._pens_table.setItem(row, 8, QTableWidgetItem("0.50"))   # AvW/Head MT
+            self._pens_table.setItem(row, 9, QTableWidgetItem("0.00"))   # Weight MT
+            self._pens_table.setItem(row, 10, QTableWidgetItem(f"{pen.vcg_m:.3f}"))
+            self._pens_table.setItem(row, 11, QTableWidgetItem(f"{pen.lcg_m:.3f}"))
+            self._pens_table.setItem(row, 12, QTableWidgetItem(f"{pen.tcg_m:.3f}"))
+            self._pens_table.setItem(row, 13, QTableWidgetItem(""))      # LS Moment
 
     def _populate_tanks_table(self, tanks: list[Tank]) -> None:
         self._tanks_table.setRowCount(0)
@@ -222,7 +245,15 @@ class ShipManagerView(QWidget):
             name_item = QTableWidgetItem(tank.name)
             name_item.setData(Qt.ItemDataRole.UserRole, tank.id)
             self._tanks_table.setItem(row, 0, name_item)
-            self._tanks_table.setItem(row, 1, QTableWidgetItem(tank.tank_type.name))
+
+            category = getattr(tank, "category", None) or "Misc. Tanks"
+            if category not in TANK_CATEGORY_NAMES:
+                category = "Misc. Tanks"
+            combo = QComboBox(self)
+            combo.addItems(TANK_CATEGORY_NAMES)
+            combo.setCurrentText(category)
+            self._tanks_table.setCellWidget(row, 1, combo)
+
             self._tanks_table.setItem(
                 row, 2, QTableWidgetItem(f"{tank.capacity_m3:.2f}")
             )
@@ -332,7 +363,10 @@ class ShipManagerView(QWidget):
         row = self._tanks_table.rowCount()
         self._tanks_table.insertRow(row)
         self._tanks_table.setItem(row, 0, QTableWidgetItem("Tank"))
-        self._tanks_table.setItem(row, 1, QTableWidgetItem(TankType.CARGO.name))
+        combo = QComboBox(self)
+        combo.addItems(TANK_CATEGORY_NAMES)
+        combo.setCurrentText("Misc. Tanks")
+        self._tanks_table.setCellWidget(row, 1, combo)
         self._tanks_table.setItem(row, 2, QTableWidgetItem("0.0"))
         self._tanks_table.setItem(row, 3, QTableWidgetItem("0.5"))
 
@@ -363,19 +397,21 @@ class ShipManagerView(QWidget):
 
             for row in range(self._tanks_table.rowCount()):
                 name_item = self._tanks_table.item(row, 0)
-                type_item = self._tanks_table.item(row, 1)
                 cap_item = self._tanks_table.item(row, 2)
                 pos_item = self._tanks_table.item(row, 3)
 
-                if not name_item or not type_item:
+                if not name_item:
                     continue
 
                 name = name_item.text().strip()
-                tank_type_name = type_item.text().strip() or TankType.CARGO.name
-                try:
-                    tank_type = TankType[tank_type_name]
-                except KeyError:
-                    tank_type = TankType.CARGO
+                category = "Misc. Tanks"
+                combo = self._tanks_table.cellWidget(row, 1)
+                if isinstance(combo, QComboBox):
+                    category = combo.currentText().strip() or "Misc. Tanks"
+                if category not in TANK_CATEGORY_NAMES:
+                    category = "Misc. Tanks"
+                allowed = TANK_CATEGORY_TYPES.get(category, [TankType.CARGO])
+                tank_type = allowed[0] if allowed else TankType.CARGO
 
                 try:
                     capacity = float(cap_item.text()) if cap_item else 0.0
@@ -393,6 +429,7 @@ class ShipManagerView(QWidget):
                     ship_id=self._current_ship.id,
                     name=name,
                     tank_type=tank_type,
+                    category=category,
                     capacity_m3=capacity,
                     longitudinal_pos=pos,
                 )
@@ -414,12 +451,19 @@ class ShipManagerView(QWidget):
         row = self._pens_table.rowCount()
         self._pens_table.insertRow(row)
         self._pens_table.setItem(row, 0, QTableWidgetItem("PEN 1-1"))
-        self._pens_table.setItem(row, 1, QTableWidgetItem("DK1"))
-        self._pens_table.setItem(row, 2, QTableWidgetItem("0.0"))
+        self._pens_table.setItem(row, 1, QTableWidgetItem("A"))
+        self._pens_table.setItem(row, 2, QTableWidgetItem("0"))
         self._pens_table.setItem(row, 3, QTableWidgetItem("0.0"))
-        self._pens_table.setItem(row, 4, QTableWidgetItem("0.0"))
-        self._pens_table.setItem(row, 5, QTableWidgetItem("0.0"))
-        self._pens_table.setItem(row, 6, QTableWidgetItem("0"))
+        self._pens_table.setItem(row, 4, QTableWidgetItem("0"))
+        self._pens_table.setItem(row, 5, QTableWidgetItem("0.00"))
+        self._pens_table.setItem(row, 6, QTableWidgetItem("0.00"))
+        self._pens_table.setItem(row, 7, QTableWidgetItem(""))
+        self._pens_table.setItem(row, 8, QTableWidgetItem("0.50"))
+        self._pens_table.setItem(row, 9, QTableWidgetItem("0.00"))
+        self._pens_table.setItem(row, 10, QTableWidgetItem("0.000"))
+        self._pens_table.setItem(row, 11, QTableWidgetItem("0.000"))
+        self._pens_table.setItem(row, 12, QTableWidgetItem("0.000"))
+        self._pens_table.setItem(row, 13, QTableWidgetItem(""))
 
     def _on_delete_selected_pen_row(self) -> None:
         row = self._pens_table.currentRow()
@@ -442,11 +486,11 @@ class ShipManagerView(QWidget):
             for row in range(self._pens_table.rowCount()):
                 name_item = self._pens_table.item(row, 0)
                 deck_item = self._pens_table.item(row, 1)
-                area_item = self._pens_table.item(row, 2)
-                vcg_item = self._pens_table.item(row, 3)
-                lcg_item = self._pens_table.item(row, 4)
-                tcg_item = self._pens_table.item(row, 5)
-                cap_item = self._pens_table.item(row, 6)
+                cap_item = self._pens_table.item(row, 4)   # Head Capacity
+                area_item = self._pens_table.item(row, 6)  # Total Area m2
+                vcg_item = self._pens_table.item(row, 10)
+                lcg_item = self._pens_table.item(row, 11)
+                tcg_item = self._pens_table.item(row, 12)
                 if not name_item:
                     continue
                 try:

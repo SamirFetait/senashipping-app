@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import List, Tuple
 
 
 class TankType(Enum):
@@ -25,6 +26,8 @@ class Tank:
 
     # Basic classification (cargo / ballast / fuel / etc.)
     tank_type: TankType = TankType.CARGO
+    # Loading condition tab: Water Ballast, Fresh Water, Heavy Fuel Oil, Diesel Oil, Lube Oil, Gray Water, Misc. Tanks, Dung, Fodder Hold
+    category: str = "Misc. Tanks"
 
     # Simple longitudinal position for now (relative 0–1)
     longitudinal_pos: float = 0.5
@@ -33,3 +36,7 @@ class Tank:
     kg_m: float = 0.0
     tcg_m: float = 0.0
     lcg_m: float = 0.0
+
+    # Optional polygon from DXF (list of (x, y) in drawing units); used for deck view and selection
+    outline_xy: List[Tuple[float, float]] | None = None
+    deck_name: str | None = None  # deck this tank is drawn on (e.g. "A")

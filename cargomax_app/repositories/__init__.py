@@ -6,6 +6,7 @@ from .database import SessionLocal, Base, init_database
 from .ship_repository import ShipRepository
 from .tank_repository import TankRepository
 from .voyage_repository import VoyageRepository, ConditionRepository
+from .cargo_type_repository import CargoTypeRepository
 
 __all__ = [
     "SessionLocal",
@@ -15,6 +16,7 @@ __all__ = [
     "TankRepository",
     "VoyageRepository",
     "ConditionRepository",
+    "CargoTypeRepository",
 ]
 
 

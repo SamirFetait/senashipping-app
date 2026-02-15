@@ -43,6 +43,7 @@ def init_database(db_path: Path) -> sessionmaker:
     from .tank_repository import TankORM  # noqa: F401
     from .voyage_repository import VoyageORM, LoadingConditionORM  # noqa: F401
     from .livestock_pen_repository import LivestockPenORM  # noqa: F401
+    from .cargo_type_repository import CargoTypeORM  # noqa: F401
 
     engine = create_engine(f"sqlite:///{db_path}", future=True, echo=False)
     Base.metadata.create_all(bind=engine)
@@ -57,6 +58,65 @@ def init_database(db_path: Path) -> sessionmaker:
             conn.commit()
     except Exception:
         pass  # Column already exists
+
+    # Migration: add deck table columns to livestock_pens if missing
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE livestock_pens ADD COLUMN pen_no INTEGER"
+            ))
+            conn.commit()
+    except Exception:
+        pass
+    for col in ("area_a_m2", "area_b_m2", "area_c_m2", "area_d_m2",
+                "tcg_a_m", "tcg_b_m", "tcg_c_m", "tcg_d_m"):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    f"ALTER TABLE livestock_pens ADD COLUMN {col} REAL"
+                ))
+                conn.commit()
+        except Exception:
+            pass  # Column already exists
+
+    # Migration: tank outline and deck for DXF-derived tanks
+    for col, typ in (("outline_json", "TEXT"), ("deck_name", "VARCHAR(32)")):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    f"ALTER TABLE tanks ADD COLUMN {col} {typ}"
+                ))
+                conn.commit()
+        except Exception:
+            pass
+
+    # Migration: tank category (Storing) for loading condition tab matching
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE tanks ADD COLUMN category VARCHAR(64) DEFAULT 'Misc. Tanks'"
+            ))
+            conn.commit()
+    except Exception:
+        pass
+
+    # Migration: cargo_types calculation fields (Edit Cargo dialog)
+    for col, typ in (
+        ("method", "VARCHAR(64)"),
+        ("cargo_subtype", "VARCHAR(128)"),
+        ("avg_weight_per_head_kg", "REAL"),
+        ("vcg_from_deck_m", "REAL"),
+        ("deck_area_per_head_m2", "REAL"),
+        ("dung_weight_pct_per_day", "REAL"),
+    ):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    f"ALTER TABLE cargo_types ADD COLUMN {col} {typ}"
+                ))
+                conn.commit()
+        except Exception:
+            pass
 
     global SessionLocal
     SessionLocal = sessionmaker(

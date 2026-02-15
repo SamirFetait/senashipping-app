@@ -46,19 +46,23 @@ def _pen_mass_and_moments(
     pens: List[LivestockPen],
     pen_loadings: Dict[int, int],
     mass_per_head_t: float,
+    vcg_from_deck_m: float = 0.0,
 ) -> tuple[float, float, float, float]:
-    """Return (total_mass, vcg_moment, lcg_moment_norm, tcg_moment)."""
+    """Return (total_mass, vcg_moment, lcg_moment_norm, tcg_moment).
+    Cargo VCG = pen.vcg_m (deck) + vcg_from_deck_m (CoG above deck from cargo type).
+    """
     total = 0.0
     vcg_mom = 0.0
     lcg_mom = 0.0
     tcg_mom = 0.0
+    cargo_vcg_offset = vcg_from_deck_m
     for pen in pens:
         heads = pen_loadings.get(pen.id or -1, 0)
         if heads <= 0:
             continue
         mass = heads * mass_per_head_t
         total += mass
-        vcg_mom += mass * pen.vcg_m
+        vcg_mom += mass * (pen.vcg_m + cargo_vcg_offset)
         lcg_mom += mass * pen.lcg_m  # will divide by L for norm
         tcg_mom += mass * pen.tcg_m
     return total, vcg_mom, lcg_mom, tcg_mom
@@ -72,6 +76,7 @@ def compute_condition(
     pens: List[LivestockPen] | None = None,
     pen_loadings: Dict[int, int] | None = None,
     mass_per_head_t: float = 0.5,
+    vcg_from_deck_m: float = 0.0,
 ) -> ConditionResults:
     """
     Compute displacement, draft, trim, GM, and basic strength for a condition.
@@ -97,7 +102,7 @@ def compute_condition(
         total_tcg_moment += mass * tank.tcg_m
 
     pen_mass, pen_vcg, pen_lcg, pen_tcg = _pen_mass_and_moments(
-        pens_list, loadings, mass_per_head_t
+        pens_list, loadings, mass_per_head_t, vcg_from_deck_m
     )
     total_mass_t += pen_mass
     L = max(1e-6, ship.length_overall_m)
