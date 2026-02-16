@@ -33,8 +33,10 @@ class TankORM(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ship_id: Mapped[int] = mapped_column(Integer, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tank_type: Mapped[str] = mapped_column(String(32), nullable=False)
     capacity_m3: Mapped[float] = mapped_column(Float, default=0.0)
+    density_t_per_m3: Mapped[float] = mapped_column(Float, default=1.0)
     longitudinal_pos: Mapped[float] = mapped_column(Float, default=0.5)
     kg_m: Mapped[float] = mapped_column(Float, default=0.0)
     tcg_m: Mapped[float] = mapped_column(Float, default=0.0)
@@ -64,9 +66,11 @@ class TankRepository:
                     id=obj.id,
                     ship_id=obj.ship_id,
                     name=obj.name,
+                    description=getattr(obj, "description", None) or "",
                     tank_type=TankType[obj.tank_type],
                     category=cat,
                     capacity_m3=obj.capacity_m3,
+                    density_t_per_m3=getattr(obj, "density_t_per_m3", 1.0) or 1.0,
                     longitudinal_pos=obj.longitudinal_pos,
                     kg_m=obj.kg_m,
                     tcg_m=obj.tcg_m,
@@ -83,9 +87,11 @@ class TankRepository:
         obj = TankORM(
             ship_id=tank.ship_id,
             name=tank.name,
+            description=getattr(tank, "description", None) or "",
             tank_type=tank.tank_type.name,
             category=getattr(tank, "category", None) or "Misc. Tanks",
             capacity_m3=tank.capacity_m3,
+            density_t_per_m3=getattr(tank, "density_t_per_m3", 1.0) or 1.0,
             longitudinal_pos=tank.longitudinal_pos,
             kg_m=tank.kg_m,
             tcg_m=tank.tcg_m,
@@ -107,9 +113,11 @@ class TankRepository:
             raise ValueError(f"Tank with id {tank.id} not found")
 
         obj.name = tank.name
+        obj.description = getattr(tank, "description", None) or ""
         obj.tank_type = tank.tank_type.name
         obj.category = getattr(tank, "category", None) or "Misc. Tanks"
         obj.capacity_m3 = tank.capacity_m3
+        obj.density_t_per_m3 = getattr(tank, "density_t_per_m3", 1.0) or 1.0
         obj.longitudinal_pos = tank.longitudinal_pos
         obj.kg_m = tank.kg_m
         obj.tcg_m = tank.tcg_m

@@ -58,56 +58,6 @@ def init_osama_bay() -> None:
 
         ship = _get_or_create_osama_bay(ship_repo)
 
-        # Only seed demo data if there are currently no tanks/pens
-        if not tank_repo.list_for_ship(ship.id):
-            # TODO: replace these example tanks with your real Osama Bay tanks
-            tank_repo.create(Tank(
-                ship_id=ship.id,
-                name="P1-1",
-                description="Example cargo tank",
-                capacity_m3=100.0,
-                density_t_per_m3=1.0,
-                longitudinal_pos=0.2,
-                kg_m=5.0,
-                tcg_m=0.0,
-                lcg_m=20.0,
-                tank_type=TankType.CARGO,
-            ))
-            tank_repo.create(Tank(
-                ship_id=ship.id,
-                name="P1-2",
-                description="Example cargo tank",
-                capacity_m3=120.0,
-                density_t_per_m3=1.0,
-                longitudinal_pos=0.3,
-                kg_m=5.5,
-                tcg_m=0.0,
-                lcg_m=30.0,
-                tank_type=TankType.CARGO,
-            ))
-
-        if not pen_repo.list_for_ship(ship.id):
-            # TODO: replace these example pens with your real ones and deck codes
-            pen_repo.create(LivestockPen(
-                ship_id=ship.id,
-                name="PEN 1-1",
-                deck="A",
-                area_m2=10.0,
-                capacity_head=50,
-                vcg_m=5.0,
-                lcg_m=20.0,
-                tcg_m=2.0,
-            ))
-            pen_repo.create(LivestockPen(
-                ship_id=ship.id,
-                name="PEN 1-2",
-                deck="B",
-                area_m2=12.0,
-                capacity_head=60,
-                vcg_m=5.5,
-                lcg_m=25.0,
-                tcg_m=2.5,
-            ))
 
     print("Osama Bay ship/tanks/pens initialized.")
 

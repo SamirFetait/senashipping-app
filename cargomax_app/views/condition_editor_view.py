@@ -35,6 +35,7 @@ from ..services.condition_service import (
     ConditionResults,
 )
 from ..services.voyage_service import VoyageService, VoyageValidationError
+from ..utils.sorting import get_pen_sort_key, get_tank_sort_key
 from .deck_profile_widget import DeckProfileWidget
 from .results_panel import ResultsPanel
 from .condition_table_widget import ConditionTableWidget
@@ -357,7 +358,9 @@ class ConditionEditorView(QWidget):
     ) -> None:
         volumes = volumes or {}
         self._tank_table.setRowCount(0)
-        for tank in tanks:
+        # Sort tanks by the 3-level key: number -> letter pattern (A,B,D,C) -> deck
+        sorted_tanks = sorted(tanks, key=get_tank_sort_key)
+        for tank in sorted_tanks:
             row = self._tank_table.rowCount()
             self._tank_table.insertRow(row)
 
@@ -378,7 +381,9 @@ class ConditionEditorView(QWidget):
     ) -> None:
         loadings = pen_loadings or {}
         self._pen_table.setRowCount(0)
-        for pen in pens:
+        # Sort pens by the 3-level key: number -> letter pattern (A,B,D,C) -> deck
+        sorted_pens = sorted(pens, key=get_pen_sort_key)
+        for pen in sorted_pens:
             row = self._pen_table.rowCount()
             self._pen_table.insertRow(row)
             name_item = QTableWidgetItem(pen.name)

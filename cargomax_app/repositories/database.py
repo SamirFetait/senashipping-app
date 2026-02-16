@@ -100,6 +100,20 @@ def init_database(db_path: Path) -> sessionmaker:
     except Exception:
         pass
 
+    # Migration: tank description and density fields for detailed tank management
+    for col, typ, default in (
+        ("description", "VARCHAR(255)", "''"),
+        ("density_t_per_m3", "REAL", "1.0"),
+    ):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    f"ALTER TABLE tanks ADD COLUMN {col} {typ} DEFAULT {default}"
+                ))
+                conn.commit()
+        except Exception:
+            pass  # Column already exists
+
     # Migration: cargo_types calculation fields (Edit Cargo dialog)
     for col, typ in (
         ("method", "VARCHAR(64)"),

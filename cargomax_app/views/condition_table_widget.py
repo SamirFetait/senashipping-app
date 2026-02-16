@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 
 from ..models import Tank, LivestockPen
 from ..models.tank import TankType
+from ..utils.sorting import get_pen_sort_key, get_tank_sort_key
 
 
 MASS_PER_HEAD_T = 0.5  # Average mass per head in tonnes
@@ -282,6 +283,9 @@ class ConditionTableWidget(QWidget):
             if _deck_to_letter(p.deck or "") == deck_letter_upper
         ]
         
+        # Sort pens by the 3-level key: number -> letter pattern (A,B,D,C) -> deck
+        deck_pens = sorted(deck_pens, key=get_pen_sort_key)
+        
         total_weight = 0.0
         total_area_used = 0.0
         total_area = 0.0
@@ -512,6 +516,10 @@ class ConditionTableWidget(QWidget):
                         cat_tanks.append(t)
                 elif t.tank_type in allowed_types:
                     cat_tanks.append(t)
+            
+            # Sort tanks within category by the 3-level key: number -> letter pattern (A,B,D,C) -> deck
+            cat_tanks = sorted(cat_tanks, key=get_tank_sort_key)
+            
             total_cap = 0.0
             total_vol = 0.0
             total_weight = 0.0
@@ -570,9 +578,12 @@ class ConditionTableWidget(QWidget):
         all_table = self._table_widgets.get("All")
         if not all_table:
             return
+        
+        # Sort pens by the 3-level key: number -> letter pattern (A,B,D,C) -> deck
+        sorted_pens = sorted(pens, key=get_pen_sort_key)
             
         # Add all pens
-        for pen in pens:
+        for pen in sorted_pens:
             heads = pen_loadings.get(pen.id or -1, 0)
             if heads == 0:
                 continue
@@ -624,9 +635,12 @@ class ConditionTableWidget(QWidget):
         
         if cargo_types:
             all_table.itemChanged.connect(self._make_all_tab_item_changed(all_table))
+        
+        # Sort tanks by the 3-level key: number -> letter pattern (A,B,D,C) -> deck
+        sorted_tanks = sorted(tanks, key=get_tank_sort_key)
             
         # Add all tanks
-        for tank in tanks:
+        for tank in sorted_tanks:
             vol = tank_volumes.get(tank.id or -1, 0.0)
             if vol == 0.0:
                 continue

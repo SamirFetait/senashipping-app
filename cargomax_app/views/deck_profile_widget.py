@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .graphics_views import ShipGraphicsView
+from ..utils.sorting import get_pen_sort_key
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # -> senashipping_app
@@ -381,13 +382,8 @@ class DeckTabWidget(QWidget):
             p for p in pens
             if (getattr(p, "deck", None) or "").strip().upper() == self._deck_name.upper()
         ]
-        # Sort by pen_no descending (14 at top), then by name
-        def sort_key(p):
-            pno = getattr(p, "pen_no", None)
-            if pno is not None:
-                return (-pno, p.name)
-            return (0, p.name)
-        deck_pens.sort(key=sort_key)
+        # Sort pens by the 3-level key: number -> letter pattern (A,B,D,C) -> deck
+        deck_pens = sorted(deck_pens, key=get_pen_sort_key)
 
         # Net area: sum of area_a+area_b+area_c+area_d when set, else area_m2
         net_area = 0.0
