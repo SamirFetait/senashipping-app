@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QRectF, pyqtSignal
-from PyQt6.QtGui import QPen, QBrush, QColor, QPainterPath
+from PyQt6.QtCore import Qt, QRectF, pyqtSignal, QSize
+from PyQt6.QtGui import QPen, QBrush, QColor, QPainterPath, QFont, QResizeEvent
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
-    QSplitter,
     QComboBox,
     QLabel,
     QGraphicsScene,
+    QGraphicsView,
     QGraphicsPathItem,
     QGraphicsItem,
     QTabWidget,
@@ -19,6 +19,8 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QGraphicsLineItem,
     QGraphicsRectItem,
+    QGraphicsTextItem,
+    QGraphicsPolygonItem,
 )
 
 from .graphics_views import ShipGraphicsView
@@ -53,8 +55,6 @@ def _load_dxf_into_scene(dxf_path: Path, scene: QGraphicsScene) -> bool:
 
     msp = doc.modelspace()
     pen = QPen(Qt.GlobalColor.darkGray, 0)  # cosmetic pen (width 0 = hairline)
-
-    from PyQt6.QtGui import QPainterPath
 
     drew_anything = False
 
@@ -163,6 +163,7 @@ class ProfileView(ShipGraphicsView):
     Top profile view with waterline.
 
     Shows ship profile with dynamic waterline based on draft and trim.
+    Fixed view - no zoom/pan, auto-fits to window size.
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -170,41 +171,79 @@ class ProfileView(ShipGraphicsView):
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         
+        # Disable zoom and pan - fixed view only
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self.setInteractive(False)
+        
         # Store references to dynamic elements
         self._waterline_item: QGraphicsLineItem | None = None
+        self._waterline_fill_item: QGraphicsPolygonItem | None = None
         self._waterline_aft_item: QGraphicsLineItem | None = None
         self._waterline_fwd_item: QGraphicsLineItem | None = None
+        self._draft_markers: list[QGraphicsItem] = []
+        self._trim_text_item: QGraphicsTextItem | None = None
         
         # Ship dimensions for scaling
         self._ship_length: float = 0.0
         self._ship_breadth: float = 0.0
+        self._ship_depth: float = 0.0
+        self._keel_y: float = 0.0  # Y position of keel baseline in scene coordinates
         
         self._load_profile()
+    
+    def showEvent(self, event) -> None:
+        """Fit scene when view is first shown."""
+        super().showEvent(event)
+        self._fit_scene_to_view()
+    
+    def wheelEvent(self, event) -> None:
+        """Disable zoom - do nothing."""
+        event.ignore()
+    
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        """Auto-fit scene to viewport when window is resized."""
+        super().resizeEvent(event)
+        self._fit_scene_to_view()
+    
+    def _fit_scene_to_view(self) -> None:
+        """Fit all scene items (including waterline) to the viewport."""
+        if self._scene and self._scene.items():
+            # Get bounding rect of all items including waterline
+            bounds = self._scene.itemsBoundingRect()
+            if bounds.isValid() and not bounds.isEmpty():
+                # No padding to maximize drawing size
+                self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
 
     def _load_profile(self) -> None:
         """Load ship profile from DXF or show placeholder."""
         self._scene.clear()
         self._waterline_item = None
+        self._waterline_fill_item = None
         self._waterline_aft_item = None
         self._waterline_fwd_item = None
+        self._draft_markers.clear()
+        self._trim_text_item = None
         
         dxf_path = CAD_DIR / "profile.dxf"
         if not _load_dxf_into_scene(dxf_path, self._scene):
             # Fallback placeholder if DXF missing or ezdxf not installed
             # Draw a simple hull shape
             hull_pen = QPen(QColor(50, 50, 50), 2)
-            self._scene.addLine(0, 0, 800, 0, hull_pen)  # Baseline
+            self._scene.addLine(0, 0, 800, 0, hull_pen)  # Baseline (keel)
             self._scene.addRect(QRectF(50, -40, 700, 80), QPen(QColor(30, 30, 30), 2))
             self._ship_length = 800.0
             self._ship_breadth = 80.0
+            self._keel_y = 0.0  # Keel is at y=0 in placeholder
         else:
             # Estimate dimensions from scene bounds
             bounds = self._scene.itemsBoundingRect()
             self._ship_length = max(bounds.width(), 100.0)
             self._ship_breadth = max(abs(bounds.height()), 20.0)
+            # Assume keel is at the bottom of the bounding box
+            self._keel_y = bounds.bottom()
         
-        if self._scene.items():
-            self.fitInView(self._scene.itemsBoundingRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        # Fit scene to view after loading
+        self._fit_scene_to_view()
             
     def update_waterline(
         self,
@@ -212,6 +251,8 @@ class ProfileView(ShipGraphicsView):
         draft_aft: float | None = None,
         draft_fwd: float | None = None,
         ship_length: float | None = None,
+        ship_depth: float | None = None,
+        trim_m: float | None = None,
     ) -> None:
         """
         Update waterline visualization based on draft values.
@@ -221,51 +262,163 @@ class ProfileView(ShipGraphicsView):
             draft_aft: Draft at aft (m), optional
             draft_fwd: Draft at forward (m), optional
             ship_length: Ship length (m), optional
+            ship_depth: Ship depth (m), optional - used for proper scaling
+            trim_m: Trim value (m, positive = stern down), optional - for display
         """
         if ship_length:
             self._ship_length = ship_length
+        if ship_depth:
+            self._ship_depth = ship_depth
             
         if self._ship_length == 0:
             return
-            
-        # Scale draft to scene coordinates (assuming scene is scaled appropriately)
-        # For now, use a simple scaling factor
-        scale_y = self._ship_breadth / 10.0 if self._ship_breadth > 0 else 1.0
         
-        # Remove old waterlines
+        # Calculate proper scaling factor based on ship depth or use scene bounds
+        if self._ship_depth > 0:
+            # Use actual ship depth for scaling
+            scene_bounds = self._scene.itemsBoundingRect()
+            scene_depth = abs(scene_bounds.height())
+            if scene_depth > 0:
+                scale_y = scene_depth / self._ship_depth
+            else:
+                scale_y = self._ship_breadth / 10.0 if self._ship_breadth > 0 else 1.0
+        else:
+            # Fallback to estimated scaling
+            scale_y = self._ship_breadth / 10.0 if self._ship_breadth > 0 else 1.0
+        
+        # Remove old waterline elements
         if self._waterline_item:
             self._scene.removeItem(self._waterline_item)
+            self._waterline_item = None
+        if self._waterline_fill_item:
+            self._scene.removeItem(self._waterline_fill_item)
+            self._waterline_fill_item = None
         if self._waterline_aft_item:
             self._scene.removeItem(self._waterline_aft_item)
+            self._waterline_aft_item = None
         if self._waterline_fwd_item:
             self._scene.removeItem(self._waterline_fwd_item)
-            
-        # Draw waterline (blue, thick)
-        waterline_pen = QPen(QColor(0, 100, 200), 3)
+            self._waterline_fwd_item = None
+        for marker in self._draft_markers:
+            self._scene.removeItem(marker)
+        self._draft_markers.clear()
+        if self._trim_text_item:
+            self._scene.removeItem(self._trim_text_item)
+            self._trim_text_item = None
         
+        # Calculate waterline positions (measured from keel upward)
+        # In Qt scene coordinates, y increases downward, so we subtract from keel_y
         if draft_aft is not None and draft_fwd is not None:
-            # Draw angled waterline showing trim
-            y_aft = -draft_aft * scale_y
-            y_fwd = -draft_fwd * scale_y
+            # Angled waterline showing trim
+            y_aft = self._keel_y - draft_aft * scale_y
+            y_fwd = self._keel_y - draft_fwd * scale_y
+            
+            # Draw waterline fill (semi-transparent blue polygon below waterline)
+            fill_path = QPainterPath()
+            fill_path.moveTo(0, y_aft)
+            fill_path.lineTo(self._ship_length, y_fwd)
+            fill_path.lineTo(self._ship_length, self._keel_y)
+            fill_path.lineTo(0, self._keel_y)
+            fill_path.closeSubpath()
+            
+            self._waterline_fill_item = self._scene.addPath(
+                fill_path,
+                QPen(Qt.PenStyle.NoPen),
+                QBrush(QColor(100, 150, 255, 60))  # Semi-transparent blue
+            )
+            self._waterline_fill_item.setZValue(50)
+            
+            # Draw waterline (blue, thick)
+            waterline_pen = QPen(QColor(0, 100, 200), 4)
             self._waterline_item = self._scene.addLine(
                 0, y_aft, self._ship_length, y_fwd, waterline_pen
             )
+            
+            # Add draft markers at aft, mid, and forward
+            self._add_draft_marker(0, y_aft, draft_aft, "Aft")
+            mid_x = self._ship_length / 2
+            y_mid = y_aft + (y_fwd - y_aft) * 0.5
+            self._add_draft_marker(mid_x, y_mid, draft_mid, "Mid")
+            self._add_draft_marker(self._ship_length, y_fwd, draft_fwd, "Fwd")
+            
+            # Display trim value
+            if trim_m is not None:
+                trim_str = f"Trim: {abs(trim_m):.3f}m {'A' if trim_m >= 0 else 'F'}"
+                trim_color = QColor(0, 150, 0) if abs(trim_m) < 1.0 else QColor(200, 150, 0) if abs(trim_m) < 2.0 else QColor(200, 0, 0)
+                self._trim_text_item = self._scene.addText(trim_str, QFont("Arial", 12, QFont.Weight.Bold))
+                self._trim_text_item.setDefaultTextColor(trim_color)
+                self._trim_text_item.setPos(mid_x - 50, y_mid - 30)
+                self._trim_text_item.setZValue(150)
         else:
-            # Draw level waterline
-            y = -draft_mid * scale_y
+            # Level waterline
+            y = self._keel_y - draft_mid * scale_y
+            
+            # Draw waterline fill
+            fill_path = QPainterPath()
+            fill_path.moveTo(0, y)
+            fill_path.lineTo(self._ship_length, y)
+            fill_path.lineTo(self._ship_length, self._keel_y)
+            fill_path.lineTo(0, self._keel_y)
+            fill_path.closeSubpath()
+            
+            self._waterline_fill_item = self._scene.addPath(
+                fill_path,
+                QPen(Qt.PenStyle.NoPen),
+                QBrush(QColor(100, 150, 255, 60))
+            )
+            self._waterline_fill_item.setZValue(50)
+            
+            # Draw waterline (blue, thick)
+            waterline_pen = QPen(QColor(0, 100, 200), 4)
             self._waterline_item = self._scene.addLine(
                 0, y, self._ship_length, y, waterline_pen
             )
             
+            # Add draft marker at midship
+            mid_x = self._ship_length / 2
+            self._add_draft_marker(mid_x, y, draft_mid, "Mid")
+            
         # Bring waterline to front
         if self._waterline_item:
             self._waterline_item.setZValue(100)
+        
+        # Auto-fit scene to view after updating waterline
+        self._fit_scene_to_view()
+    
+    def _add_draft_marker(self, x: float, y: float, draft_value: float, label: str) -> None:
+        """Add a draft measurement marker with label at the specified position."""
+        # Draw vertical line marker
+        marker_pen = QPen(QColor(0, 100, 200), 2)
+        marker_length = 15
+        marker_line = self._scene.addLine(
+            x, y - marker_length / 2, x, y + marker_length / 2, marker_pen
+        )
+        marker_line.setZValue(110)
+        self._draft_markers.append(marker_line)
+        
+        # Add horizontal tick
+        tick_length = 8
+        tick_line = self._scene.addLine(
+            x - tick_length / 2, y, x + tick_length / 2, y, marker_pen
+        )
+        tick_line.setZValue(110)
+        self._draft_markers.append(tick_line)
+        
+        # Add text label
+        label_text = f"{label}: {draft_value:.2f}m"
+        text_item = self._scene.addText(label_text, QFont("Arial", 10))
+        text_item.setDefaultTextColor(QColor(0, 100, 200))
+        # Position label above the marker
+        text_item.setPos(x - 30, y - 25)
+        text_item.setZValue(120)
+        self._draft_markers.append(text_item)
 
 
 class DeckView(ShipGraphicsView):
     """
     Deck plan view: draws DXF or tank polygons. Tank polygons are selectable
     with visual states (normal/hover/selected) and emit tank_selected.
+    Fixed view - no zoom/pan, auto-fits to window size.
     """
 
     tank_selected = pyqtSignal(int)
@@ -274,8 +427,35 @@ class DeckView(ShipGraphicsView):
         super().__init__(parent)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
+        
+        # Disable zoom and pan - fixed view only
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self.setInteractive(False)
+        
         self._deck_name = ""
         self._scene.selectionChanged.connect(self._on_selection_changed)
+    
+    def showEvent(self, event) -> None:
+        """Fit scene when view is first shown."""
+        super().showEvent(event)
+        self._fit_scene_to_view()
+    
+    def wheelEvent(self, event) -> None:
+        """Disable zoom - do nothing."""
+        event.ignore()
+    
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        """Auto-fit scene to viewport when window is resized."""
+        super().resizeEvent(event)
+        self._fit_scene_to_view()
+    
+    def _fit_scene_to_view(self) -> None:
+        """Fit all scene items to the viewport."""
+        if self._scene and self._scene.items():
+            bounds = self._scene.itemsBoundingRect()
+            if bounds.isValid() and not bounds.isEmpty():
+                # No padding to maximize drawing size
+                self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
 
     def _on_selection_changed(self) -> None:
         for item in self._scene.selectedItems():
@@ -316,8 +496,8 @@ class DeckView(ShipGraphicsView):
                     QBrush(Qt.GlobalColor.green),
                 )
 
-        if self._scene.items():
-            self.fitInView(self._scene.itemsBoundingRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        # Fit scene to view after loading deck
+        self._fit_scene_to_view()
 
     def set_tanks(self, tanks: list) -> None:
         """
@@ -326,6 +506,7 @@ class DeckView(ShipGraphicsView):
         """
         if self._deck_name:
             self.load_deck(self._deck_name, tanks)
+            # load_deck already calls _fit_scene_to_view()
 
 
 def _fmt_val(v: float | None, decimals: int = 2) -> str:
@@ -470,31 +651,25 @@ class DeckProfileWidget(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        splitter = QSplitter(Qt.Orientation.Vertical, self)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # Top half: profile
+        # Top: profile view — fixed proportion (~65% height), not resizable
         self._profile_view = ProfileView(self)
-        splitter.addWidget(self._profile_view)
+        main_layout.addWidget(self._profile_view, 55)
 
-        # Bottom half: deck tabs
+        # Bottom: deck tabs (plan/tank view) — fixed proportion (~35% height), not resizable
         self._deck_tabs = QTabWidget(self)
         self._deck_tab_widgets: dict[str, DeckTabWidget] = {}
 
-        # Create a tab for each deck A-H
         for deck_letter in ["A", "B", "C", "D", "E", "F", "G", "H"]:
             tab_widget = DeckTabWidget(deck_letter, self)
             self._deck_tab_widgets[deck_letter] = tab_widget
             self._deck_tabs.addTab(tab_widget, f"Deck {deck_letter}")
             tab_widget._deck_view.tank_selected.connect(self.tank_selected.emit)
 
-        splitter.addWidget(self._deck_tabs)
-        splitter.setStretchFactor(0, 1)  # Profile gets equal space
-        splitter.setStretchFactor(1, 1)   # Tabs get equal space
-
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(self._deck_tabs, 45)
 
         # Wire tab changes
         self._deck_tabs.currentChanged.connect(self._on_tab_changed)
@@ -525,7 +700,11 @@ class DeckProfileWidget(QWidget):
         draft_aft: float | None = None,
         draft_fwd: float | None = None,
         ship_length: float | None = None,
+        ship_depth: float | None = None,
+        trim_m: float | None = None,
     ) -> None:
         """Update waterline visualization in profile view."""
-        self._profile_view.update_waterline(draft_mid, draft_aft, draft_fwd, ship_length)
+        self._profile_view.update_waterline(
+            draft_mid, draft_aft, draft_fwd, ship_length, ship_depth, trim_m
+        )
 

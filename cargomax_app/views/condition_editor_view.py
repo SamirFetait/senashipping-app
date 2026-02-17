@@ -366,11 +366,15 @@ class ConditionEditorView(QWidget):
 
             name_item = QTableWidgetItem(tank.name)
             name_item.setData(Qt.ItemDataRole.UserRole, tank.id)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Read-only
 
             cap_item = QTableWidgetItem(f"{tank.capacity_m3:.2f}")
+            cap_item.setFlags(cap_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Read-only
+            
             vol = volumes.get(tank.id or -1, 0.0)
             fill_pct = (vol / tank.capacity_m3 * 100.0) if tank.capacity_m3 > 0 else 0.0
             fill_item = QTableWidgetItem(f"{fill_pct:.1f}")
+            # Fill % is editable (user can change loading)
 
             self._tank_table.setItem(row, 0, name_item)
             self._tank_table.setItem(row, 1, cap_item)
@@ -388,11 +392,21 @@ class ConditionEditorView(QWidget):
             self._pen_table.insertRow(row)
             name_item = QTableWidgetItem(pen.name)
             name_item.setData(Qt.ItemDataRole.UserRole, pen.id)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Read-only
             self._pen_table.setItem(row, 0, name_item)
-            self._pen_table.setItem(row, 1, QTableWidgetItem(pen.deck))
-            self._pen_table.setItem(row, 2, QTableWidgetItem(f"{pen.area_m2:.2f}"))
+            
+            deck_item = QTableWidgetItem(pen.deck)
+            deck_item.setFlags(deck_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Read-only
+            self._pen_table.setItem(row, 1, deck_item)
+            
+            area_item = QTableWidgetItem(f"{pen.area_m2:.2f}")
+            area_item.setFlags(area_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Read-only
+            self._pen_table.setItem(row, 2, area_item)
+            
             heads = loadings.get(pen.id or -1, 0)
-            self._pen_table.setItem(row, 3, QTableWidgetItem(str(heads)))
+            head_item = QTableWidgetItem(str(heads))
+            # Head Count is editable (user can change loading)
+            self._pen_table.setItem(row, 3, head_item)
 
     def load_condition(self, voyage_id: int, condition_id: int) -> None:
         """Load a stored condition for editing. Called when user clicks Edit in Voyage Planner."""
@@ -589,9 +603,10 @@ class ConditionEditorView(QWidget):
         draft_fwd = getattr(results, "draft_fwd_m", results.draft_m - results.trim_m / 2)
         ship_length = getattr(self._current_ship, "length_overall_m", 0.0) if self._current_ship else 0.0
         ship_breadth = getattr(self._current_ship, "breadth_m", 0.0) if self._current_ship else 0.0
+        ship_depth = getattr(self._current_ship, "depth_m", 0.0) if self._current_ship else 0.0
         
         self._deck_profile_widget.update_waterline(
-            results.draft_m, draft_aft, draft_fwd, ship_length
+            results.draft_m, draft_aft, draft_fwd, ship_length, ship_depth, results.trim_m
         )
         self._cross_section_widget.update_waterline(results.draft_m, ship_breadth)
         

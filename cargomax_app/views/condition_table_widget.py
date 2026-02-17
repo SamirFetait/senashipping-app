@@ -295,16 +295,30 @@ class ConditionTableWidget(QWidget):
             table.insertRow(row)
             
             heads = pen_loadings.get(pen.id or -1, 0)
-            weight_mt = heads * mass_per_head_t
-            total_weight += weight_mt
             
-            head_pct = (heads / pen.capacity_head * 100.0) if pen.capacity_head > 0 else 0.0
             if area_per_head_from_cargo is not None:
                 area_per_head = area_per_head_from_cargo
             else:
                 area_per_head = pen.area_m2 / heads if heads > 0 else 0.0
-            # Used Area = # Head × Area/Head (professional: same as cargo deck area per head × heads)
+            
+            # Constraint: Cap # Head first if Used Area would exceed Total Area
+            # Calculate max heads based on area constraint: max_heads = floor(Total Area / Area per Head)
+            if area_per_head > 0:
+                max_heads_by_area = int(pen.area_m2 / area_per_head)
+                heads = min(heads, max_heads_by_area)
+            # Also cap by head capacity
+            heads = min(heads, int(pen.capacity_head)) if pen.capacity_head > 0 else heads
+            
+            # Now calculate Head %Full from capped # Head
+            head_pct = (heads / pen.capacity_head * 100.0) if pen.capacity_head > 0 else 0.0
+            
+            # Calculate Used Area (will be ≤ Total Area due to capping)
             area_used = heads * area_per_head if heads > 0 else 0.0
+            # Ensure Used Area ≤ Total Area (safety check)
+            area_used = min(area_used, pen.area_m2)
+            
+            weight_mt = heads * mass_per_head_t
+            total_weight += weight_mt
             total_area_used += area_used
             total_area += pen.area_m2
             
@@ -318,6 +332,7 @@ class ConditionTableWidget(QWidget):
             
             name_item = QTableWidgetItem(pen.name)
             name_item.setData(Qt.ItemDataRole.UserRole, pen.id)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Read-only (from ship manager)
             table.setItem(row, 0, name_item)
             if cargo_type_names:
                 combo = QComboBox(table)
@@ -332,19 +347,56 @@ class ConditionTableWidget(QWidget):
                     )
                 table.setCellWidget(row, 1, combo)
             else:
-                table.setItem(row, 1, QTableWidgetItem(cargo_name))
-            table.setItem(row, 2, QTableWidgetItem(str(heads)))
-            table.setItem(row, 3, QTableWidgetItem(f"{head_pct:.2f}"))
-            table.setItem(row, 4, QTableWidgetItem(f"{pen.capacity_head:.2f}"))
-            table.setItem(row, 5, QTableWidgetItem(f"{area_used:.2f}"))
-            table.setItem(row, 6, QTableWidgetItem(f"{pen.area_m2:.2f}"))
-            table.setItem(row, 7, QTableWidgetItem(f"{area_per_head:.2f}"))
-            table.setItem(row, 8, QTableWidgetItem(f"{mass_per_head_t:.2f}"))
-            table.setItem(row, 9, QTableWidgetItem(f"{weight_mt:.2f}"))
-            table.setItem(row, 10, QTableWidgetItem(f"{vcg_display:.3f}"))
-            table.setItem(row, 11, QTableWidgetItem(f"{pen.lcg_m:.3f}"))
-            table.setItem(row, 12, QTableWidgetItem(f"{pen.tcg_m:.3f}"))
-            table.setItem(row, 13, QTableWidgetItem(f"{lcg_moment:.2f}"))
+                cargo_item = QTableWidgetItem(cargo_name)
+                cargo_item.setFlags(cargo_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Read-only if no combo
+                table.setItem(row, 1, cargo_item)
+            # # Head (col 2) - editable
+            head_item = QTableWidgetItem(str(heads))
+            table.setItem(row, 2, head_item)
+            # Head %Full (col 3) - calculated, read-only
+            head_pct_item = QTableWidgetItem(f"{head_pct:.2f}")
+            head_pct_item.setFlags(head_pct_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row, 3, head_pct_item)
+            # Head Capacity (col 4) - from ship manager, read-only
+            cap_item = QTableWidgetItem(f"{pen.capacity_head:.2f}")
+            cap_item.setFlags(cap_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row, 4, cap_item)
+            # Used Area m2 (col 5) - calculated, read-only
+            area_used_item = QTableWidgetItem(f"{area_used:.2f}")
+            area_used_item.setFlags(area_used_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row, 5, area_used_item)
+            # Total Area m2 (col 6) - from ship manager, read-only
+            area_item = QTableWidgetItem(f"{pen.area_m2:.2f}")
+            area_item.setFlags(area_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row, 6, area_item)
+            # Area/Head (col 7) - calculated, read-only
+            area_per_head_item = QTableWidgetItem(f"{area_per_head:.2f}")
+            area_per_head_item.setFlags(area_per_head_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row, 7, area_per_head_item)
+            # AvW/Head MT (col 8) - from cargo type, read-only
+            mass_item = QTableWidgetItem(f"{mass_per_head_t:.2f}")
+            mass_item.setFlags(mass_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row, 8, mass_item)
+            # Weight MT (col 9) - calculated, read-only
+            weight_item = QTableWidgetItem(f"{weight_mt:.2f}")
+            weight_item.setFlags(weight_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row, 9, weight_item)
+            # VCG m-BL (col 10) - calculated, read-only
+            vcg_item = QTableWidgetItem(f"{vcg_display:.3f}")
+            vcg_item.setFlags(vcg_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row, 10, vcg_item)
+            # LCG m-[FR] (col 11) - from ship manager, read-only
+            lcg_item = QTableWidgetItem(f"{pen.lcg_m:.3f}")
+            lcg_item.setFlags(lcg_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row, 11, lcg_item)
+            # TCG m-CL (col 12) - from ship manager, read-only
+            tcg_item = QTableWidgetItem(f"{pen.tcg_m:.3f}")
+            tcg_item.setFlags(tcg_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row, 12, tcg_item)
+            # LS Moment m-MT (col 13) - calculated, read-only
+            moment_item = QTableWidgetItem(f"{lcg_moment:.2f}")
+            moment_item.setFlags(moment_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row, 13, moment_item)
             
         if deck_pens and cargo_types:
             table.itemChanged.connect(self._make_livestock_item_changed(table))
@@ -416,9 +468,24 @@ class ConditionTableWidget(QWidget):
         else:
             mass_per_head_t = MASS_PER_HEAD_T
             area_per_head = pen.area_m2 / heads if heads > 0 else 0.0
-        weight_mt = heads * mass_per_head_t
+        
+        # Constraint: Cap # Head first if Used Area would exceed Total Area
+        # Calculate max heads based on area constraint: max_heads = floor(Total Area / Area per Head)
+        if area_per_head > 0:
+            max_heads_by_area = int(pen.area_m2 / area_per_head)
+            heads = min(heads, max_heads_by_area)
+        # Also cap by head capacity
+        heads = min(heads, int(pen.capacity_head)) if pen.capacity_head > 0 else heads
+        
+        # Now calculate Head %Full from capped # Head
         head_pct = (heads / pen.capacity_head * 100.0) if pen.capacity_head > 0 else 0.0
+        
+        # Calculate Used Area (will be ≤ Total Area due to capping)
         area_used = heads * area_per_head if heads > 0 else 0.0
+        # Ensure Used Area ≤ Total Area (safety check)
+        area_used = min(area_used, pen.area_m2)
+        
+        weight_mt = heads * mass_per_head_t
         # VCG (m-BL) = pen deck + cargo VCG from deck (matches stability)
         vcg_from_deck = (getattr(ct, "vcg_from_deck_m", 0) or 0) if ct else 0.0
         vcg_display = pen.vcg_m + vcg_from_deck
@@ -426,6 +493,11 @@ class ConditionTableWidget(QWidget):
         lcg_moment = weight_mt * pen.lcg_m
         self._skip_item_changed = True
         try:
+            # Update # Head in table if it was capped
+            if table.item(row, 2):
+                table.item(row, 2).setText(str(heads))
+            else:
+                table.setItem(row, 2, QTableWidgetItem(str(heads)))
             if table.item(row, 3):
                 table.item(row, 3).setText(f"{head_pct:.2f}")
             else:
@@ -535,20 +607,74 @@ class ConditionTableWidget(QWidget):
                 total_weight += weight_mt
                 vcg = getattr(tank, "kg_m", 0.0) or 0.0
                 # Column 0: green indicator (empty cell; header is styled green)
-                table.setItem(row, 0, QTableWidgetItem(""))
-                table.setItem(row, self.TANK_COL_NAME, QTableWidgetItem(tank.name))
-                table.setItem(row, self.TANK_COL_ULL_SND, QTableWidgetItem(""))   # Ullage/Sounding – optional
-                table.setItem(row, self.TANK_COL_UTRIM, QTableWidgetItem(""))    # UTrim – optional
-                table.setItem(row, self.TANK_COL_CAPACITY, QTableWidgetItem(f"{tank.capacity_m3:.2f}"))
-                table.setItem(row, self.TANK_COL_PCT_FULL, QTableWidgetItem(f"{fill_pct:.1f}"))
-                table.setItem(row, self.TANK_COL_VOLUME, QTableWidgetItem(f"{vol:.2f}"))
-                table.setItem(row, self.TANK_COL_DENS, QTableWidgetItem(f"{dens:.3f}"))
-                table.setItem(row, self.TANK_COL_WEIGHT, QTableWidgetItem(f"{weight_mt:.2f}"))
-                table.setItem(row, self.TANK_COL_VCG, QTableWidgetItem(f"{vcg:.3f}"))
-                table.setItem(row, self.TANK_COL_LCG, QTableWidgetItem(f"{tank.lcg_m:.3f}"))
-                table.setItem(row, self.TANK_COL_TCG, QTableWidgetItem(f"{tank.tcg_m:.3f}"))
-                table.setItem(row, self.TANK_COL_FSOPT, QTableWidgetItem(""))    # Free surface option
-                table.setItem(row, self.TANK_COL_FST, QTableWidgetItem(""))     # Free surface moment
+                indicator_item = QTableWidgetItem("")
+                indicator_item.setFlags(indicator_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row, 0, indicator_item)
+                
+                # Name (col 1) - from ship manager, read-only
+                name_item = QTableWidgetItem(tank.name)
+                name_item.setData(Qt.ItemDataRole.UserRole, tank.id)
+                name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row, self.TANK_COL_NAME, name_item)
+                
+                # Ull/Snd (col 2) - optional, read-only
+                ull_item = QTableWidgetItem("")
+                ull_item.setFlags(ull_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row, self.TANK_COL_ULL_SND, ull_item)
+                
+                # UTrim (col 3) - optional, read-only
+                utrim_item = QTableWidgetItem("")
+                utrim_item.setFlags(utrim_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row, self.TANK_COL_UTRIM, utrim_item)
+                
+                # Capacity (col 4) - from ship manager, read-only
+                cap_item = QTableWidgetItem(f"{tank.capacity_m3:.2f}")
+                cap_item.setFlags(cap_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row, self.TANK_COL_CAPACITY, cap_item)
+                
+                # %Full (col 5) - editable (user can change loading)
+                fill_item = QTableWidgetItem(f"{fill_pct:.1f}")
+                table.setItem(row, self.TANK_COL_PCT_FULL, fill_item)
+                
+                # Volume (col 6) - calculated, read-only
+                vol_item = QTableWidgetItem(f"{vol:.2f}")
+                vol_item.setFlags(vol_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row, self.TANK_COL_VOLUME, vol_item)
+                
+                # Dens (col 7) - from ship manager, read-only
+                dens_item = QTableWidgetItem(f"{dens:.3f}")
+                dens_item.setFlags(dens_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row, self.TANK_COL_DENS, dens_item)
+                
+                # Weight (col 8) - calculated, read-only
+                weight_item = QTableWidgetItem(f"{weight_mt:.2f}")
+                weight_item.setFlags(weight_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row, self.TANK_COL_WEIGHT, weight_item)
+                
+                # VCG (col 9) - from ship manager, read-only
+                vcg_item = QTableWidgetItem(f"{vcg:.3f}")
+                vcg_item.setFlags(vcg_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row, self.TANK_COL_VCG, vcg_item)
+                
+                # LCG (col 10) - from ship manager, read-only
+                lcg_item = QTableWidgetItem(f"{tank.lcg_m:.3f}")
+                lcg_item.setFlags(lcg_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row, self.TANK_COL_LCG, lcg_item)
+                
+                # TCG (col 11) - from ship manager, read-only
+                tcg_item = QTableWidgetItem(f"{tank.tcg_m:.3f}")
+                tcg_item.setFlags(tcg_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row, self.TANK_COL_TCG, tcg_item)
+                
+                # FSopt (col 12) - calculated, read-only
+                fsopt_item = QTableWidgetItem("")
+                fsopt_item.setFlags(fsopt_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row, self.TANK_COL_FSOPT, fsopt_item)
+                
+                # FSt (col 13) - calculated, read-only
+                fst_item = QTableWidgetItem("")
+                fst_item.setFlags(fst_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row, self.TANK_COL_FST, fst_item)
             if cat_tanks:
                 row = table.rowCount()
                 table.insertRow(row)
@@ -591,13 +717,28 @@ class ConditionTableWidget(QWidget):
             row = all_table.rowCount()
             all_table.insertRow(row)
             
-            weight_mt = heads * mass_per_head_t
-            head_pct = (heads / pen.capacity_head * 100.0) if pen.capacity_head > 0 else 0.0
             if area_per_head_from_cargo is not None:
                 area_per_head = area_per_head_from_cargo
             else:
                 area_per_head = pen.area_m2 / heads if heads > 0 else 0.0
+            
+            # Constraint: Cap # Head first if Used Area would exceed Total Area
+            # Calculate max heads based on area constraint: max_heads = floor(Total Area / Area per Head)
+            if area_per_head > 0:
+                max_heads_by_area = int(pen.area_m2 / area_per_head)
+                heads = min(heads, max_heads_by_area)
+            # Also cap by head capacity
+            heads = min(heads, int(pen.capacity_head)) if pen.capacity_head > 0 else heads
+            
+            # Now calculate Head %Full from capped # Head
+            head_pct = (heads / pen.capacity_head * 100.0) if pen.capacity_head > 0 else 0.0
+            
+            # Calculate Used Area (will be ≤ Total Area due to capping)
             area_used = heads * area_per_head if heads > 0 else 0.0
+            # Ensure Used Area ≤ Total Area (safety check)
+            area_used = min(area_used, pen.area_m2)
+            
+            weight_mt = heads * mass_per_head_t
             ct_sel = next((c for c in (cargo_types or []) if (getattr(c, "name", "") or "").strip() == cargo_name), None)
             vcg_from_deck = (getattr(ct_sel, "vcg_from_deck_m", 0) or 0) if ct_sel else 0.0
             vcg_display = pen.vcg_m + vcg_from_deck
