@@ -113,8 +113,9 @@ class ConditionEditorView(QWidget):
         self._save_condition_btn.setToolTip("Save to file via File ΓåÆ Save")
         # Connect deck profile widget to condition table for bidirectional synchronization
         self._condition_table.set_deck_profile_widget(self._deck_profile_widget)
-        self._load_ships()
+        # Initialize cargo types first to ensure "-- Blank --" is available
         self._refresh_cargo_types()
+        self._load_ships()
 
     def _build_layout(self) -> None:
         root = QVBoxLayout(self)
@@ -263,6 +264,9 @@ class ConditionEditorView(QWidget):
             self._current_ship = self._ships[0]
             self._ship_label.setText(self._current_ship.name or "ΓÇö No ship ΓÇö")
             self._ship_combo.setCurrentIndex(0)
+            # Ensure cargo is set to "-- Blank --" before loading ship data
+            if self._cargo_type_combo.count() > 0:
+                self._cargo_type_combo.setCurrentIndex(0)  # "-- Blank --"
             self._load_voyages()
             self._set_current_ship(self._current_ship)
         else:
@@ -333,6 +337,9 @@ class ConditionEditorView(QWidget):
         for v in self._voyages:
             self._voyage_combo.addItem(f"{v.name} ({v.departure_port}ΓåÆ{v.arrival_port})", v.id)
         self._voyage_combo.setCurrentIndex(0)
+        # Ensure cargo is "-- Blank --" when loading voyages (first time opening)
+        if self._cargo_type_combo.count() > 0:
+            self._cargo_type_combo.setCurrentIndex(0)  # "-- Blank --"
         self._on_voyage_changed(0)
 
     def _load_conditions(self) -> None:
@@ -376,6 +383,7 @@ class ConditionEditorView(QWidget):
         self._deck_profile_widget.update_tables(pens, tanks)
         
         # Update condition table widget
+        # If no condition is selected, use empty pen_loadings and volumes to show blank values
         volumes = self._current_condition.tank_volumes_m3 if self._current_condition else {}
         pen_loads = getattr(self._current_condition, "pen_loadings", {}) or {} if self._current_condition else {}
         self._update_condition_table(pens, tanks, pen_loads, volumes)
@@ -514,6 +522,9 @@ class ConditionEditorView(QWidget):
         if index <= 0:
             self._current_voyage = None
             self._current_condition = None
+            # When no voyage selected, ensure cargo is "-- Blank --" to show blank values
+            if self._cargo_type_combo.count() > 0:
+                self._cargo_type_combo.setCurrentIndex(0)  # "-- Blank --"
         elif index - 1 < len(self._voyages):
             self._current_voyage = self._voyages[index - 1]
             self._current_condition = None
@@ -526,6 +537,9 @@ class ConditionEditorView(QWidget):
         if index <= 0:
             self._current_condition = None
             self._condition_name_edit.clear()
+            # When selecting "-- New --", ensure cargo is "-- Blank --" to show blank values
+            if self._cargo_type_combo.count() > 0:
+                self._cargo_type_combo.setCurrentIndex(0)  # "-- Blank --"
         elif index - 1 < len(self._conditions):
             self._current_condition = self._conditions[index - 1]
             self._condition_name_edit.setText(self._current_condition.name)

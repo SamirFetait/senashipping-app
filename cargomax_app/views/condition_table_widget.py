@@ -448,7 +448,7 @@ class ConditionTableWidget(QWidget):
             # All other columns: sync with deck table values (shifted by 1 due to Deck column)
             all_table.setItem(row, 3, QTableWidgetItem(str(deck_data.get("heads", 0))))
             all_table.setItem(row, 4, QTableWidgetItem(f"{deck_data.get('head_pct', 0.0):.2f}"))
-            all_table.setItem(row, 5, QTableWidgetItem(f"{deck_data.get('head_capacity', 0.0):.2f}"))
+            all_table.setItem(row, 5, QTableWidgetItem(str(int(deck_data.get('head_capacity', 0.0)))))
             all_table.setItem(row, 6, QTableWidgetItem(f"{deck_data.get('area_used', 0.0):.2f}"))
             all_table.setItem(row, 7, QTableWidgetItem(f"{pen.area_m2:.2f}"))
             all_table.setItem(row, 8, QTableWidgetItem(f"{deck_data.get('area_per_head', 0.0):.2f}"))
@@ -667,10 +667,12 @@ class ConditionTableWidget(QWidget):
             max_heads_by_capacity = int(pen.capacity_head) if pen.capacity_head > 0 else max_heads_by_area
             
             # Set heads to maximum ONLY if cargo is not blank
-            # If cargo is "-- Blank --", keep heads at 0
+            # If cargo is "-- Blank --", keep heads at 0 and set head capacity to 0
             # Check cargo_name from the function parameter
             if cargo_name == "-- Blank --":
                 heads = 0
+                head_capacity = 0
+                area_used = 0.0
             else:
                 # Set heads to maximum (minimum of area-based and capacity-based maximums)
                 # This auto-selects the maximum as default, but column remains editable
@@ -682,17 +684,17 @@ class ConditionTableWidget(QWidget):
                     heads = max_heads_by_capacity
                 else:
                     heads = initial_heads  # Fallback to initial value if no constraints
+                
+                # Calculate Used Area (will be Γëñ Total Area due to capping)
+                area_used = heads * area_per_head if heads > 0 else 0.0
+                # Ensure Used Area Γëñ Total Area (safety check)
+                area_used = min(area_used, pen.area_m2)
+                
+                # Head Capacity = Total Area / Area per Head (max capacity based on area), floored to integer
+                head_capacity = int(pen.area_m2 / area_per_head) if area_per_head > 0 else 0
             
-            # Calculate Used Area (will be Γëñ Total Area due to capping)
-            area_used = heads * area_per_head if heads > 0 else 0.0
-            # Ensure Used Area Γëñ Total Area (safety check)
-            area_used = min(area_used, pen.area_m2)
-            
-            # Head Capacity = Total Area / Area per Head (max capacity based on area)
-            head_capacity = (pen.area_m2 / area_per_head) if area_per_head > 0 else 0.0
-            
-            # Head %Full = (Used Area / Total Area) * 100 (percentage of area used)
-            head_pct = (area_used / pen.area_m2 * 100.0) if pen.area_m2 > 0 else 0.0
+            # Head %Full = (Head / Head Capacity) * 100
+            head_pct = (heads / head_capacity * 100.0) if head_capacity > 0 else 0.0
             
             weight_mt = heads * mass_per_head_t
             total_weight += weight_mt
@@ -736,8 +738,8 @@ class ConditionTableWidget(QWidget):
             head_pct_item = QTableWidgetItem(f"{head_pct:.2f}")
             head_pct_item.setFlags(head_pct_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 3, head_pct_item)
-            # Head Capacity (col 4) - calculated from Total Area / Area per Head, read-only
-            cap_item = QTableWidgetItem(f"{head_capacity:.2f}")
+            # Head Capacity (col 4) - calculated from Total Area / Area per Head, floored to integer, read-only
+            cap_item = QTableWidgetItem(str(head_capacity))
             cap_item.setFlags(cap_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 4, cap_item)
             # Used Area m2 (col 5) - calculated, read-only
@@ -1287,6 +1289,7 @@ class ConditionTableWidget(QWidget):
             mass_per_head_t = 0.0
             area_used = 0.0
             head_capacity = 0.0
+            # Head %Full = (Head / Head Capacity) * 100 = 0 / 0 = 0
             head_pct = 0.0
             weight_mt = 0.0
             vcg_display = pen.vcg_m  # Keep pen's base VCG
@@ -1354,32 +1357,48 @@ class ConditionTableWidget(QWidget):
         # Calculate maximum heads based on capacity constraint
         max_heads_by_capacity = int(pen.capacity_head) if pen.capacity_head > 0 else max_heads_by_area
         
-        # If auto_max_heads is True (cargo changed), set to maximum ONLY if cargo is not blank
-        # If cargo is "-- Blank --", keep heads at 0
-        if auto_max_heads:
-            if cargo_name == "-- Blank --":
-                # Keep heads at 0 for blank cargo
-                heads = 0
+        # If cargo is "-- Blank --", set all values to zero (including head capacity)
+        if cargo_name == "-- Blank --":
+            heads = 0
+            head_capacity = 0
+            area_used = 0.0
+        elif auto_max_heads:
+            # Set heads to maximum (minimum of area-based and capacity-based maximums)
+            if max_heads_by_area > 0 and max_heads_by_capacity > 0:
+                heads = min(max_heads_by_area, max_heads_by_capacity)
+            elif max_heads_by_area > 0:
+                heads = max_heads_by_area
+            elif max_heads_by_capacity > 0:
+                heads = max_heads_by_capacity
             else:
-                # Set heads to maximum (minimum of area-based and capacity-based maximums)
-                heads = min(max_heads_by_area, max_heads_by_capacity) if max_heads_by_area > 0 and max_heads_by_capacity > 0 else (max_heads_by_area if max_heads_by_area > 0 else max_heads_by_capacity)
+                heads = max(0, heads)  # Keep current value if no constraints
+            
+            # Calculate Used Area (will be Γëñ Total Area due to capping)
+            area_used = heads * area_per_head if heads > 0 else 0.0
+            # Ensure Used Area Γëñ Total Area (safety check)
+            area_used = min(area_used, pen.area_m2)
+            
+            # Head Capacity = Total Area / Area per Head (max capacity based on area), floored to integer
+            head_capacity = int(pen.area_m2 / area_per_head) if area_per_head > 0 else 0
         else:
             # Use current heads value but cap it to maximums
-            if area_per_head > 0:
+            heads = max(0, heads)
+            if area_per_head > 0 and max_heads_by_area > 0:
                 heads = min(heads, max_heads_by_area)
             # Also cap by head capacity
-            heads = min(heads, max_heads_by_capacity) if max_heads_by_capacity > 0 else heads
+            if max_heads_by_capacity > 0:
+                heads = min(heads, max_heads_by_capacity)
+            
+            # Calculate Used Area (will be Γëñ Total Area due to capping)
+            area_used = heads * area_per_head if heads > 0 else 0.0
+            # Ensure Used Area Γëñ Total Area (safety check)
+            area_used = min(area_used, pen.area_m2)
+            
+            # Head Capacity = Total Area / Area per Head (max capacity based on area), floored to integer
+            head_capacity = int(pen.area_m2 / area_per_head) if area_per_head > 0 else 0
         
-        # Calculate Used Area (will be Γëñ Total Area due to capping)
-        area_used = heads * area_per_head if heads > 0 else 0.0
-        # Ensure Used Area Γëñ Total Area (safety check)
-        area_used = min(area_used, pen.area_m2)
-        
-        # Head Capacity = Total Area / Area per Head (max capacity based on area)
-        head_capacity = (pen.area_m2 / area_per_head) if area_per_head > 0 else 0.0
-        
-        # Head %Full = (Used Area / Total Area) * 100 (percentage of area used)
-        head_pct = (area_used / pen.area_m2 * 100.0) if pen.area_m2 > 0 else 0.0
+        # Head %Full = (Head / Head Capacity) * 100
+        head_pct = (heads / head_capacity * 100.0) if head_capacity > 0 else 0.0
         
         weight_mt = heads * mass_per_head_t
         # VCG (m-BL) = pen deck + cargo VCG from deck (matches stability)
@@ -1394,12 +1413,12 @@ class ConditionTableWidget(QWidget):
                 table.item(row, 2).setText(str(heads))
             else:
                 table.setItem(row, 2, QTableWidgetItem(str(heads)))
-            # Update Head Capacity - calculated from Total Area / Area per Head
-            head_capacity = (pen.area_m2 / area_per_head) if area_per_head > 0 else 0.0
+            # Update Head Capacity - calculated from Total Area / Area per Head, floored to integer
+            # If cargo is blank, head_capacity should already be 0 from above
             if table.item(row, 4):
-                table.item(row, 4).setText(f"{head_capacity:.2f}")
+                table.item(row, 4).setText(str(head_capacity))
             else:
-                cap_item = QTableWidgetItem(f"{head_capacity:.2f}")
+                cap_item = QTableWidgetItem(str(head_capacity))
                 cap_item.setFlags(cap_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, 4, cap_item)
             # Update Head %Full - calculated from Used Area / Total Area
@@ -1796,7 +1815,7 @@ class ConditionTableWidget(QWidget):
             # All other columns: sync with deck table values (shifted by 1 due to Deck column)
             all_table.setItem(row, 3, QTableWidgetItem(str(deck_data.get("heads", 0))))
             all_table.setItem(row, 4, QTableWidgetItem(f"{deck_data.get('head_pct', 0.0):.2f}"))
-            all_table.setItem(row, 5, QTableWidgetItem(f"{deck_data.get('head_capacity', 0.0):.2f}"))
+            all_table.setItem(row, 5, QTableWidgetItem(str(int(deck_data.get('head_capacity', 0.0)))))
             all_table.setItem(row, 6, QTableWidgetItem(f"{deck_data.get('area_used', 0.0):.2f}"))
             all_table.setItem(row, 7, QTableWidgetItem(f"{pen.area_m2:.2f}"))
             all_table.setItem(row, 8, QTableWidgetItem(f"{deck_data.get('area_per_head', 0.0):.2f}"))
