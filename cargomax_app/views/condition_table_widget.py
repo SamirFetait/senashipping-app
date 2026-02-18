@@ -47,14 +47,14 @@ TANK_CATEGORY_NAMES: List[str] = list(TANK_CATEGORY_TYPES.keys())
 
 
 def _deck_to_letter(deck: str) -> Optional[str]:
-    """Normalize Ship Manager deck value to A–H so it matches loading condition tabs (Livestock-DK1..DK8)."""
+    """Normalize Ship Manager deck value to AΓÇôH so it matches loading condition tabs (Livestock-DK1..DK8)."""
     s = (deck or "").strip().upper()
     if not s:
         return None
-    # A–H already
+    # AΓÇôH already
     if s in ("A", "B", "C", "D", "E", "F", "G", "H"):
         return s
-    # 1–8 or DK1–DK8
+    # 1ΓÇô8 or DK1ΓÇôDK8
     if s.isdigit() and 1 <= int(s) <= 8:
         return chr(ord("A") + int(s) - 1)
     if s.startswith("DK") and s[2:].strip().isdigit():
@@ -70,7 +70,7 @@ class ConditionTableWidget(QWidget):
     
     Tabs: Livestock-DK1..DK8, Water Ballast, Fresh Water, Heavy Fuel Oil, Diesel Oil,
     Lube Oil, Misc. Tanks, Dung, Fodder Hold, Spaces, All, Selected.
-    Use the '+' button to add tanks/pens (define them in Tools → Ship & data setup).
+    Use the '+' button to add tanks/pens (define them in Tools ΓåÆ Ship & data setup).
     """
 
     add_requested = pyqtSignal()  # Emitted when user clicks '+' (e.g. open Ship & data setup)
@@ -80,12 +80,18 @@ class ConditionTableWidget(QWidget):
         
         self._tabs = QTabWidget(self)
         self._table_widgets: Dict[str, QTableWidget] = {}
+        self._cargo_header_combos: Dict[str, QComboBox] = {}  # tab_name -> cargo header combo
         self._current_pens: List[LivestockPen] = []
         self._current_cargo_types: List[Any] = []
         self._current_ship_id: Optional[int] = None
         self._skip_item_changed = False
+        self._syncing_selection = False  # Flag to prevent infinite loops during selection sync
+        self._deck_profile_widget = None  # Will be set by parent view
         
         self._create_tabs()
+        
+        # Connect tab changes to sync deck layout
+        self._tabs.currentChanged.connect(self._on_tab_changed)
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -99,7 +105,7 @@ class ConditionTableWidget(QWidget):
         bottom.addStretch()
         self._add_btn = QPushButton("+", self)
         self._add_btn.setFixedSize(32, 28)
-        self._add_btn.setToolTip("Add tank or pen – define in Tools → Ship & data setup, then they appear here")
+        self._add_btn.setToolTip("Add tank or pen ΓÇô define in Tools ΓåÆ Ship & data setup, then they appear here")
         self._add_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-size: 16px; font-weight: bold; border: none; border-radius: 3px; } QPushButton:hover { background-color: #45a049; }")
         self._add_btn.clicked.connect(self._on_add_clicked)
         bottom.addWidget(self._add_btn)
@@ -116,10 +122,13 @@ class ConditionTableWidget(QWidget):
             deck_letter = chr(ord("A") + deck_num - 1)
             if deck_num == 8:
                 table = self._create_deck8_table()
+                self._table_widgets[tab_name] = table
+                self._tabs.addTab(table, f"{tab_name} (Deck {deck_letter})")
             else:
-                table = self._create_table()
-            self._table_widgets[tab_name] = table
-            self._tabs.addTab(table, f"{tab_name} (Deck {deck_letter})")
+                # Create table with header dropdown for deck tables (DK1-DK7)
+                table_widget = self._create_table_with_header(tab_name)
+                self._table_widgets[tab_name] = table_widget._table
+                self._tabs.addTab(table_widget, f"{tab_name} (Deck {deck_letter})")
             
         tank_categories = [
             "Water Ballast", "Fresh Water", "Heavy Fuel Oil", "Diesel Oil",
@@ -130,10 +139,15 @@ class ConditionTableWidget(QWidget):
             self._table_widgets[cat] = table
             self._tabs.addTab(table, cat)
             
-        for tab_name in ["All", "Selected"]:
-            table = self._create_table()
-            self._table_widgets[tab_name] = table
-            self._tabs.addTab(table, tab_name)
+        # "All" tab: custom table with extra Deck column
+        all_table = self._create_all_table()
+        self._table_widgets["All"] = all_table
+        self._tabs.addTab(all_table, "All")
+
+        # "Selected" tab: standard livestock table structure
+        selected_table = self._create_table()
+        self._table_widgets["Selected"] = selected_table
+        self._tabs.addTab(selected_table, "Selected")
             
     def _create_table(self) -> QTableWidget:
         """Create a table with livestock column structure (pens)."""
@@ -157,6 +171,80 @@ class ConditionTableWidget(QWidget):
         ])
         self._setup_common_table(table)
         return table
+
+    def _create_all_table(self) -> QTableWidget:
+        """Create the 'All' tab table with Deck column after Name."""
+        table = QTableWidget(self)
+        table.setColumnCount(15)
+        table.setHorizontalHeaderLabels([
+            "Name",
+            "Deck",
+            "Cargo",
+            "# Head",
+            "Head %Full",
+            "Head Capacity",
+            "Used Area m2",
+            "Total Area m2",
+            "Area/Head",
+            "AvW/Head MT",
+            "Weight MT",
+            "VCG m-BL",
+            "LCG m-[FR]",
+            "TCG m-CL",
+            "LS Moment m-MT",
+        ])
+        self._setup_common_table(table)
+        return table
+    
+    def _create_table_with_header(self, tab_name: str) -> QWidget:
+        """Create a table widget with a header combo box for Cargo column."""
+        container = QWidget(self)
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        
+        # Header row with combo box aligned to Cargo column
+        header_widget = QWidget(container)
+        header_widget.setFixedHeight(30)
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(4, 2, 4, 2)
+        header_layout.setSpacing(4)
+        
+        # Label for Name column
+        name_label = QLabel("Name", header_widget)
+        name_label.setMinimumWidth(100)
+        header_layout.addWidget(name_label)
+        
+        # Cargo combo box in header (aligned with Cargo column)
+        cargo_label = QLabel("Cargo:", header_widget)
+        header_layout.addWidget(cargo_label)
+        cargo_combo = QComboBox(header_widget)
+        cargo_combo.setMinimumWidth(150)
+        cargo_combo.setToolTip("Select cargo to apply to all rows in this table")
+        cargo_combo.addItem("-- Apply to All --")  # Default option
+        cargo_combo.currentTextChanged.connect(
+            lambda cargo: self._on_header_cargo_changed(tab_name, cargo)
+        )
+        self._cargo_header_combos[tab_name] = cargo_combo
+        header_layout.addWidget(cargo_combo)
+        header_layout.addStretch()
+        
+        layout.addWidget(header_widget)
+        
+        # Table below header
+        table = self._create_table()
+        layout.addWidget(table)
+        
+        # Store table reference for easy access
+        container._table = table
+        
+        # Connect table column resize to sync header layout if needed
+        def sync_header_widths():
+            # Update header widget width to match table
+            header_widget.setMinimumWidth(table.width())
+        table.horizontalHeader().sectionResized.connect(sync_header_widths)
+        
+        return container
 
     def _create_deck8_table(self) -> QTableWidget:
         """Create deck 8 table: Name, Quantity, Weight (kg), Total Weight (kg), VCG m-BL, LCG m-[FR], TCG m-CL, LS Moment m-MT."""
@@ -221,6 +309,227 @@ class ConditionTableWidget(QWidget):
     def _setup_common_table(self, table: QTableWidget) -> None:
         table.setAlternatingRowColors(True)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)  # Allow multi-selection
+        # Connect selection changes to sync with deck layout
+        table.itemSelectionChanged.connect(lambda: self._on_table_selection_changed(table))
+    
+    def set_deck_profile_widget(self, deck_profile_widget) -> None:
+        """Set reference to deck profile widget for bidirectional synchronization."""
+        self._deck_profile_widget = deck_profile_widget
+        if deck_profile_widget:
+            # Connect deck layout selection changes to update tables
+            deck_profile_widget.selection_changed.connect(self._on_deck_layout_selection_changed)
+            deck_profile_widget.deck_changed.connect(self._on_deck_changed)
+    
+    def _on_tab_changed(self, index: int) -> None:
+        """Handle tab change - sync deck layout if switching to a deck table, or refresh All table if switching to it."""
+        if self._syncing_selection:
+            return
+        
+        # Get the widget for this tab
+        widget = self._tabs.widget(index)
+        if not widget:
+            return
+        
+        # Check if switching to "All" table - refresh it to sync with deck tables
+        tab_text = self._tabs.tabText(index)
+        if tab_text == "All":
+            # Refresh the All table to sync with current deck table values
+            all_table = self._table_widgets.get("All")
+            if all_table and self._current_pens:
+                # Re-populate All table with current data
+                # Get current pens, tanks, and loadings
+                pens = self._current_pens
+                tanks = []  # Will be populated from update_data call
+                pen_loadings = {}
+                tank_volumes = {}
+                
+                # Extract pen_loadings from deck tables
+                for tab_name, table in self._table_widgets.items():
+                    if tab_name.startswith("Livestock-DK") and tab_name != "Livestock-DK8":
+                        for row in range(table.rowCount()):
+                            name_item = table.item(row, 0)
+                            if not name_item or "Totals" in (name_item.text() or ""):
+                                continue
+                            pen_id = name_item.data(Qt.ItemDataRole.UserRole)
+                            if pen_id:
+                                head_item = table.item(row, 2)
+                                if head_item:
+                                    try:
+                                        heads = int(float(head_item.text() or "0"))
+                                        pen_loadings[pen_id] = heads
+                                    except (ValueError, TypeError):
+                                        pass
+                
+                # Call update_data to refresh All table
+                # Note: This will be called with the full data, but we need to trigger a refresh
+                # For now, just re-populate the pens section
+                self._refresh_all_table_pens(all_table, pens, pen_loadings, self._current_cargo_types)
+                return
+        
+        # Handle deck table tab switching
+        if not self._deck_profile_widget:
+            return
+        
+        # Find which deck table this tab corresponds to
+        deck_num = None
+        for tab_name, table in self._table_widgets.items():
+            if tab_name.startswith("Livestock-DK"):
+                # Check if this widget contains the table
+                if widget == table or (hasattr(widget, "_table") and widget._table == table):
+                    try:
+                        deck_num = int(tab_name.replace("Livestock-DK", ""))
+                        break
+                    except ValueError:
+                        continue
+        
+        if deck_num and 1 <= deck_num <= 8:
+            deck_letter = chr(ord("A") + deck_num - 1)
+            # Switch deck layout to match table
+            self._syncing_selection = True
+            try:
+                # Find the deck tab index in deck profile widget
+                deck_tabs = self._deck_profile_widget._deck_tabs
+                for i in range(deck_tabs.count()):
+                    tab_widget = deck_tabs.widget(i)
+                    if hasattr(tab_widget, "_deck_name") and tab_widget._deck_name == deck_letter:
+                        deck_tabs.setCurrentIndex(i)
+                        break
+            finally:
+                self._syncing_selection = False
+    
+    def _refresh_all_table_pens(self, all_table: QTableWidget, pens: List[LivestockPen], pen_loadings: Dict[int, int], cargo_types: Optional[List[Any]] = None) -> None:
+        """Refresh pens in the All table by syncing with deck tables."""
+        # Clear existing pen rows (keep tanks)
+        rows_to_remove = []
+        for row in range(all_table.rowCount()):
+            item = all_table.item(row, 2)  # Cargo column (col 2) - "Tank" indicates tank row
+            if item and item.text() != "Tank":
+                rows_to_remove.append(row)
+        
+        # Remove rows in reverse order to maintain indices
+        for row in reversed(rows_to_remove):
+            all_table.removeRow(row)
+        
+        # Re-populate pens from deck tables, sorted by deck first
+        def all_table_sort_key(pen: LivestockPen) -> tuple:
+            deck_letter = _deck_to_letter(pen.deck or "") or ""
+            # Normalize deck to A-H for sorting
+            if deck_letter and deck_letter.upper() in ["A", "B", "C", "D", "E", "F", "G", "H"]:
+                deck_order = ord(deck_letter.upper())
+            else:
+                deck_order = 999  # Put invalid decks at end
+            # Then use standard pen sort key for secondary sorting
+            standard_key = get_pen_sort_key(pen)
+            return (deck_order, standard_key[0], standard_key[1], standard_key[2])
+        
+        sorted_pens = sorted(pens, key=all_table_sort_key)
+        for pen in sorted_pens:
+            deck_data = self._get_pen_data_from_deck_table(pen, cargo_types)
+            
+            row = all_table.rowCount()
+            all_table.insertRow(row)
+            
+            name_item = QTableWidgetItem(pen.name)
+            name_item.setData(Qt.ItemDataRole.UserRole, pen.id)
+            all_table.setItem(row, 0, name_item)
+            
+            # Deck column (col 1): show normalized deck letter (A-H), read-only
+            deck_letter = _deck_to_letter(pen.deck or "") or (pen.deck or "")
+            deck_item = QTableWidgetItem(deck_letter)
+            deck_item.setFlags(deck_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Read-only
+            all_table.setItem(row, 1, deck_item)
+            
+            # Cargo column (col 2): read-only, sync with deck table
+            cargo_item = QTableWidgetItem(deck_data.get("cargo", "-- Blank --"))
+            cargo_item.setFlags(cargo_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Read-only
+            all_table.setItem(row, 2, cargo_item)
+            
+            # All other columns: sync with deck table values (shifted by 1 due to Deck column)
+            all_table.setItem(row, 3, QTableWidgetItem(str(deck_data.get("heads", 0))))
+            all_table.setItem(row, 4, QTableWidgetItem(f"{deck_data.get('head_pct', 0.0):.2f}"))
+            all_table.setItem(row, 5, QTableWidgetItem(f"{deck_data.get('head_capacity', 0.0):.2f}"))
+            all_table.setItem(row, 6, QTableWidgetItem(f"{deck_data.get('area_used', 0.0):.2f}"))
+            all_table.setItem(row, 7, QTableWidgetItem(f"{pen.area_m2:.2f}"))
+            all_table.setItem(row, 8, QTableWidgetItem(f"{deck_data.get('area_per_head', 0.0):.2f}"))
+            all_table.setItem(row, 9, QTableWidgetItem(f"{deck_data.get('mass_per_head_t', 0.0):.2f}"))
+            all_table.setItem(row, 10, QTableWidgetItem(f"{deck_data.get('weight_mt', 0.0):.2f}"))
+            all_table.setItem(row, 11, QTableWidgetItem(f"{deck_data.get('vcg_display', pen.vcg_m):.3f}"))
+            all_table.setItem(row, 12, QTableWidgetItem(f"{pen.lcg_m:.3f}"))
+            all_table.setItem(row, 13, QTableWidgetItem(f"{pen.tcg_m:.3f}"))
+            all_table.setItem(row, 14, QTableWidgetItem(f"{deck_data.get('lcg_moment', 0.0):.2f}"))
+    
+    def _on_table_selection_changed(self, table: QTableWidget) -> None:
+        """Handle table selection change - sync to deck layout."""
+        if self._syncing_selection or not self._deck_profile_widget:
+            return
+        
+        # Get selected pen IDs from the table
+        selected_pen_ids = set()
+        selection_model = table.selectionModel()
+        if selection_model:
+            selected_rows = selection_model.selectedRows()
+            for index in selected_rows:
+                row = index.row()
+                item = table.item(row, 0)
+                if item:
+                    pen_id = item.data(Qt.ItemDataRole.UserRole)
+                    if pen_id:
+                        selected_pen_ids.add(pen_id)
+        
+        # Update deck layout selection
+        self._syncing_selection = True
+        try:
+            self._deck_profile_widget.set_selected(selected_pen_ids, set())
+        finally:
+            self._syncing_selection = False
+    
+    def _on_deck_layout_selection_changed(self, pen_ids: set[int], tank_ids: set[int]) -> None:
+        """Handle deck layout selection change - sync to tables."""
+        if self._syncing_selection:
+            return
+        
+        self._syncing_selection = True
+        try:
+            # Update all deck tables with the selection
+            for tab_name, table in self._table_widgets.items():
+                if not isinstance(table, QTableWidget):
+                    continue
+                # Clear current selection
+                table.clearSelection()
+                # Select rows matching the pen IDs
+                for row in range(table.rowCount()):
+                    item = table.item(row, 0)
+                    if item:
+                        pen_id = item.data(Qt.ItemDataRole.UserRole)
+                        if pen_id in pen_ids:
+                            table.selectRow(row)
+        finally:
+            self._syncing_selection = False
+    
+    def _on_deck_changed(self, deck_letter: str) -> None:
+        """Handle deck change in deck layout - switch to corresponding table tab."""
+        if self._syncing_selection:
+            return
+        
+        # Convert deck letter to deck number (A=1, B=2, ..., H=8)
+        deck_num = ord(deck_letter.upper()) - ord("A") + 1
+        if 1 <= deck_num <= 8:
+            tab_name = f"Livestock-DK{deck_num}"
+            # Find and switch to the corresponding tab
+            if tab_name in self._table_widgets:
+                table = self._table_widgets[tab_name]
+                # Find the tab index that contains this table
+                for i in range(self._tabs.count()):
+                    widget = self._tabs.widget(i)
+                    # Check if this widget contains the table
+                    if widget == table or (hasattr(widget, "_table") and widget._table == table):
+                        self._syncing_selection = True
+                        try:
+                            self._tabs.setCurrentIndex(i)
+                        finally:
+                            self._syncing_selection = False
+                        break
         
     def update_data(
         self,
@@ -232,6 +541,7 @@ class ConditionTableWidget(QWidget):
         cargo_type_names: Optional[List[str]] = None,
         cargo_types: Optional[List[Any]] = None,
         ship_id: Optional[int] = None,
+        default_cargo_name: Optional[str] = None,
     ) -> None:
         """
         Update all tables with current pens and tanks data.
@@ -239,6 +549,7 @@ class ConditionTableWidget(QWidget):
         If cargo_type_names is set, the Cargo column is a dropdown filled from the cargo library.
         If cargo_types (full CargoType objects) is set, changing Cargo or # Head will recalculate row and totals.
         ship_id is needed to save user-entered deck 8 rows to the database.
+        default_cargo_name: Default cargo name to use (defaults to "-- Blank --" if not provided and no cargo_type).
         """
         self._current_pens = pens
         self._current_cargo_types = cargo_types or []
@@ -250,15 +561,17 @@ class ConditionTableWidget(QWidget):
             except Exception:
                 pass
             table.setRowCount(0)
-            
-        mass_per_head_t = (
-            (getattr(cargo_type, "avg_weight_per_head_kg", 520.0) or 520.0) / 1000.0
-            if cargo_type else MASS_PER_HEAD_T
-        )
-        area_per_head_from_cargo = (
-            getattr(cargo_type, "deck_area_per_head_m2", None) if cargo_type else None
-        )
-        cargo_name = (cargo_type.name or "Livestock").strip() if cargo_type else "Livestock"
+        
+        # Default to "-- Blank --" if no cargo_type and no default_cargo_name provided
+        if cargo_type:
+            mass_per_head_t = (getattr(cargo_type, "avg_weight_per_head_kg", 520.0) or 520.0) / 1000.0
+            area_per_head_from_cargo = getattr(cargo_type, "deck_area_per_head_m2", None)
+            cargo_name = (cargo_type.name or "Livestock").strip()
+        else:
+            # No cargo selected - use blank defaults
+            mass_per_head_t = 0.0
+            area_per_head_from_cargo = None
+            cargo_name = default_cargo_name if default_cargo_name else "-- Blank --"
 
         # Update livestock deck tabs
         for deck_num in range(1, 9):
@@ -296,6 +609,9 @@ class ConditionTableWidget(QWidget):
             cargo_types=self._current_cargo_types,
         )
         
+        # Refresh cargo dropdowns in header combos
+        self._refresh_cargo_header_dropdowns()
+        
     def _populate_livestock_tab(
         self,
         tab_name: str,
@@ -330,28 +646,53 @@ class ConditionTableWidget(QWidget):
             row = table.rowCount()
             table.insertRow(row)
             
-            heads = pen_loadings.get(pen.id or -1, 0)
+            initial_heads = pen_loadings.get(pen.id or -1, 0)
             
             if area_per_head_from_cargo is not None:
                 area_per_head = area_per_head_from_cargo
             else:
-                area_per_head = pen.area_m2 / heads if heads > 0 else 0.0
+                # Use cargo's area_per_head if available, otherwise calculate from initial heads
+                ct_sel = next((c for c in (cargo_types or []) if (getattr(c, "name", "") or "").strip() == cargo_name), None)
+                if ct_sel:
+                    area_per_head = getattr(ct_sel, "deck_area_per_head_m2", 1.85) or 1.85
+                else:
+                    area_per_head = pen.area_m2 / initial_heads if initial_heads > 0 else 1.85
             
-            # Constraint: Cap # Head first if Used Area would exceed Total Area
-            # Calculate max heads based on area constraint: max_heads = floor(Total Area / Area per Head)
+            # Calculate maximum heads based on area constraint: max_heads = floor(Total Area / Area per Head)
+            max_heads_by_area = 0
             if area_per_head > 0:
                 max_heads_by_area = int(pen.area_m2 / area_per_head)
-                heads = min(heads, max_heads_by_area)
-            # Also cap by head capacity
-            heads = min(heads, int(pen.capacity_head)) if pen.capacity_head > 0 else heads
             
-            # Now calculate Head %Full from capped # Head
-            head_pct = (heads / pen.capacity_head * 100.0) if pen.capacity_head > 0 else 0.0
+            # Calculate maximum heads based on capacity constraint
+            max_heads_by_capacity = int(pen.capacity_head) if pen.capacity_head > 0 else max_heads_by_area
             
-            # Calculate Used Area (will be ≤ Total Area due to capping)
+            # Set heads to maximum ONLY if cargo is not blank
+            # If cargo is "-- Blank --", keep heads at 0
+            # Check cargo_name from the function parameter
+            if cargo_name == "-- Blank --":
+                heads = 0
+            else:
+                # Set heads to maximum (minimum of area-based and capacity-based maximums)
+                # This auto-selects the maximum as default, but column remains editable
+                if max_heads_by_area > 0 and max_heads_by_capacity > 0:
+                    heads = min(max_heads_by_area, max_heads_by_capacity)
+                elif max_heads_by_area > 0:
+                    heads = max_heads_by_area
+                elif max_heads_by_capacity > 0:
+                    heads = max_heads_by_capacity
+                else:
+                    heads = initial_heads  # Fallback to initial value if no constraints
+            
+            # Calculate Used Area (will be Γëñ Total Area due to capping)
             area_used = heads * area_per_head if heads > 0 else 0.0
-            # Ensure Used Area ≤ Total Area (safety check)
+            # Ensure Used Area Γëñ Total Area (safety check)
             area_used = min(area_used, pen.area_m2)
+            
+            # Head Capacity = Total Area / Area per Head (max capacity based on area)
+            head_capacity = (pen.area_m2 / area_per_head) if area_per_head > 0 else 0.0
+            
+            # Head %Full = (Used Area / Total Area) * 100 (percentage of area used)
+            head_pct = (area_used / pen.area_m2 * 100.0) if pen.area_m2 > 0 else 0.0
             
             weight_mt = heads * mass_per_head_t
             total_weight += weight_mt
@@ -363,7 +704,7 @@ class ConditionTableWidget(QWidget):
             vcg_from_deck = (getattr(ct_sel, "vcg_from_deck_m", 0) or 0) if ct_sel else 0.0
             vcg_display = pen.vcg_m + vcg_from_deck
             
-            # LS Moment (m-MT) = Weight (MT) × LCG (m)
+            # LS Moment (m-MT) = Weight (MT) ├ù LCG (m)
             lcg_moment = weight_mt * pen.lcg_m
             
             name_item = QTableWidgetItem(pen.name)
@@ -372,14 +713,16 @@ class ConditionTableWidget(QWidget):
             table.setItem(row, 0, name_item)
             if cargo_type_names:
                 combo = QComboBox(table)
-                combo.addItems(cargo_type_names)
-                if cargo_name in cargo_type_names:
+                # Add blank cargo option first, then regular cargo types
+                all_cargo_names = ["-- Blank --"] + cargo_type_names
+                combo.addItems(all_cargo_names)
+                if cargo_name in all_cargo_names:
                     combo.setCurrentText(cargo_name)
-                elif cargo_type_names:
+                elif all_cargo_names:
                     combo.setCurrentIndex(0)
                 if cargo_types:
                     combo.currentTextChanged.connect(
-                        lambda _t, t=table, r=row: self._recalculate_livestock_row(t, r)
+                        lambda _t, t=table, r=row: self._recalculate_livestock_row(t, r, auto_max_heads=True)
                     )
                 table.setCellWidget(row, 1, combo)
             else:
@@ -393,8 +736,8 @@ class ConditionTableWidget(QWidget):
             head_pct_item = QTableWidgetItem(f"{head_pct:.2f}")
             head_pct_item.setFlags(head_pct_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 3, head_pct_item)
-            # Head Capacity (col 4) - from ship manager, read-only
-            cap_item = QTableWidgetItem(f"{pen.capacity_head:.2f}")
+            # Head Capacity (col 4) - calculated from Total Area / Area per Head, read-only
+            cap_item = QTableWidgetItem(f"{head_capacity:.2f}")
             cap_item.setFlags(cap_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 4, cap_item)
             # Used Area m2 (col 5) - calculated, read-only
@@ -763,8 +1106,162 @@ class ConditionTableWidget(QWidget):
                 self._recalculate_livestock_row(table, row)
         return on_item
     
-    def _recalculate_livestock_row(self, table: QTableWidget, row: int) -> None:
-        """Recalculate one pen row from Cargo dropdown and # Head; then refresh totals."""
+    def _refresh_cargo_header_dropdowns(self) -> None:
+        """Refresh cargo options in header dropdown combos."""
+        cargo_type_names = [c.name for c in self._current_cargo_types] if self._current_cargo_types else []
+        # Add blank cargo option at the beginning
+        blank_cargo_name = "-- Blank --"
+        all_cargo_names = [blank_cargo_name] + cargo_type_names
+        
+        for tab_name, combo in self._cargo_header_combos.items():
+            current_text = combo.currentText()
+            combo.clear()
+            combo.addItem("-- Apply to All --")  # Default option
+            combo.addItems(all_cargo_names)
+            # Restore previous selection if it still exists
+            if current_text in all_cargo_names:
+                combo.setCurrentText(current_text)
+            else:
+                combo.setCurrentIndex(0)  # Select "-- Apply to All --"
+    
+    def update_cargo_types(self, cargo_types: Optional[List[Any]] = None) -> None:
+        """Update the current cargo types list and refresh all dropdowns (header and cell dropdowns)."""
+        if cargo_types is not None:
+            self._current_cargo_types = cargo_types
+        
+        # Refresh header dropdowns
+        self._refresh_cargo_header_dropdowns()
+        
+        # Refresh all cell dropdowns in deck tables and other tables
+        cargo_type_names = [c.name for c in self._current_cargo_types] if self._current_cargo_types else []
+        # Add blank cargo option at the beginning
+        blank_cargo_name = "-- Blank --"
+        all_cargo_names = [blank_cargo_name] + cargo_type_names
+        
+        # Update cargo combos in all livestock deck tables (DK1-DK7)
+        for deck_num in range(1, 8):
+            tab_name = f"Livestock-DK{deck_num}"
+            table = self._table_widgets.get(tab_name)
+            if not table or table.columnCount() != 14:
+                continue
+            
+            for row in range(table.rowCount()):
+                # Skip totals row
+                name_item = table.item(row, 0)
+                if not name_item or "Totals" in (name_item.text() or ""):
+                    continue
+                
+                # Cargo column is column 1
+                combo = table.cellWidget(row, 1)
+                if isinstance(combo, QComboBox):
+                    current_text = combo.currentText()
+                    combo.clear()
+                    combo.addItems(all_cargo_names)
+                    # Restore previous selection if it still exists
+                    if current_text in all_cargo_names:
+                        combo.setCurrentText(current_text)
+                    elif all_cargo_names:
+                        combo.setCurrentIndex(0)
+        
+        # Update cargo combos in "All" and "Selected" tables (if they have cargo dropdowns)
+        for tab_name in ["All", "Selected"]:
+            table = self._table_widgets.get(tab_name)
+            if not table:
+                continue
+            
+            for row in range(table.rowCount()):
+                # Skip totals row
+                name_item = table.item(row, 0)
+                if not name_item or "Totals" in (name_item.text() or ""):
+                    continue
+                
+                # Cargo column is column 1 (or column 2 if there's a Deck column)
+                cargo_col = 1 if table.columnCount() == 14 else 2
+                combo = table.cellWidget(row, cargo_col)
+                if isinstance(combo, QComboBox):
+                    current_text = combo.currentText()
+                    combo.clear()
+                    combo.addItems(all_cargo_names)
+                    # Restore previous selection if it still exists
+                    if current_text in all_cargo_names:
+                        combo.setCurrentText(current_text)
+                    elif all_cargo_names:
+                        combo.setCurrentIndex(0)
+    
+    def _on_header_cargo_changed(self, tab_name: str, cargo: str) -> None:
+        """Handle cargo selection from header combo - apply to all rows in the table."""
+        if cargo == "-- Apply to All --" or not cargo:
+            return
+        
+        table = self._table_widgets.get(tab_name)
+        if not table or table.columnCount() != 14:
+            return
+        
+        # Block itemChanged signals during bulk update
+        self._skip_item_changed = True
+        try:
+            # Apply cargo to all rows (skip totals row)
+            for row in range(table.rowCount()):
+                # Skip totals row
+                name_item = table.item(row, 0)
+                if not name_item or "Totals" in (name_item.text() or ""):
+                    continue
+                
+                # Cargo column is column 1
+                combo = table.cellWidget(row, 1)
+                if isinstance(combo, QComboBox):
+                    # Find the index of the cargo in the combo
+                    cargo_index = -1
+                    available_items = []
+                    for i in range(combo.count()):
+                        item_text = combo.itemText(i)
+                        available_items.append(item_text)
+                        if item_text == cargo:
+                            cargo_index = i
+                            break
+                    
+                    # Skip if cargo not found in this combo
+                    if cargo_index < 0:
+                        # Try to add it if it's a valid cargo type
+                        if cargo != "-- Blank --" and cargo in [c.name for c in self._current_cargo_types]:
+                            combo.addItem(cargo)
+                            cargo_index = combo.count() - 1
+                        else:
+                            continue
+                    
+                    # Block signals to avoid individual row recalculation during setting
+                    combo.blockSignals(True)
+                    
+                    # Set the cargo using index (more reliable than setCurrentText)
+                    combo.setCurrentIndex(cargo_index)
+                    
+                    combo.blockSignals(False)
+                    
+                    # Recalculate the row with auto-max heads (cargo changed via header)
+                    try:
+                        self._recalculate_livestock_row(table, row, auto_max_heads=True)
+                    except Exception as e:
+                        import logging
+                        logging.error(f"Error recalculating row {row} in header cargo change: {e}", exc_info=True)
+            
+            # Reset header combo to default after applying
+            header_combo = self._cargo_header_combos.get(tab_name)
+            if header_combo:
+                header_combo.blockSignals(True)
+                header_combo.setCurrentIndex(0)  # Reset to "-- Apply to All --"
+                header_combo.blockSignals(False)
+        finally:
+            self._skip_item_changed = False
+    
+    def _recalculate_livestock_row(self, table: QTableWidget, row: int, auto_max_heads: bool = False) -> None:
+        """Recalculate one pen row from Cargo dropdown and # Head; then refresh totals.
+        
+        Args:
+            table: The table widget containing the row
+            row: The row index to recalculate
+            auto_max_heads: If True, automatically set # Head to maximum when cargo changes.
+                          If False, use current # Head value and cap it if needed.
+        """
         if row >= table.rowCount() - 1:
             return
         name_item = table.item(row, 0)
@@ -772,6 +1269,8 @@ class ConditionTableWidget(QWidget):
         pen = next((p for p in self._current_pens if p.id == pen_id), None) if pen_id is not None else None
         if not pen:
             return
+        
+        # Get current heads value
         try:
             heads = int(float((table.item(row, 2) or QTableWidgetItem("0")).text()))
         except (TypeError, ValueError):
@@ -779,6 +1278,66 @@ class ConditionTableWidget(QWidget):
         heads = max(0, heads)
         combo = table.cellWidget(row, 1)
         cargo_name = combo.currentText().strip() if isinstance(combo, QComboBox) else "Livestock"
+        
+        # Check if blank cargo is selected
+        if cargo_name == "-- Blank --":
+            # Set all values to zero for blank cargo
+            heads = 0
+            area_per_head = 0.0
+            mass_per_head_t = 0.0
+            area_used = 0.0
+            head_capacity = 0.0
+            head_pct = 0.0
+            weight_mt = 0.0
+            vcg_display = pen.vcg_m  # Keep pen's base VCG
+            lcg_moment = 0.0
+            self._skip_item_changed = True
+            try:
+                # Update all cells to zero
+                if table.item(row, 2):
+                    table.item(row, 2).setText("0")
+                else:
+                    table.setItem(row, 2, QTableWidgetItem("0"))
+                if table.item(row, 3):
+                    table.item(row, 3).setText("0.00")
+                else:
+                    table.setItem(row, 3, QTableWidgetItem("0.00"))
+                if table.item(row, 4):
+                    table.item(row, 4).setText("0.00")
+                else:
+                    table.setItem(row, 4, QTableWidgetItem("0.00"))
+                if table.item(row, 5):
+                    table.item(row, 5).setText("0.00")
+                else:
+                    table.setItem(row, 5, QTableWidgetItem("0.00"))
+                if table.item(row, 7):
+                    table.item(row, 7).setText("0.00")
+                else:
+                    table.setItem(row, 7, QTableWidgetItem("0.00"))
+                if table.item(row, 8):
+                    table.item(row, 8).setText("0.00")
+                else:
+                    table.setItem(row, 8, QTableWidgetItem("0.00"))
+                if table.item(row, 9):
+                    table.item(row, 9).setText("0.00")
+                else:
+                    table.setItem(row, 9, QTableWidgetItem("0.00"))
+                if table.item(row, 10):
+                    table.item(row, 10).setText(f"{vcg_display:.3f}")
+                else:
+                    table.setItem(row, 10, QTableWidgetItem(f"{vcg_display:.3f}"))
+                if table.item(row, 13):
+                    table.item(row, 13).setText("0.00")
+                else:
+                    table.setItem(row, 13, QTableWidgetItem("0.00"))
+            finally:
+                self._skip_item_changed = False
+            # Refresh totals
+            last_row_label = (table.item(table.rowCount() - 1, 0).text() or "") if table.rowCount() else ""
+            if "Totals" in last_row_label:
+                self._refresh_livestock_totals(table)
+            return
+        
         ct = next((c for c in self._current_cargo_types if (getattr(c, "name", "") or "").strip() == cargo_name), None)
         if ct:
             mass_per_head_t = (getattr(ct, "avg_weight_per_head_kg", 520.0) or 520.0) / 1000.0
@@ -787,27 +1346,46 @@ class ConditionTableWidget(QWidget):
             mass_per_head_t = MASS_PER_HEAD_T
             area_per_head = pen.area_m2 / heads if heads > 0 else 0.0
         
-        # Constraint: Cap # Head first if Used Area would exceed Total Area
-        # Calculate max heads based on area constraint: max_heads = floor(Total Area / Area per Head)
+        # Calculate maximum heads based on area constraint: max_heads = floor(Total Area / Area per Head)
+        max_heads_by_area = 0
         if area_per_head > 0:
             max_heads_by_area = int(pen.area_m2 / area_per_head)
-            heads = min(heads, max_heads_by_area)
-        # Also cap by head capacity
-        heads = min(heads, int(pen.capacity_head)) if pen.capacity_head > 0 else heads
         
-        # Now calculate Head %Full from capped # Head
-        head_pct = (heads / pen.capacity_head * 100.0) if pen.capacity_head > 0 else 0.0
+        # Calculate maximum heads based on capacity constraint
+        max_heads_by_capacity = int(pen.capacity_head) if pen.capacity_head > 0 else max_heads_by_area
         
-        # Calculate Used Area (will be ≤ Total Area due to capping)
+        # If auto_max_heads is True (cargo changed), set to maximum ONLY if cargo is not blank
+        # If cargo is "-- Blank --", keep heads at 0
+        if auto_max_heads:
+            if cargo_name == "-- Blank --":
+                # Keep heads at 0 for blank cargo
+                heads = 0
+            else:
+                # Set heads to maximum (minimum of area-based and capacity-based maximums)
+                heads = min(max_heads_by_area, max_heads_by_capacity) if max_heads_by_area > 0 and max_heads_by_capacity > 0 else (max_heads_by_area if max_heads_by_area > 0 else max_heads_by_capacity)
+        else:
+            # Use current heads value but cap it to maximums
+            if area_per_head > 0:
+                heads = min(heads, max_heads_by_area)
+            # Also cap by head capacity
+            heads = min(heads, max_heads_by_capacity) if max_heads_by_capacity > 0 else heads
+        
+        # Calculate Used Area (will be Γëñ Total Area due to capping)
         area_used = heads * area_per_head if heads > 0 else 0.0
-        # Ensure Used Area ≤ Total Area (safety check)
+        # Ensure Used Area Γëñ Total Area (safety check)
         area_used = min(area_used, pen.area_m2)
+        
+        # Head Capacity = Total Area / Area per Head (max capacity based on area)
+        head_capacity = (pen.area_m2 / area_per_head) if area_per_head > 0 else 0.0
+        
+        # Head %Full = (Used Area / Total Area) * 100 (percentage of area used)
+        head_pct = (area_used / pen.area_m2 * 100.0) if pen.area_m2 > 0 else 0.0
         
         weight_mt = heads * mass_per_head_t
         # VCG (m-BL) = pen deck + cargo VCG from deck (matches stability)
         vcg_from_deck = (getattr(ct, "vcg_from_deck_m", 0) or 0) if ct else 0.0
         vcg_display = pen.vcg_m + vcg_from_deck
-        # LS Moment (m-MT) = Weight × LCG
+        # LS Moment (m-MT) = Weight ├ù LCG
         lcg_moment = weight_mt * pen.lcg_m
         self._skip_item_changed = True
         try:
@@ -816,6 +1394,15 @@ class ConditionTableWidget(QWidget):
                 table.item(row, 2).setText(str(heads))
             else:
                 table.setItem(row, 2, QTableWidgetItem(str(heads)))
+            # Update Head Capacity - calculated from Total Area / Area per Head
+            head_capacity = (pen.area_m2 / area_per_head) if area_per_head > 0 else 0.0
+            if table.item(row, 4):
+                table.item(row, 4).setText(f"{head_capacity:.2f}")
+            else:
+                cap_item = QTableWidgetItem(f"{head_capacity:.2f}")
+                cap_item.setFlags(cap_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row, 4, cap_item)
+            # Update Head %Full - calculated from Used Area / Total Area
             if table.item(row, 3):
                 table.item(row, 3).setText(f"{head_pct:.2f}")
             else:
@@ -920,6 +1507,9 @@ class ConditionTableWidget(QWidget):
                 # Initial: get volume from tank_volumes, calculate weight = volume * density
                 vol = tank_volumes.get(tank.id or -1, 0.0)
                 dens = getattr(tank, "density_t_per_m3", 1.025) or 1.025
+                # Constraint: Volume cannot exceed Capacity
+                if tank.capacity_m3 > 0 and vol > tank.capacity_m3:
+                    vol = tank.capacity_m3
                 weight_mt = vol * dens if vol > 0 else 0.0
                 # Calculate %Full from volume and capacity
                 fill_pct = (vol / tank.capacity_m3 * 100.0) if tank.capacity_m3 > 0 else 0.0
@@ -958,7 +1548,9 @@ class ConditionTableWidget(QWidget):
                 fill_item.setFlags(fill_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_PCT_FULL, fill_item)
                 
-                # Volume (col 6) - calculated from weight and density, read-only
+                # Volume (col 6) - calculated from weight and density, but capped at capacity, read-only
+                # Ensure volume doesn't exceed capacity
+                vol = min(vol, tank.capacity_m3) if tank.capacity_m3 > 0 else vol
                 vol_item = QTableWidgetItem(f"{vol:.2f}")
                 vol_item.setFlags(vol_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_VOLUME, vol_item)
@@ -1026,13 +1618,15 @@ class ConditionTableWidget(QWidget):
         return on_item
     
     def _recalculate_tank_row(self, table: QTableWidget, row: int) -> None:
-        """Recalculate Volume and %Full from Weight and Density for a tank row."""
+        """Recalculate Volume and %Full from Weight and Density for a tank row.
+        Volume is constrained to not exceed capacity; if it would, weight is adjusted accordingly."""
         if row < 0 or row >= table.rowCount():
             return
         # Skip totals row
         name_item = table.item(row, self.TANK_COL_NAME)
         if not name_item or "Totals" in (name_item.text() or ""):
             return
+        
         try:
             weight_text = (table.item(row, self.TANK_COL_WEIGHT).text() or "").strip()
             weight_mt = float(weight_text) if weight_text else 0.0
@@ -1053,14 +1647,33 @@ class ConditionTableWidget(QWidget):
             vol = weight_mt / dens
         else:
             vol = 0.0
+        
+        # Constraint: Volume cannot exceed Capacity
+        # If volume would exceed capacity, cap it and adjust weight accordingly
+        weight_adjusted = False
+        if capacity > 0 and vol > capacity:
+            vol = capacity
+            # Adjust weight to match the capped volume
+            weight_mt = vol * dens
+            weight_adjusted = True
+        
         # Calculate %Full = (Volume / Capacity) * 100
         if capacity > 0:
             fill_pct = (vol / capacity) * 100.0
         else:
             fill_pct = 0.0
+        
         self._skip_item_changed = True
         try:
-            # Update Volume (col 6)
+            # Update Weight (col 8) if it was adjusted due to capacity constraint
+            if weight_adjusted:
+                if table.item(row, self.TANK_COL_WEIGHT):
+                    table.item(row, self.TANK_COL_WEIGHT).setText(f"{weight_mt:.2f}")
+                else:
+                    weight_item = QTableWidgetItem(f"{weight_mt:.2f}")
+                    table.setItem(row, self.TANK_COL_WEIGHT, weight_item)
+            
+            # Update Volume (col 6) - capped at capacity
             if table.item(row, self.TANK_COL_VOLUME):
                 table.item(row, self.TANK_COL_VOLUME).setText(f"{vol:.2f}")
             else:
@@ -1143,74 +1756,56 @@ class ConditionTableWidget(QWidget):
         if not all_table:
             return
         
-        # Sort pens by the 3-level key: number -> letter pattern (A,B,D,C) -> deck
-        sorted_pens = sorted(pens, key=get_pen_sort_key)
+        # Sort pens by deck first (A, B, C, D, ...), then by the standard pen sort key
+        def all_table_sort_key(pen: LivestockPen) -> tuple:
+            deck_letter = _deck_to_letter(pen.deck or "") or ""
+            # Normalize deck to A-H for sorting
+            if deck_letter and deck_letter.upper() in ["A", "B", "C", "D", "E", "F", "G", "H"]:
+                deck_order = ord(deck_letter.upper())
+            else:
+                deck_order = 999  # Put invalid decks at end
+            # Then use standard pen sort key for secondary sorting
+            standard_key = get_pen_sort_key(pen)
+            return (deck_order, standard_key[0], standard_key[1], standard_key[2])
+        
+        sorted_pens = sorted(pens, key=all_table_sort_key)
             
-        # Add all pens
+        # Add all pens from every deck (including those with 0 heads)
         for pen in sorted_pens:
-            heads = pen_loadings.get(pen.id or -1, 0)
-            if heads == 0:
-                continue
-                
+            # Get all data from deck table (cargo, heads, head capacity, etc.)
+            deck_data = self._get_pen_data_from_deck_table(pen, cargo_types)
+            
             row = all_table.rowCount()
             all_table.insertRow(row)
-            
-            if area_per_head_from_cargo is not None:
-                area_per_head = area_per_head_from_cargo
-            else:
-                area_per_head = pen.area_m2 / heads if heads > 0 else 0.0
-            
-            # Constraint: Cap # Head first if Used Area would exceed Total Area
-            # Calculate max heads based on area constraint: max_heads = floor(Total Area / Area per Head)
-            if area_per_head > 0:
-                max_heads_by_area = int(pen.area_m2 / area_per_head)
-                heads = min(heads, max_heads_by_area)
-            # Also cap by head capacity
-            heads = min(heads, int(pen.capacity_head)) if pen.capacity_head > 0 else heads
-            
-            # Now calculate Head %Full from capped # Head
-            head_pct = (heads / pen.capacity_head * 100.0) if pen.capacity_head > 0 else 0.0
-            
-            # Calculate Used Area (will be ≤ Total Area due to capping)
-            area_used = heads * area_per_head if heads > 0 else 0.0
-            # Ensure Used Area ≤ Total Area (safety check)
-            area_used = min(area_used, pen.area_m2)
-            
-            weight_mt = heads * mass_per_head_t
-            ct_sel = next((c for c in (cargo_types or []) if (getattr(c, "name", "") or "").strip() == cargo_name), None)
-            vcg_from_deck = (getattr(ct_sel, "vcg_from_deck_m", 0) or 0) if ct_sel else 0.0
-            vcg_display = pen.vcg_m + vcg_from_deck
-            lcg_moment = weight_mt * pen.lcg_m
             
             name_item = QTableWidgetItem(pen.name)
             name_item.setData(Qt.ItemDataRole.UserRole, pen.id)
             all_table.setItem(row, 0, name_item)
-            if cargo_type_names:
-                combo = QComboBox(all_table)
-                combo.addItems(cargo_type_names)
-                if cargo_name in cargo_type_names:
-                    combo.setCurrentText(cargo_name)
-                elif cargo_type_names:
-                    combo.setCurrentIndex(0)
-                if cargo_types:
-                    combo.currentTextChanged.connect(
-                        lambda _t, t=all_table, r=row: self._recalculate_livestock_row(t, r)
-                    )
-                all_table.setCellWidget(row, 1, combo)
-            else:
-                all_table.setItem(row, 1, QTableWidgetItem(cargo_name))
-            all_table.setItem(row, 2, QTableWidgetItem(str(heads)))
-            all_table.setItem(row, 3, QTableWidgetItem(f"{head_pct:.2f}"))
-            all_table.setItem(row, 4, QTableWidgetItem(f"{pen.capacity_head:.2f}"))
-            all_table.setItem(row, 5, QTableWidgetItem(f"{area_used:.2f}"))
-            all_table.setItem(row, 6, QTableWidgetItem(f"{pen.area_m2:.2f}"))
-            all_table.setItem(row, 7, QTableWidgetItem(f"{area_per_head:.2f}"))
-            all_table.setItem(row, 8, QTableWidgetItem(f"{mass_per_head_t:.2f}"))
-            all_table.setItem(row, 9, QTableWidgetItem(f"{weight_mt:.2f}"))
-            all_table.setItem(row, 10, QTableWidgetItem(f"{vcg_display:.3f}"))
-            all_table.setItem(row, 11, QTableWidgetItem(f"{pen.lcg_m:.3f}"))
-            all_table.setItem(row, 12, QTableWidgetItem(f"{pen.tcg_m:.3f}"))
-            all_table.setItem(row, 13, QTableWidgetItem(f"{lcg_moment:.2f}"))
+            
+            # Deck column (col 1): show normalized deck letter (A-H), read-only
+            deck_letter = _deck_to_letter(pen.deck or "") or (pen.deck or "")
+            deck_item = QTableWidgetItem(deck_letter)
+            deck_item.setFlags(deck_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Read-only
+            all_table.setItem(row, 1, deck_item)
+            
+            # Cargo column (col 2): read-only, sync with deck table
+            cargo_item = QTableWidgetItem(deck_data.get("cargo", "-- Blank --"))
+            cargo_item.setFlags(cargo_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Read-only
+            all_table.setItem(row, 2, cargo_item)
+            
+            # All other columns: sync with deck table values (shifted by 1 due to Deck column)
+            all_table.setItem(row, 3, QTableWidgetItem(str(deck_data.get("heads", 0))))
+            all_table.setItem(row, 4, QTableWidgetItem(f"{deck_data.get('head_pct', 0.0):.2f}"))
+            all_table.setItem(row, 5, QTableWidgetItem(f"{deck_data.get('head_capacity', 0.0):.2f}"))
+            all_table.setItem(row, 6, QTableWidgetItem(f"{deck_data.get('area_used', 0.0):.2f}"))
+            all_table.setItem(row, 7, QTableWidgetItem(f"{pen.area_m2:.2f}"))
+            all_table.setItem(row, 8, QTableWidgetItem(f"{deck_data.get('area_per_head', 0.0):.2f}"))
+            all_table.setItem(row, 9, QTableWidgetItem(f"{deck_data.get('mass_per_head_t', 0.0):.2f}"))
+            all_table.setItem(row, 10, QTableWidgetItem(f"{deck_data.get('weight_mt', 0.0):.2f}"))
+            all_table.setItem(row, 11, QTableWidgetItem(f"{deck_data.get('vcg_display', pen.vcg_m):.3f}"))
+            all_table.setItem(row, 12, QTableWidgetItem(f"{pen.lcg_m:.3f}"))
+            all_table.setItem(row, 13, QTableWidgetItem(f"{pen.tcg_m:.3f}"))
+            all_table.setItem(row, 14, QTableWidgetItem(f"{deck_data.get('lcg_moment', 0.0):.2f}"))
         
         if cargo_types:
             all_table.itemChanged.connect(self._make_all_tab_item_changed(all_table))
@@ -1231,16 +1826,153 @@ class ConditionTableWidget(QWidget):
             weight_mt = vol * 1.025
             
             all_table.setItem(row, 0, QTableWidgetItem(tank.name))
-            all_table.setItem(row, 1, QTableWidgetItem("Tank"))
-            all_table.setItem(row, 2, QTableWidgetItem(""))
-            all_table.setItem(row, 3, QTableWidgetItem(f"{fill_pct:.1f}"))
-            all_table.setItem(row, 4, QTableWidgetItem(f"{tank.capacity_m3:.2f}"))
-            all_table.setItem(row, 5, QTableWidgetItem(""))
+            all_table.setItem(row, 1, QTableWidgetItem(""))  # Deck column - empty for tanks
+            all_table.setItem(row, 2, QTableWidgetItem("Tank"))
+            all_table.setItem(row, 3, QTableWidgetItem(""))
+            all_table.setItem(row, 4, QTableWidgetItem(f"{fill_pct:.1f}"))
+            all_table.setItem(row, 5, QTableWidgetItem(f"{tank.capacity_m3:.2f}"))
             all_table.setItem(row, 6, QTableWidgetItem(""))
             all_table.setItem(row, 7, QTableWidgetItem(""))
             all_table.setItem(row, 8, QTableWidgetItem(""))
-            all_table.setItem(row, 9, QTableWidgetItem(f"{weight_mt:.2f}"))
-            all_table.setItem(row, 10, QTableWidgetItem(""))
-            all_table.setItem(row, 11, QTableWidgetItem(f"{tank.longitudinal_pos:.3f}"))
+            all_table.setItem(row, 9, QTableWidgetItem(""))
+            all_table.setItem(row, 10, QTableWidgetItem(f"{weight_mt:.2f}"))
+            all_table.setItem(row, 11, QTableWidgetItem(""))
             all_table.setItem(row, 12, QTableWidgetItem(""))
             all_table.setItem(row, 13, QTableWidgetItem(""))
+            all_table.setItem(row, 14, QTableWidgetItem(""))
+    
+    def _get_pen_data_from_deck_table(self, pen: LivestockPen, cargo_types: Optional[List[Any]] = None) -> Dict[str, Any]:
+        """Get all pen data (cargo, heads, head capacity, etc.) from the deck table for this pen.
+        Returns a dictionary with all calculated values, or defaults if not found."""
+        # Default values
+        result = {
+            "cargo": "-- Blank --",
+            "heads": 0,
+            "head_pct": 0.0,
+            "head_capacity": 0.0,
+            "area_used": 0.0,
+            "area_per_head": 0.0,
+            "mass_per_head_t": 0.0,
+            "weight_mt": 0.0,
+            "vcg_display": pen.vcg_m,
+            "lcg_moment": 0.0,
+        }
+        
+        # Determine which deck table this pen belongs to
+        deck_letter = _deck_to_letter(pen.deck or "")
+        if not deck_letter:
+            return result
+        
+        # Convert deck letter to deck number (A=1, B=2, ..., H=8)
+        deck_num = ord(deck_letter.upper()) - ord("A") + 1
+        if not (1 <= deck_num <= 8):
+            return result
+        
+        # Deck 8 (H) doesn't have cargo dropdowns, skip it
+        if deck_num == 8:
+            return result
+        
+        # Find the deck table
+        tab_name = f"Livestock-DK{deck_num}"
+        deck_table = self._table_widgets.get(tab_name)
+        if not deck_table:
+            return result
+        
+        # Find the pen in the deck table by pen ID
+        for deck_row in range(deck_table.rowCount()):
+            deck_name_item = deck_table.item(deck_row, 0)
+            if not deck_name_item:
+                continue
+            
+            # Skip totals row
+            if "Totals" in (deck_name_item.text() or ""):
+                continue
+            
+            deck_pen_id = deck_name_item.data(Qt.ItemDataRole.UserRole)
+            if deck_pen_id == pen.id:
+                # Found the pen, get all data from the deck table
+                # Cargo (col 1)
+                cargo_combo = deck_table.cellWidget(deck_row, 1)
+                if isinstance(cargo_combo, QComboBox):
+                    cargo_text = cargo_combo.currentText().strip()
+                    result["cargo"] = cargo_text if cargo_text else "-- Blank --"
+                else:
+                    cargo_item = deck_table.item(deck_row, 1)
+                    if cargo_item:
+                        result["cargo"] = cargo_item.text().strip() or "-- Blank --"
+                
+                # # Head (col 2)
+                head_item = deck_table.item(deck_row, 2)
+                if head_item:
+                    try:
+                        result["heads"] = int(float(head_item.text() or "0"))
+                    except (ValueError, TypeError):
+                        result["heads"] = 0
+                
+                # Head %Full (col 3)
+                head_pct_item = deck_table.item(deck_row, 3)
+                if head_pct_item:
+                    try:
+                        result["head_pct"] = float(head_pct_item.text() or "0")
+                    except (ValueError, TypeError):
+                        result["head_pct"] = 0.0
+                
+                # Head Capacity (col 4)
+                head_cap_item = deck_table.item(deck_row, 4)
+                if head_cap_item:
+                    try:
+                        result["head_capacity"] = float(head_cap_item.text() or "0")
+                    except (ValueError, TypeError):
+                        result["head_capacity"] = 0.0
+                
+                # Used Area m2 (col 5)
+                area_used_item = deck_table.item(deck_row, 5)
+                if area_used_item:
+                    try:
+                        result["area_used"] = float(area_used_item.text() or "0")
+                    except (ValueError, TypeError):
+                        result["area_used"] = 0.0
+                
+                # Area/Head (col 7)
+                area_per_head_item = deck_table.item(deck_row, 7)
+                if area_per_head_item:
+                    try:
+                        result["area_per_head"] = float(area_per_head_item.text() or "0")
+                    except (ValueError, TypeError):
+                        result["area_per_head"] = 0.0
+                
+                # AvW/Head MT (col 8)
+                mass_item = deck_table.item(deck_row, 8)
+                if mass_item:
+                    try:
+                        result["mass_per_head_t"] = float(mass_item.text() or "0")
+                    except (ValueError, TypeError):
+                        result["mass_per_head_t"] = 0.0
+                
+                # Weight MT (col 9)
+                weight_item = deck_table.item(deck_row, 9)
+                if weight_item:
+                    try:
+                        result["weight_mt"] = float(weight_item.text() or "0")
+                    except (ValueError, TypeError):
+                        result["weight_mt"] = 0.0
+                
+                # VCG m-BL (col 10)
+                vcg_item = deck_table.item(deck_row, 10)
+                if vcg_item:
+                    try:
+                        result["vcg_display"] = float(vcg_item.text() or str(pen.vcg_m))
+                    except (ValueError, TypeError):
+                        result["vcg_display"] = pen.vcg_m
+                
+                # LS Moment m-MT (col 13)
+                moment_item = deck_table.item(deck_row, 13)
+                if moment_item:
+                    try:
+                        result["lcg_moment"] = float(moment_item.text() or "0")
+                    except (ValueError, TypeError):
+                        result["lcg_moment"] = 0.0
+                
+                break
+        
+        return result

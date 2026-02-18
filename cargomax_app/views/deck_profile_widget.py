@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QRectF, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, QRectF, pyqtSignal, QSize, QSignalBlocker
 from PyQt6.QtGui import QPen, QBrush, QColor, QPainterPath, QFont, QResizeEvent
 from PyQt6.QtWidgets import (
     QWidget,
@@ -158,6 +158,53 @@ class TankPolygonItem(QGraphicsPathItem):
         return self._tank_id
 
 
+class PenMarkerItem(QGraphicsRectItem):
+    """
+    Selectable, hoverable rectangle marker for a pen. Visual states: normal, hover, selected.
+    Used in profile view (LCG/VCG) and deck view (LCG/TCG).
+    """
+    def __init__(self, pen_id: int, rect: QRectF, parent: QGraphicsItem | None = None) -> None:
+        super().__init__(rect, parent)
+        self._pen_id = pen_id
+        self._hover = False
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, False)
+        self.setAcceptHoverEvents(True)
+        self.setData(0, pen_id)
+        self._update_style()
+
+    def _update_style(self) -> None:
+        if self.isSelected():
+            self.setPen(QPen(QColor(0, 150, 255), 1.5))  # Thin blue outline when selected
+            self.setBrush(QBrush(Qt.BrushStyle.NoBrush))  # No fill, just outline
+        elif self._hover:
+            self.setPen(QPen(QColor(100, 180, 255), 1.2))  # Lighter blue on hover
+            self.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+        else:
+            self.setPen(QPen(QColor(100, 100, 100), 0.8))  # Thin gray outline
+            self.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+        self.update()
+
+    def hoverEnterEvent(self, event) -> None:
+        self._hover = True
+        self._update_style()
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event) -> None:
+        self._hover = False
+        self._update_style()
+        super().hoverLeaveEvent(event)
+
+    def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value) -> None:
+        if change == QGraphicsItem.GraphicsItemChange.ItemSelectedChange:
+            self._update_style()
+        return super().itemChange(change, value)
+
+    @property
+    def pen_id(self) -> int:
+        return self._pen_id
+
+
 class ProfileView(ShipGraphicsView):
     """
     Top profile view with waterline.
@@ -166,14 +213,20 @@ class ProfileView(ShipGraphicsView):
     Fixed view - no zoom/pan, auto-fits to window size.
     """
 
+    # Emits the full current pen selection for this view.
+    pen_selection_changed = pyqtSignal(object)  # set[int]
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         
-        # Disable zoom and pan - fixed view only
-        self.setDragMode(QGraphicsView.DragMode.NoDrag)
-        self.setInteractive(False)
+        # Set white background
+        self._scene.setBackgroundBrush(QBrush(Qt.GlobalColor.white))
+        
+        # Enable interaction for pen selection with multi-selection
+        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)  # Enable rubber band selection
+        self.setInteractive(True)  # Enable interaction for clickable pens
         
         # Store references to dynamic elements
         self._waterline_item: QGraphicsLineItem | None = None
@@ -182,6 +235,10 @@ class ProfileView(ShipGraphicsView):
         self._waterline_fwd_item: QGraphicsLineItem | None = None
         self._draft_markers: list[QGraphicsItem] = []
         self._trim_text_item: QGraphicsTextItem | None = None
+        self._hull_fill_item: QGraphicsPolygonItem | None = None  # Gray hull fill
+        self._pen_markers: dict[int, PenMarkerItem] = {}  # pen_id -> marker
+        self._current_pens: list = []
+        self._syncing_selection = False
         
         # Ship dimensions for scaling
         self._ship_length: float = 0.0
@@ -190,6 +247,16 @@ class ProfileView(ShipGraphicsView):
         self._keel_y: float = 0.0  # Y position of keel baseline in scene coordinates
         
         self._load_profile()
+        self._scene.selectionChanged.connect(self._on_selection_changed)
+    
+    def _on_selection_changed(self) -> None:
+        """Emit full selected pen set (multi-selection)."""
+        if self._syncing_selection:
+            return
+        selected_pen_ids = {
+            item.pen_id for item in self._scene.selectedItems() if isinstance(item, PenMarkerItem)
+        }
+        self.pen_selection_changed.emit(set(selected_pen_ids))
     
     def showEvent(self, event) -> None:
         """Fit scene when view is first shown."""
@@ -215,7 +282,7 @@ class ProfileView(ShipGraphicsView):
                 self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
 
     def _load_profile(self) -> None:
-        """Load ship profile from DXF or show placeholder."""
+        """Load ship profile from DXF or show placeholder. Add gray hull fill."""
         self._scene.clear()
         self._waterline_item = None
         self._waterline_fill_item = None
@@ -223,6 +290,7 @@ class ProfileView(ShipGraphicsView):
         self._waterline_fwd_item = None
         self._draft_markers.clear()
         self._trim_text_item = None
+        self._hull_fill_item = None
         
         dxf_path = CAD_DIR / "profile.dxf"
         if not _load_dxf_into_scene(dxf_path, self._scene):
@@ -230,20 +298,98 @@ class ProfileView(ShipGraphicsView):
             # Draw a simple hull shape
             hull_pen = QPen(QColor(50, 50, 50), 2)
             self._scene.addLine(0, 0, 800, 0, hull_pen)  # Baseline (keel)
-            self._scene.addRect(QRectF(50, -40, 700, 80), QPen(QColor(30, 30, 30), 2))
+            hull_rect = QRectF(50, -40, 700, 80)
+            # Draw hull outline
+            self._scene.addRect(hull_rect, QPen(QColor(30, 30, 30), 2))
+            # Add gray hull fill
+            hull_fill_brush = QBrush(QColor(200, 200, 200, 180))  # Light gray, semi-transparent
+            self._hull_fill_item = self._scene.addRect(hull_rect, QPen(Qt.PenStyle.NoPen), hull_fill_brush)
+            self._hull_fill_item.setZValue(-10)  # Behind everything
             self._ship_length = 800.0
             self._ship_breadth = 80.0
+            self._ship_depth = 80.0
             self._keel_y = 0.0  # Keel is at y=0 in placeholder
         else:
             # Estimate dimensions from scene bounds
             bounds = self._scene.itemsBoundingRect()
             self._ship_length = max(bounds.width(), 100.0)
             self._ship_breadth = max(abs(bounds.height()), 20.0)
+            self._ship_depth = self._ship_breadth
             # Assume keel is at the bottom of the bounding box
             self._keel_y = bounds.bottom()
+            
+            # Add gray hull fill polygon (create a polygon from the hull outline)
+            # For now, create a simple rectangle fill. Can be enhanced to match DXF hull shape later
+            hull_fill_rect = QRectF(bounds.left(), bounds.top(), bounds.width(), bounds.height())
+            hull_fill_brush = QBrush(QColor(200, 200, 200, 180))  # Light gray, semi-transparent
+            self._hull_fill_item = self._scene.addRect(hull_fill_rect, QPen(Qt.PenStyle.NoPen), hull_fill_brush)
+            self._hull_fill_item.setZValue(-10)  # Behind DXF lines and everything else
         
         # Fit scene to view after loading
         self._fit_scene_to_view()
+    
+    def set_pens(self, pens: list) -> None:
+        """Update pens and draw markers in profile view."""
+        self._current_pens = pens
+        self._update_pen_markers()
+    
+    def _update_pen_markers(self) -> None:
+        """Draw pen markers as rectangles at their LCG/VCG positions, sized by area."""
+        # Clear existing markers
+        for marker in list(self._pen_markers.values()):
+            self._scene.removeItem(marker)
+        self._pen_markers.clear()
+        
+        if not self._current_pens or self._ship_length == 0:
+            return
+        
+        # Calculate scaling: assume pens are positioned relative to ship length
+        # For profile view: x = LCG, y = VCG from keel (keel_y - vcg)
+        for pen in self._current_pens:
+            if not pen.id:
+                continue
+            
+            # Position: LCG along ship, VCG from keel
+            x_center = pen.lcg_m
+            y_center = self._keel_y - pen.vcg_m  # VCG measured from keel upward
+            
+            # Size rectangle based on area
+            # Convert area (m²) to visual size: assume sqrt(area) gives a reasonable dimension
+            # Scale it appropriately for the view
+            area_m2 = pen.area_m2 or 10.0  # Default 10 m² if not set
+            # Width: proportional to sqrt(area), scaled to ship length
+            # Height: fixed small height for profile view (pens are thin vertically)
+            width = max(min(area_m2 ** 0.5 * 2.0, self._ship_length * 0.1), 5.0)  # Min 5, max 10% of ship length
+            height = max(self._ship_depth * 0.05, 3.0)  # Small fixed height, min 3
+            
+            rect = QRectF(x_center - width/2, y_center - height/2, width, height)
+            marker = PenMarkerItem(pen.id, rect)
+            marker.setZValue(100)  # Above hull fill, below waterline
+            self._pen_markers[pen.id] = marker
+            self._scene.addItem(marker)
+    
+    def highlight_pen(self, pen_id: int) -> None:
+        """Highlight a pen marker by selecting it."""
+        if pen_id in self._pen_markers:
+            marker = self._pen_markers[pen_id]
+            # Clear other selections first
+            self._scene.clearSelection()
+            marker.setSelected(True)
+            # Scroll to marker
+            self.ensureVisible(marker)
+
+    def set_selected_pens(self, pen_ids: set[int]) -> None:
+        """Programmatically select pens in this view without feedback loops."""
+        self._syncing_selection = True
+        try:
+            with QSignalBlocker(self._scene):
+                self._scene.clearSelection()
+                for pid in pen_ids or set():
+                    item = self._pen_markers.get(pid)
+                    if item:
+                        item.setSelected(True)
+        finally:
+            self._syncing_selection = False
             
     def update_waterline(
         self,
@@ -421,18 +567,27 @@ class DeckView(ShipGraphicsView):
     Fixed view - no zoom/pan, auto-fits to window size.
     """
 
+    # Kept for legacy behavior (other parts may connect).
     tank_selected = pyqtSignal(int)
+    # Emits full selection sets from the deck scene.
+    selection_changed = pyqtSignal(object, object)  # set[int], set[int]
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         
-        # Disable zoom and pan - fixed view only
-        self.setDragMode(QGraphicsView.DragMode.NoDrag)
-        self.setInteractive(False)
+        # Set white background
+        self._scene.setBackgroundBrush(QBrush(Qt.GlobalColor.white))
+        
+        # Enable interaction for pen selection with multi-selection
+        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)  # Enable rubber band selection
+        self.setInteractive(True)  # Enable interaction for clickable pens
         
         self._deck_name = ""
+        self._pen_markers: dict[int, PenMarkerItem] = {}  # pen_id -> marker
+        self._current_pens: list = []
+        self._syncing_selection = False
         self._scene.selectionChanged.connect(self._on_selection_changed)
     
     def showEvent(self, event) -> None:
@@ -458,12 +613,35 @@ class DeckView(ShipGraphicsView):
                 self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
 
     def _on_selection_changed(self) -> None:
-        for item in self._scene.selectedItems():
-            if isinstance(item, TankPolygonItem):
-                self.tank_selected.emit(item.tank_id)
-                return
-        # No tank selected; could emit -1 or do nothing
-        # self.tank_selected.emit(-1)
+        """Emit full selected tank/pen sets (multi-selection)."""
+        if self._syncing_selection:
+            return
+        selected_tanks = {
+            item.tank_id for item in self._scene.selectedItems() if isinstance(item, TankPolygonItem)
+        }
+        selected_pens = {
+            item.pen_id for item in self._scene.selectedItems() if isinstance(item, PenMarkerItem)
+        }
+        # Legacy: emit first selected tank id if any
+        if selected_tanks:
+            self.tank_selected.emit(next(iter(selected_tanks)))
+        self.selection_changed.emit(set(selected_pens), set(selected_tanks))
+
+    def set_selected(self, pen_ids: set[int], tank_ids: set[int]) -> None:
+        """Programmatically set selection in this deck view without feedback loops."""
+        self._syncing_selection = True
+        try:
+            with QSignalBlocker(self._scene):
+                self._scene.clearSelection()
+                for pid in pen_ids or set():
+                    item = self._pen_markers.get(pid)
+                    if item:
+                        item.setSelected(True)
+                for item in self._scene.items():
+                    if isinstance(item, TankPolygonItem) and item.tank_id in (tank_ids or set()):
+                        item.setSelected(True)
+        finally:
+            self._syncing_selection = False
 
     def load_deck(self, deck_name: str, tanks: list | None = None) -> None:
         """
@@ -472,6 +650,7 @@ class DeckView(ShipGraphicsView):
         """
         self._deck_name = deck_name
         self._scene.clear()
+        self._pen_markers.clear()
 
         deck_tanks = []
         if tanks:
@@ -495,9 +674,62 @@ class DeckView(ShipGraphicsView):
                     QPen(Qt.GlobalColor.darkGreen, 2),
                     QBrush(Qt.GlobalColor.green),
                 )
+        
+        # Update pen markers for this deck
+        self._update_pen_markers()
 
         # Fit scene to view after loading deck
         self._fit_scene_to_view()
+    
+    def set_pens(self, pens: list) -> None:
+        """Update pens and draw markers in deck view."""
+        self._current_pens = pens
+        self._update_pen_markers()
+    
+    def _update_pen_markers(self) -> None:
+        """Draw pen markers as rectangles at their LCG/TCG positions, sized by area."""
+        # Clear existing markers
+        for marker in list(self._pen_markers.values()):
+            self._scene.removeItem(marker)
+        self._pen_markers.clear()
+        
+        if not self._current_pens or not self._deck_name:
+            return
+        
+        # Filter pens for this deck
+        from .condition_table_widget import _deck_to_letter
+        deck_letter = self._deck_name.upper()
+        deck_pens = [
+            p for p in self._current_pens
+            if _deck_to_letter(p.deck or "") == deck_letter
+        ]
+        
+        if not deck_pens:
+            return
+        
+        # Get scene bounds to estimate ship dimensions
+        bounds = self._scene.itemsBoundingRect()
+        ship_length = max(bounds.width(), 100.0)
+        ship_breadth = max(bounds.height(), 20.0)
+        
+        for pen in deck_pens:
+            if not pen.id:
+                continue
+            
+            # Position: LCG along ship, TCG from centerline
+            x_center = pen.lcg_m
+            y_center = ship_breadth / 2 + pen.tcg_m  # TCG: positive = starboard, negative = port
+            
+            # Size rectangle based on area
+            area_m2 = pen.area_m2 or 10.0
+            # For deck view: create square-ish rectangles based on area
+            size = max(area_m2 ** 0.5 * 1.5, 3.0)  # Scale sqrt(area), min 3
+            
+            rect = QRectF(x_center - size/2, y_center - size/2, size, size)
+            marker = PenMarkerItem(pen.id, rect)
+            marker.setZValue(50)  # Above DXF lines
+            self._pen_markers[pen.id] = marker
+            self._scene.addItem(marker)
 
     def set_tanks(self, tanks: list) -> None:
         """
@@ -507,6 +739,14 @@ class DeckView(ShipGraphicsView):
         if self._deck_name:
             self.load_deck(self._deck_name, tanks)
             # load_deck already calls _fit_scene_to_view()
+    
+    def highlight_pen(self, pen_id: int) -> None:
+        """Highlight a pen marker by selecting it."""
+        if pen_id in self._pen_markers:
+            marker = self._pen_markers[pen_id]
+            marker.setSelected(True)
+            self._scene.clearSelection()
+            marker.setSelected(True)
 
 
 def _fmt_val(v: float | None, decimals: int = 2) -> str:
@@ -647,6 +887,9 @@ class DeckProfileWidget(QWidget):
     deck_changed = pyqtSignal(str)
     # Emitted when user selects a tank polygon in a deck view (connects to calculation UI)
     tank_selected = pyqtSignal(int)
+    # Emitted when selection changes anywhere in profile/deck views.
+    # pens_selected/tanks_selected are `set[int]` or `None` (None = no change to that type).
+    selection_changed = pyqtSignal(object, object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -668,6 +911,12 @@ class DeckProfileWidget(QWidget):
             self._deck_tab_widgets[deck_letter] = tab_widget
             self._deck_tabs.addTab(tab_widget, f"Deck {deck_letter}")
             tab_widget._deck_view.tank_selected.connect(self.tank_selected.emit)
+            tab_widget._deck_view.selection_changed.connect(self._on_deck_view_selection_changed)
+        
+        # Connect profile view pen selection
+        self._profile_view.pen_selection_changed.connect(self._on_profile_selection_changed)
+
+        self._syncing_selection = False
 
         main_layout.addWidget(self._deck_tabs, 45)
 
@@ -684,8 +933,39 @@ class DeckProfileWidget(QWidget):
 
     def update_tables(self, pens: list, tanks: list) -> None:
         """Update all deck tab tables with current pens/tanks data."""
+        # Update pens in profile and deck views
+        self._profile_view.set_pens(pens)
         for tab_widget in self._deck_tab_widgets.values():
             tab_widget.update_table(pens, tanks)
+            tab_widget._deck_view.set_pens(pens)
+
+    def _on_profile_selection_changed(self, pen_ids: set[int]) -> None:
+        if self._syncing_selection:
+            return
+        self.selection_changed.emit(set(pen_ids), None)
+
+    def _on_deck_view_selection_changed(self, pen_ids: set[int], tank_ids: set[int]) -> None:
+        if self._syncing_selection:
+            return
+        self.selection_changed.emit(set(pen_ids), set(tank_ids))
+
+    def set_selected(self, pen_ids: set[int], tank_ids: set[int]) -> None:
+        """Programmatically set selection in profile + all deck views."""
+        self._syncing_selection = True
+        try:
+            self._profile_view.set_selected_pens(pen_ids)
+            for tab_widget in self._deck_tab_widgets.values():
+                tab_widget._deck_view.set_selected(pen_ids, tank_ids)
+        finally:
+            self._syncing_selection = False
+    
+    def highlight_pen(self, pen_id: int) -> None:
+        """Highlight a pen in profile view and deck view."""
+        self._profile_view.highlight_pen(pen_id)
+        # Also highlight in current deck view
+        current_tab = self._deck_tabs.currentWidget()
+        if isinstance(current_tab, DeckTabWidget):
+            current_tab._deck_view.highlight_pen(pen_id)
 
     def get_current_deck(self) -> str:
         """Return the currently selected deck letter."""

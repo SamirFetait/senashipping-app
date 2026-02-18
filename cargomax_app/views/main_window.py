@@ -637,12 +637,15 @@ class MainWindow(QMainWindow):
             action.setChecked(idx == index)
 
     def _on_cargo_library(self) -> None:
-        """Open Edit Cargo Library dialog; refresh condition editor combo when closed."""
+        """Open Edit Cargo Library dialog; refresh condition editor combo and dropdowns when closed."""
         dlg = CargoLibraryDialog(self)
         dlg.exec()
         cond_editor = self._stack.widget(self._page_indexes.condition_editor)
         if isinstance(cond_editor, ConditionEditorView):
             cond_editor._refresh_cargo_types()
+            # Update cargo types in condition table widget and refresh dropdowns
+            if hasattr(cond_editor, '_condition_table') and hasattr(cond_editor._condition_table, 'update_cargo_types'):
+                cond_editor._condition_table.update_cargo_types(cond_editor._cargo_types)
 
     def _on_import_tanks_from_dxf(self) -> None:
         """Import DXF polygons as tank objects for the current ship."""
