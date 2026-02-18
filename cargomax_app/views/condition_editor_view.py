@@ -291,6 +291,7 @@ class ConditionEditorView(QWidget):
                 self._tank_table.setCurrentCell(row, 0)
                 self._tank_table.scrollToItem(item)
                 return
+    
 
     def _load_voyages(self) -> None:
         self._voyage_combo.clear()
@@ -336,6 +337,9 @@ class ConditionEditorView(QWidget):
             cond_service = ConditionService(db)
             tanks = cond_service.get_tanks_for_ship(ship.id)
             pens = cond_service.get_pens_for_ship(ship.id)
+
+        self._current_pens = pens
+        self._current_tanks = tanks
 
         volumes: Dict[int, float] = {}
         pen_loadings: Dict[int, int] = {}
@@ -742,6 +746,7 @@ class ConditionEditorView(QWidget):
             cargo_type=selected_cargo,
             cargo_type_names=cargo_type_names,
             cargo_types=self._cargo_types,
+            ship_id=self._current_ship.id if self._current_ship else None,
         )
         
     # Public methods for toolbar access

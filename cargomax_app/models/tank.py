@@ -26,7 +26,7 @@ class Tank:
 
     # Basic classification (cargo / ballast / fuel / etc.)
     tank_type: TankType = TankType.CARGO
-    # Loading condition tab: Water Ballast, Fresh Water, Heavy Fuel Oil, Diesel Oil, Lube Oil, Gray Water, Misc. Tanks, Dung, Fodder Hold
+    # Loading condition tab: Water Ballast, Fresh Water, Heavy Fuel Oil, Diesel Oil, Lube Oil, Misc. Tanks, Dung, Fodder Hold, Spaces
     category: str = "Misc. Tanks"
 
     # Simple longitudinal position for now (relative 0–1)

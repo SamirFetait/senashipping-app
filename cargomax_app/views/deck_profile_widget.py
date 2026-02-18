@@ -693,6 +693,7 @@ class DeckProfileWidget(QWidget):
         if isinstance(current_tab, DeckTabWidget):
             return current_tab._deck_name
         return "A"
+    
         
     def update_waterline(
         self,
