@@ -278,8 +278,10 @@ class ProfileView(ShipGraphicsView):
             # Get bounding rect of all items including waterline
             bounds = self._scene.itemsBoundingRect()
             if bounds.isValid() and not bounds.isEmpty():
-                # No padding to maximize drawing size
-                self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
+                # Add padding (5% margin) for better visual appearance
+                padding = min(bounds.width(), bounds.height()) * 0.05
+                padded_bounds = bounds.adjusted(-padding, -padding, padding, padding)
+                self.fitInView(padded_bounds, Qt.AspectRatioMode.KeepAspectRatio)
 
     def _load_profile(self) -> None:
         """Load ship profile from DXF or show placeholder. Add gray hull fill."""
@@ -525,8 +527,10 @@ class DeckView(ShipGraphicsView):
         if self._scene and self._scene.items():
             bounds = self._scene.itemsBoundingRect()
             if bounds.isValid() and not bounds.isEmpty():
-                # No padding to maximize drawing size
-                self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
+                # Add padding (5% margin) for better visual appearance
+                padding = min(bounds.width(), bounds.height()) * 0.05
+                padded_bounds = bounds.adjusted(-padding, -padding, padding, padding)
+                self.fitInView(padded_bounds, Qt.AspectRatioMode.KeepAspectRatio)
 
     def _on_selection_changed(self) -> None:
         """Emit full selected tank/pen sets (multi-selection)."""

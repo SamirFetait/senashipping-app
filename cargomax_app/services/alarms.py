@@ -47,12 +47,33 @@ def build_alarm_rows(
 
     # Calculation Status
     n += 1
+    if validation:
+        has_errors = getattr(validation, "has_errors", False)
+        has_warnings = getattr(validation, "has_warnings", False)
+        if has_errors:
+            calc_status = AlarmStatus.FAIL
+            calc_attained = "FAILED"
+            calc_pass_if = "No errors"
+        elif has_warnings:
+            calc_status = AlarmStatus.WARN
+            calc_attained = "WARNING"
+            calc_pass_if = "No warnings"
+        else:
+            calc_status = AlarmStatus.PASS
+            calc_attained = "OK"
+            calc_pass_if = "OK"
+    else:
+        # No validation available - assume OK
+        calc_status = AlarmStatus.PASS
+        calc_attained = "OK"
+        calc_pass_if = "OK"
+    
     rows.append(AlarmRow(
         no=n,
-        status=AlarmStatus.PASS,
+        status=calc_status,
         description="Calculation Status",
-        attained="OK",
-        pass_if="OK",
+        attained=calc_attained,
+        pass_if=calc_pass_if,
         type=AlarmType.REQUIREMENT,
     ))
 

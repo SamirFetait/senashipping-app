@@ -557,6 +557,71 @@ class ConditionTableWidget(QWidget):
         self._current_pens = pens
         self._current_cargo_types = cargo_types or []
         self._current_ship_id = ship_id
+        
+        # Preserve all editable data from tables before clearing
+        preserved_cargo_selections: Dict[int, str] = {}  # pen_id -> cargo_name
+        preserved_head_counts: Dict[int, int] = {}  # pen_id -> head_count
+        preserved_tank_weights: Dict[int, float] = {}  # tank_id -> weight_mt
+        
+        # Preserve livestock pen data (cargo and head counts)
+        for deck_num in range(1, 9):
+            tab_name = f"Livestock-DK{deck_num}"
+            table = self._table_widgets.get(tab_name)
+            if table:
+                for row in range(table.rowCount()):
+                    name_item = table.item(row, 0)
+                    if not name_item:
+                        continue
+                    pen_id = name_item.data(Qt.ItemDataRole.UserRole)
+                    if pen_id is None:
+                        continue
+                    
+                    # Get cargo selection from combo box (column 1)
+                    cargo_combo = table.cellWidget(row, 1)
+                    if isinstance(cargo_combo, QComboBox):
+                        cargo_text = cargo_combo.currentText()
+                        if cargo_text:
+                            preserved_cargo_selections[pen_id] = cargo_text
+                    
+                    # Get head count (column 2 for decks 1-7, column 1 for deck 8)
+                    if deck_num == 8:
+                        head_item = table.item(row, 1)  # Quantity column
+                    else:
+                        head_item = table.item(row, 2)  # # Head column
+                    if head_item:
+                        try:
+                            head_count = int(float(head_item.text()))
+                            if head_count > 0:
+                                preserved_head_counts[pen_id] = head_count
+                        except (ValueError, TypeError):
+                            pass
+        
+        # Preserve tank weights from all tank category tables
+        tank_category_tabs = [
+            "Water Ballast", "Fresh Water", "Heavy Fuel Oil", "Diesel Oil",
+            "Lube Oil", "Misc. Tanks", "Dung", "Fodder Hold", "Spaces"
+        ]
+        for tab_name in tank_category_tabs:
+            table = self._table_widgets.get(tab_name)
+            if table:
+                for row in range(table.rowCount()):
+                    name_item = table.item(row, self.TANK_COL_NAME)
+                    if not name_item:
+                        continue
+                    tank_id = name_item.data(Qt.ItemDataRole.UserRole)
+                    if tank_id is None:
+                        continue
+                    
+                    # Get weight (column 8)
+                    weight_item = table.item(row, self.TANK_COL_WEIGHT)
+                    if weight_item:
+                        try:
+                            weight_mt = float(weight_item.text())
+                            if weight_mt > 0:
+                                preserved_tank_weights[tank_id] = weight_mt
+                        except (ValueError, TypeError):
+                            pass
+        
         # Clear all tables first
         for table in self._table_widgets.values():
             try:
@@ -588,6 +653,8 @@ class ConditionTableWidget(QWidget):
                     cargo_name=cargo_name,
                     cargo_type_names=cargo_type_names,
                     cargo_types=self._current_cargo_types,
+                    preserved_cargo_selections=preserved_cargo_selections,
+                    preserved_head_counts=preserved_head_counts,
                 )
             else:
                 self._populate_livestock_tab(
@@ -597,10 +664,12 @@ class ConditionTableWidget(QWidget):
                     cargo_name=cargo_name,
                     cargo_type_names=cargo_type_names,
                     cargo_types=self._current_cargo_types,
+                    preserved_cargo_selections=preserved_cargo_selections,
+                    preserved_head_counts=preserved_head_counts,
                 )
             
         # Update tank category tabs
-        self._populate_tank_tabs(tanks, tank_volumes)
+        self._populate_tank_tabs(tanks, tank_volumes, preserved_tank_weights=preserved_tank_weights)
         
         # Update "All" tab
         self._populate_all_tab(
@@ -610,6 +679,8 @@ class ConditionTableWidget(QWidget):
             cargo_name=cargo_name,
             cargo_type_names=cargo_type_names,
             cargo_types=self._current_cargo_types,
+            preserved_cargo_selections=preserved_cargo_selections,
+            preserved_head_counts=preserved_head_counts,
         )
         
         # Refresh cargo dropdowns in header combos
@@ -626,6 +697,8 @@ class ConditionTableWidget(QWidget):
         cargo_name: str = "Livestock",
         cargo_type_names: Optional[List[str]] = None,
         cargo_types: Optional[List[Any]] = None,
+        preserved_cargo_selections: Optional[Dict[int, str]] = None,
+        preserved_head_counts: Optional[Dict[int, int]] = None,
     ) -> None:
         """Populate a livestock deck tab with pens for that deck. Cargo dropdown + dynamic recalc when Cargo or # Head changes."""
         table = self._table_widgets.get(tab_name)
@@ -649,7 +722,12 @@ class ConditionTableWidget(QWidget):
             row = table.rowCount()
             table.insertRow(row)
             
-            initial_heads = pen_loadings.get(pen.id or -1, 0)
+            # Check for preserved head count first, then use pen_loadings
+            pen_id = pen.id or -1
+            if preserved_head_counts and pen_id in preserved_head_counts:
+                initial_heads = preserved_head_counts[pen_id]
+            else:
+                initial_heads = pen_loadings.get(pen_id, 0)
             
             if area_per_head_from_cargo is not None:
                 area_per_head = area_per_head_from_cargo
@@ -669,10 +747,21 @@ class ConditionTableWidget(QWidget):
             # Calculate maximum heads based on capacity constraint
             max_heads_by_capacity = int(pen.capacity_head) if pen.capacity_head > 0 else max_heads_by_area
             
-            # Set heads to maximum ONLY if cargo is not blank
+            # Use preserved head count if available, otherwise calculate based on cargo
             # If cargo is "-- Blank --", keep heads at 0 and set head capacity to 0
             # Check cargo_name from the function parameter
-            if cargo_name == "-- Blank --":
+            if preserved_head_counts and pen_id in preserved_head_counts:
+                # Use preserved head count
+                heads = preserved_head_counts[pen_id]
+                # Calculate area used based on preserved heads
+                if area_per_head > 0:
+                    area_used = heads * area_per_head
+                    area_used = min(area_used, pen.area_m2)  # Cap at total area
+                    head_capacity = int(pen.area_m2 / area_per_head) if area_per_head > 0 else 0
+                else:
+                    area_used = 0.0
+                    head_capacity = 0
+            elif cargo_name == "-- Blank --":
                 heads = 0
                 head_capacity = 0
                 area_used = 0.0
@@ -688,9 +777,9 @@ class ConditionTableWidget(QWidget):
                 else:
                     heads = initial_heads  # Fallback to initial value if no constraints
                 
-                # Calculate Used Area (will be Γëñ Total Area due to capping)
+                # Calculate Used Area (will be ≤ Total Area due to capping)
                 area_used = heads * area_per_head if heads > 0 else 0.0
-                # Ensure Used Area Γëñ Total Area (safety check)
+                # Ensure Used Area ≤ Total Area (safety check)
                 area_used = min(area_used, pen.area_m2)
                 
                 # Head Capacity = Total Area / Area per Head (max capacity based on area), floored to integer
@@ -721,7 +810,14 @@ class ConditionTableWidget(QWidget):
                 # Add blank cargo option first, then regular cargo types
                 all_cargo_names = ["-- Blank --"] + cargo_type_names
                 combo.addItems(all_cargo_names)
-                if cargo_name in all_cargo_names:
+                # Check if this pen has a preserved cargo selection
+                pen_id = pen.id or -1
+                preserved_cargo = None
+                if preserved_cargo_selections:
+                    preserved_cargo = preserved_cargo_selections.get(pen_id)
+                if preserved_cargo and preserved_cargo in all_cargo_names:
+                    combo.setCurrentText(preserved_cargo)
+                elif cargo_name in all_cargo_names:
                     combo.setCurrentText(cargo_name)
                 elif all_cargo_names:
                     combo.setCurrentIndex(0)
@@ -815,6 +911,8 @@ class ConditionTableWidget(QWidget):
         cargo_name: str = "Livestock",
         cargo_type_names: Optional[List[str]] = None,
         cargo_types: Optional[List[Any]] = None,
+        preserved_cargo_selections: Optional[Dict[int, str]] = None,
+        preserved_head_counts: Optional[Dict[int, int]] = None,
     ) -> None:
         """Populate deck 8 (H) tab with columns: Name, Quantity, Weight, Total Weight, LCG, VCG, TCG, LS Moment m-MT."""
         table = self._table_widgets.get(tab_name)
@@ -833,8 +931,14 @@ class ConditionTableWidget(QWidget):
         for pen in deck_pens:
             row = table.rowCount()
             table.insertRow(row)
-            # For deck 8: use pen_loadings if available, otherwise use capacity_head (for user-entered pens)
-            heads = pen_loadings.get(pen.id or -1, 0) if pen.id and pen.id in pen_loadings else (pen.capacity_head if pen.capacity_head > 0 else 0)
+            # For deck 8: use preserved head count if available, otherwise pen_loadings, otherwise capacity_head
+            pen_id = pen.id or -1
+            if preserved_head_counts and pen_id in preserved_head_counts:
+                heads = preserved_head_counts[pen_id]
+            elif pen.id and pen.id in pen_loadings:
+                heads = pen_loadings.get(pen_id, 0)
+            else:
+                heads = pen.capacity_head if pen.capacity_head > 0 else 0
             weight_mt = heads * mass_per_head_t
             vcg_display = pen.vcg_m + vcg_from_deck
             lcg_moment = weight_mt * pen.lcg_m
@@ -1499,6 +1603,7 @@ class ConditionTableWidget(QWidget):
         self,
         tanks: List[Tank],
         tank_volumes: Dict[int, float],
+        preserved_tank_weights: Optional[Dict[int, float]] = None,
     ) -> None:
         """Populate each tank category tab by tank category (Storing dropdown in Ship Manager)."""
         for cat in TANK_CATEGORY_NAMES:
@@ -1527,12 +1632,24 @@ class ConditionTableWidget(QWidget):
                 row = table.rowCount()
                 table.insertRow(row)
                 # Initial: get volume from tank_volumes, calculate weight = volume * density
-                vol = tank_volumes.get(tank.id or -1, 0.0)
-                dens = getattr(tank, "density_t_per_m3", 1.025) or 1.025
-                # Constraint: Volume cannot exceed Capacity
-                if tank.capacity_m3 > 0 and vol > tank.capacity_m3:
-                    vol = tank.capacity_m3
-                weight_mt = vol * dens if vol > 0 else 0.0
+                # But use preserved weight if available
+                tank_id = tank.id or -1
+                if preserved_tank_weights and tank_id in preserved_tank_weights:
+                    # Use preserved weight and calculate volume from it
+                    weight_mt = preserved_tank_weights[tank_id]
+                    dens = getattr(tank, "density_t_per_m3", 1.025) or 1.025
+                    vol = weight_mt / dens if dens > 0 else 0.0
+                    # Constraint: Volume cannot exceed Capacity
+                    if tank.capacity_m3 > 0 and vol > tank.capacity_m3:
+                        vol = tank.capacity_m3
+                        weight_mt = vol * dens  # Recalculate weight if volume was capped
+                else:
+                    vol = tank_volumes.get(tank_id, 0.0)
+                    dens = getattr(tank, "density_t_per_m3", 1.025) or 1.025
+                    # Constraint: Volume cannot exceed Capacity
+                    if tank.capacity_m3 > 0 and vol > tank.capacity_m3:
+                        vol = tank.capacity_m3
+                    weight_mt = vol * dens if vol > 0 else 0.0
                 # Calculate %Full from volume and capacity
                 fill_pct = (vol / tank.capacity_m3 * 100.0) if tank.capacity_m3 > 0 else 0.0
                 total_cap += tank.capacity_m3
@@ -1772,6 +1889,8 @@ class ConditionTableWidget(QWidget):
         cargo_name: str = "Livestock",
         cargo_type_names: Optional[List[str]] = None,
         cargo_types: Optional[List[Any]] = None,
+        preserved_cargo_selections: Optional[Dict[int, str]] = None,
+        preserved_head_counts: Optional[Dict[int, int]] = None,
     ) -> None:
         """Populate the 'All' tab with everything. Cargo dropdown + dynamic recalc for pen rows."""
         all_table = self._table_widgets.get("All")

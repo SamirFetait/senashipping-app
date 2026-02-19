@@ -166,7 +166,10 @@ class ResultsPanel(QWidget):
         has_errors = getattr(validation, "has_errors", False) if validation else False
         has_warnings = getattr(validation, "has_warnings", False) if validation else False
         
-        if has_errors:
+        # Check for zero displacement (no cargo loaded)
+        if results.displacement_t < 0.001:  # Essentially zero
+            self._calc_status_label.set_status("NO CARGO", False)
+        elif has_errors:
             self._calc_status_label.set_status("FAILED", False)
         elif has_warnings:
             self._calc_status_label.set_status("WARNING", False)
