@@ -1,0 +1,58 @@
+What the app needs for your targets
+
+1. Core hydrostatic and stability calculations
+Hydrostatic tables (real data)
+Add a hydrostatic table model and usage: draft → displacement, KB, LCB, LCF, MTC, and ideally KM (and BM if needed).
+Use interpolation by draft (and trim if you support it) instead of relying only on displacement_to_draft, compute_kb, compute_bm_t for everything.
+GZ curves
+Implement actual GZ(φ) (righting lever vs heel angle), e.g. from cross curves of stability or from KM and KG (and possibly free surface).
+Add GZ criteria: e.g. area 0°–30°, 0°–40°, 30°–40°, max GZ, angle of max GZ, 30° GZ, so you can replace the current “GZ OK” surrogate with rule-based checks.
+Free surface effect
+Optionally refine with proper i_t (transverse second moment of free surface) per tank and standard formula FSC = ρ·i_t / Δ (or per-tank contribution), instead of only the current empirical factor.
+KM
+With tables: KM from table (or derived from table data). Without: keep current KM = KB + BM; ensure it’s clearly defined in one place (e.g. one “hydrostatic calculator”).
+
+2. Clear domain models
+Vessel
+Keep/extend Ship and link it to a hydrostatic dataset (e.g. HydrostaticTable or “curve set” per ship).
+Hydrostatic tables
+Introduce a clear model for hydrostatic data: e.g. table rows keyed by draft (and trim if needed) with displacement, KB, LCB, LCF, MTC, KM, etc., and a small layer that performs interpolation and returns a single “hydrostatic state” for a given draft/trim.
+Tanks / weights
+Tanks and pens are already modeled. For a cleaner API, consider a single “weight group” or “weight item” abstraction (mass + VCG, LCG, TCG) so stability and GZ see one list of weights (tanks, pens, fixed weights) instead of separate collections.
+
+3. Chapter-based calculation modules (aligned with “the book”)
+Today everything lives in flat services (hydrostatics, stability_service, longitudinal_strength, ancillary_calculations, validation).
+To align with a book (e.g. Barrass, Rawson/Tupper, or your course text):
+Add a calculations (or book) package with one module per chapter, e.g.:
+chapter_3_hydrostatics – draft, displacement, KB, LCB, LCF, MTC, use of hydrostatic table.
+chapter_4_stability – KG, GM, KM, free surface, GZ concepts.
+chapter_5_gz_curves – GZ(φ), cross curves, criteria.
+Implement (or delegate to) the formulas and steps from the book in these modules so the code mirrors the chapter structure and is easy to teach/audit.
+
+4. Clean API (StabilityAPI) for CLI / GUI / simulation
+Add a single entry point used by CLI, GUI, and simulation, e.g.:
+Inputs: vessel (ship + hydrostatic data), tanks (with fill levels), weights (pens + any fixed weights), options (density, cargo density, etc.).
+Outputs: condition results (displacement, draft, trim, KG, KM, GM, optional GZ curve), validation result (with effective GM after free surface), and criteria (including GZ criteria).
+Implement this as a facade (e.g. StabilityAPI class or compute_stability(...) in a dedicated api module) that:
+Uses your hydrostatic and stability calculators (and, when you have them, chapter modules).
+Does not depend on DB or GUI; only on domain models and calculation classes.
+Is the only place the rest of the app (CLI, GUI, simulation) calls for “full stability”.
+
+5. Unit-testable, stateless calculation classes
+Keep or introduce stateless calculators that take plain inputs and return results (no DB, no GUI):
+HydrostaticCalculator – input: draft (and trim if needed) + hydrostatic table or ship dimensions; output: displacement, KB, LCB, LCF, MTC, KM (and BM if needed).
+StabilityCalculator – input: total mass, VCG/LCG/TCG moments (or list of weight items), hydrostatic state; output: KG, GM, trim, draft ends, optional heel.
+FreeSurfaceCalculator – input: list of tanks with fill and geometry (or i_t); output: FSC (or per-tank contribution).
+GZCurveCalculator – input: displacement, KG, KM (and cross curves or table if used), FSC; output: GZ(φ) and/or summary (max GZ, angles, areas).
+Keep these classes pure: same inputs ⇒ same outputs; no globals or mutable shared state. Then:
+StabilityAPI (or the facade) composes these classes.
+Unit tests feed known inputs and assert on outputs (including with hydrostatic table fixtures and, later, GZ fixtures).
+Suggested order of work
+Domain: Add a HydrostaticTable (or similar) model and a WeightItem-style abstraction if you want one unified weight list.
+Calculations: Implement HydrostaticCalculator (with table interpolation) and keep StabilityCalculator-style logic stateless (refactor existing functions into these if helpful).
+GZ: Implement GZCurveCalculator and GZ criteria; plug into validation/criteria.
+Free surface: Optionally refine with i_t and standard FSC formula.
+Structure: Add chapter-based modules that wrap or call these calculators and mirror the book.
+API: Add StabilityAPI (or single facade) that uses the calculators and chapter modules and is the sole entry point for CLI/GUI/simulation.
+Tests: Add/expand unit tests for each calculator and for the API with fixed inputs and expected GM/KG/KM/GZ.
+If you tell me which part you want to do first (e.g. “hydrostatic table model + HydrostaticCalculator” or “StabilityAPI facade”), I can outline concrete classes and function signatures and where to put them in your repo.
