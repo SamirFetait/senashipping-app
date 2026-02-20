@@ -54,8 +54,9 @@ class MainWindow(QMainWindow):
     def __init__(self, settings: Settings, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._settings = settings
-        self.setWindowTitle("Sena Marine for Livestock Carriers")
-        self.resize(1400, 900)
+        self.setWindowTitle("Sena Shipping for Livestock Carriers")
+        self.setMinimumSize(1200, 800)
+        self.showMaximized()
         self.setWindowIcon(self.style().standardIcon(getattr(QStyle.StandardPixmap, "SP_ComputerIcon")))
 
         self._stack = QStackedWidget(self)
@@ -66,7 +67,7 @@ class MainWindow(QMainWindow):
 
         # Track navigation actions for checked state
         self._nav_actions: dict[int, QAction] = {}
-        
+
         # Track current file path for save
         self._current_file_path: Path | None = None
 
@@ -479,11 +480,11 @@ class MainWindow(QMainWindow):
         help_menu.addAction(show_program_log_action)
 
         help_menu.addSeparator()
-        
+
         about_action = QAction("&About senashipping", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
-        
+
         # Apply modern styling to main window
         self.setStyleSheet("""
             QMainWindow {
@@ -631,7 +632,7 @@ class MainWindow(QMainWindow):
     def _switch_page(self, index: int, status_message: str) -> None:
         self._stack.setCurrentIndex(index)
         self._status_bar.showMessage(status_message)
-        
+
         # Update toolbar checked state (only Loading Condition / Results have nav buttons)
         for idx, action in self._nav_actions.items():
             action.setChecked(idx == index)
@@ -720,11 +721,11 @@ class MainWindow(QMainWindow):
                 self._on_save()
             elif reply == QMessageBox.StandardButton.Cancel:
                 return
-        
+
         # Switch to condition editor if not already there
         if self._stack.currentIndex() != self._page_indexes.condition_editor:
             self._switch_page(self._page_indexes.condition_editor, "Loading Condition")
-        
+
         # Create new condition
         current_widget = self._stack.currentWidget()
         if isinstance(current_widget, ConditionEditorView):
@@ -734,7 +735,7 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage("New condition created")
         else:
             self._status_bar.showMessage("Switch to Loading Condition view first")
-            
+
     def _on_open_condition(self) -> None:
         """Handle open condition action from toolbar - opens file dialog."""
         # Ask if user wants to save current condition
@@ -749,7 +750,7 @@ class MainWindow(QMainWindow):
                 self._on_save()
             elif reply == QMessageBox.StandardButton.Cancel:
                 return
-        
+
         # Open file dialog
         file_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -757,34 +758,34 @@ class MainWindow(QMainWindow):
             str(Path.home()),
             "senashipping Files (*.senashipping);;JSON Files (*.json);;All Files (*)",
         )
-        
+
         if not file_path:
             return
-            
+
         try:
             condition = load_condition_from_file(Path(file_path))
-            
+
             # Switch to condition editor
             if self._stack.currentIndex() != self._page_indexes.condition_editor:
                 self._switch_page(self._page_indexes.condition_editor, "Loading Condition")
-            
+
             current_widget = self._stack.currentWidget()
             if isinstance(current_widget, ConditionEditorView):
                 # Load condition into editor
                 self._current_file_path = Path(file_path)
                 self.setWindowTitle(f"Sena Marine for Livestock Carriers - {Path(file_path).name}")
-                
+
                 # Set condition name and cargo type (single-ship: user sees cargo type)
                 current_widget._condition_name_edit.setText(condition.name)
                 current_widget._set_cargo_type_text(condition.name)
-                
+
                 # Load condition data into editor
                 current_widget._current_condition = condition
-                
+
                 # Load tank volumes and pen loadings
                 if current_widget._current_ship:
                     current_widget._set_current_ship(current_widget._current_ship)
-                    
+
                     # Update tank table with loaded volumes
                     if condition.tank_volumes_m3 and database.SessionLocal:
                         with database.SessionLocal() as db:
@@ -792,7 +793,7 @@ class MainWindow(QMainWindow):
                             cond_service = ConditionService(db)
                             tanks = cond_service.get_tanks_for_ship(current_widget._current_ship.id)
                             tank_by_id = {t.id: t for t in tanks}
-                            
+
                             # Update fill percentages in tank table
                             for row in range(current_widget._tank_table.rowCount()):
                                 name_item = current_widget._tank_table.item(row, 0)
@@ -806,7 +807,7 @@ class MainWindow(QMainWindow):
                                             fill_item = current_widget._tank_table.item(row, 2)
                                             if fill_item:
                                                 fill_item.setText(f"{fill_pct:.1f}")
-                    
+
                     # Update pen table with loaded head counts
                     if condition.pen_loadings:
                         pens = []
@@ -815,7 +816,7 @@ class MainWindow(QMainWindow):
                                 from ..services.condition_service import ConditionService
                                 cond_service = ConditionService(db)
                                 pens = cond_service.get_pens_for_ship(current_widget._current_ship.id)
-                        
+
                         for row in range(current_widget._pen_table.rowCount()):
                             name_item = current_widget._pen_table.item(row, 0)
                             if name_item:
@@ -825,7 +826,7 @@ class MainWindow(QMainWindow):
                                     head_item = current_widget._pen_table.item(row, 3)
                                     if head_item:
                                         head_item.setText(str(heads))
-                    
+
                     # Update condition table
                     pens = []
                     tanks = []
@@ -835,17 +836,17 @@ class MainWindow(QMainWindow):
                             cond_service = ConditionService(db)
                             pens = cond_service.get_pens_for_ship(current_widget._current_ship.id)
                             tanks = cond_service.get_tanks_for_ship(current_widget._current_ship.id)
-                    
+
                     current_widget._update_condition_table(
                         pens, tanks,
                         condition.pen_loadings or {},
                         condition.tank_volumes_m3 or {}
                     )
-                
+
                 self._status_bar.showMessage(f"Loaded condition from {Path(file_path).name}", 3000)
             else:
                 self._status_bar.showMessage("Failed to load condition")
-                
+
         except Exception as e:
             QMessageBox.critical(
                 self,
@@ -853,7 +854,7 @@ class MainWindow(QMainWindow):
                 f"Failed to open condition file:\n{str(e)}"
             )
             self._status_bar.showMessage("Failed to open file", 3000)
-        
+
     def _on_save(self) -> None:
         """Handle save action from toolbar."""
         current_widget = self._stack.currentWidget()
@@ -866,14 +867,14 @@ class MainWindow(QMainWindow):
                 self._on_save_as()
         else:
             self._status_bar.showMessage("Switch to Loading Condition view to save")
-            
+
     def _on_save_as(self) -> None:
         """Handle save as action - shows file dialog."""
         current_widget = self._stack.currentWidget()
         if not isinstance(current_widget, ConditionEditorView):
             self._status_bar.showMessage("Switch to Loading Condition view to save")
             return
-            
+
         # Show save dialog
         file_path, _ = QFileDialog.getSaveFileName(
             self,
@@ -881,21 +882,21 @@ class MainWindow(QMainWindow):
             str(self._current_file_path or Path.home() / "condition.senashipping"),
             "senashipping Files (*.senashipping);;JSON Files (*.json);;All Files (*)",
         )
-        
+
         if not file_path:
             return
-            
+
         # Ensure .senashipping extension if not provided
         if not file_path.endswith(('.senashipping', '.json')):
             file_path += '.senashipping'
-            
+
         self._save_to_file(Path(file_path), current_widget)
-        
+
     def _save_to_file(self, file_path: Path, condition_widget: ConditionEditorView) -> None:
         """Save condition to file."""
         # Get or create condition from current state
         condition = condition_widget._current_condition
-        
+
         if not condition:
             # Create condition from current form state (single-ship: name = cargo type)
             from ..models import LoadingCondition
@@ -904,7 +905,7 @@ class MainWindow(QMainWindow):
                 voyage_id=condition_widget._current_voyage.id if condition_widget._current_voyage else None,
                 name=condition_name,
             )
-            
+
             # Extract tank volumes from table
             tank_volumes: Dict[int, float] = {}
             if condition_widget._current_ship and database.SessionLocal:
@@ -913,7 +914,7 @@ class MainWindow(QMainWindow):
                     cond_service = ConditionService(db)
                     tanks = cond_service.get_tanks_for_ship(condition_widget._current_ship.id)
                     tank_by_id = {t.id: t for t in tanks}
-                    
+
                     for row in range(condition_widget._tank_table.rowCount()):
                         name_item = condition_widget._tank_table.item(row, 0)
                         fill_item = condition_widget._tank_table.item(row, 2)
@@ -928,7 +929,7 @@ class MainWindow(QMainWindow):
                                         tank_volumes[int(tank_id)] = vol
                                 except (ValueError, TypeError):
                                     pass
-            
+
             # Extract pen loadings from table
             pen_loadings: Dict[int, int] = {}
             for row in range(condition_widget._pen_table.rowCount()):
@@ -943,10 +944,10 @@ class MainWindow(QMainWindow):
                                 pen_loadings[int(pen_id)] = heads
                         except (ValueError, TypeError):
                             pass
-            
+
             condition.tank_volumes_m3 = tank_volumes
             condition.pen_loadings = pen_loadings
-            
+
         try:
             save_condition_to_file(file_path, condition)
             self._current_file_path = file_path
@@ -959,7 +960,7 @@ class MainWindow(QMainWindow):
                 f"Failed to save condition file:\n{str(e)}"
             )
             self._status_bar.showMessage("Failed to save file", 3000)
-            
+
     def _on_import_excel(self) -> None:
         """Handle import from Excel action."""
         # Open file dialog for Excel import
@@ -969,10 +970,10 @@ class MainWindow(QMainWindow):
             str(Path.home()),
             "Excel Files (*.xlsx *.xls);;All Files (*)",
         )
-        
+
         if not file_path:
             return
-            
+
         try:
             # TODO: Implement Excel import logic
             # For now, show a message
@@ -989,7 +990,7 @@ class MainWindow(QMainWindow):
                 "Import Error",
                 f"Failed to import Excel file:\n{str(e)}"
             )
-            
+
     def _on_export_excel(self) -> None:
         """Handle export to Excel action."""
         # Check if we have results to export
@@ -1003,7 +1004,7 @@ class MainWindow(QMainWindow):
             if self._stack.currentIndex() != self._page_indexes.condition_editor:
                 self._switch_page(self._page_indexes.condition_editor, "Loading Condition")
             return
-            
+
         # Open file dialog for Excel export
         file_path, _ = QFileDialog.getSaveFileName(
             self,
@@ -1011,19 +1012,19 @@ class MainWindow(QMainWindow):
             str(Path.home() / "condition_export.xlsx"),
             "Excel Files (*.xlsx);;All Files (*)",
         )
-        
+
         if not file_path:
             return
-            
+
         # Ensure .xlsx extension
         if not file_path.endswith('.xlsx'):
             file_path += '.xlsx'
-            
+
         try:
             # Switch to results view to use its export method
             if self._stack.currentIndex() != self._page_indexes.results:
                 self._switch_page(self._page_indexes.results, "Results")
-            
+
             # Use results view export method
             self._results_view._on_export_excel()
             self._status_bar.showMessage(f"Exported to {Path(file_path).name}", 3000)
@@ -1033,7 +1034,7 @@ class MainWindow(QMainWindow):
                 "Export Error",
                 f"Failed to export Excel file:\n{str(e)}"
             )
-            
+
     def _on_print_export(self) -> None:
         """Handle print/export action from toolbar."""
         current_widget = self._stack.currentWidget()
@@ -1065,7 +1066,7 @@ class MainWindow(QMainWindow):
         # Switch to condition editor if not already there
         if self._stack.currentIndex() != self._page_indexes.condition_editor:
             self._switch_page(self._page_indexes.condition_editor, "Loading Condition")
-            
+
         current_widget = self._stack.currentWidget()
         if isinstance(current_widget, ConditionEditorView):
             if current_widget.compute_condition():
@@ -1076,7 +1077,7 @@ class MainWindow(QMainWindow):
                 self._status_bar.showMessage("Computation failed - check inputs", 3000)
         else:
             self._status_bar.showMessage("Switch to Loading Condition view first")
-            
+
     # def _on_zoom_in(self) -> None:
     #     """Handle zoom in action from toolbar."""
     #     current_widget = self._stack.currentWidget()
@@ -1085,7 +1086,7 @@ class MainWindow(QMainWindow):
     #         self._status_bar.showMessage("Zoomed in", 1000)
     #     else:
     #         self._status_bar.showMessage("Zoom available in Loading Condition view")
-            
+
     # def _on_zoom_out(self) -> None:
     #     """Handle zoom out action from toolbar."""
     #     current_widget = self._stack.currentWidget()
@@ -1094,7 +1095,7 @@ class MainWindow(QMainWindow):
     #         self._status_bar.showMessage("Zoomed out", 1000)
     #     else:
     #         self._status_bar.showMessage("Zoom available in Loading Condition view")
-            
+
     # def _on_fit_to_view(self) -> None:
     #     """Handle fit to view action from toolbar."""
     #     current_widget = self._stack.currentWidget()
@@ -1129,4 +1130,3 @@ class MainWindow(QMainWindow):
             "<p>Maritime loading condition calculator for livestock carriers.</p>"
             "<p>&copy; 2026 Sena Marine</p>"
         )
-
