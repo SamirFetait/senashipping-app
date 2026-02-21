@@ -561,3 +561,6 @@ vtkWin32OpenGLRenderWindow (0000026071B9FF10): wglMakeCurrent failed in MakeCurr
 vtkWin32OpenGLRenderWindow (0000026071B9FF10): wglMakeCurrent failed in Clean(), error: 2004
 2026-02-21 14:31:50,353 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
 2026-02-21 14:34:22,058 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-21 23:49:57,109 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-21 23:54:07,803 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 00:01:34,467 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
