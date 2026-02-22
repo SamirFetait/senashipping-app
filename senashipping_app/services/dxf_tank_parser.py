@@ -41,17 +41,20 @@ def _polygon_area_and_centroid(points: List[Tuple[float, float]]) -> Tuple[float
 
 def _get_points(entity: Any) -> List[Tuple[float, float]] | None:
     """Get 2D points from LWPOLYLINE or POLYLINE. Y flipped to match Qt (y up)."""
+    et = entity.dxftype()
     try:
-        pts = list(entity.get_points())
+        if et == "LWPOLYLINE":
+            with entity.points("xy") as pts:
+                raw = [(float(p[0]), float(p[1])) for p in pts]
+        elif et == "POLYLINE":
+            raw = [(float(p[0]), float(p[1])) for p in entity.points()]
+        else:
+            return None
     except Exception:
         return None
-    if len(pts) < 3:
+    if len(raw) < 3:
         return None
-    out: List[Tuple[float, float]] = []
-    for p in pts:
-        x = p[0] if hasattr(p, "__getitem__") else getattr(p, "x", 0.0)
-        y = p[1] if hasattr(p, "__getitem__") else getattr(p, "y", 0.0)
-        out.append((float(x), -float(y)))
+    out: List[Tuple[float, float]] = [(x, -y) for x, y in raw]
     return out
 
 

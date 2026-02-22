@@ -70,7 +70,12 @@ def _load_dxf_into_scene(dxf_path: Path, scene: QGraphicsScene) -> bool:
             drew_anything = True
         elif et in ("LWPOLYLINE", "POLYLINE"):
             try:
-                points = [(p[0], p[1]) for p in e.get_points()]  # type: ignore[attr-defined]
+                if et == "LWPOLYLINE":
+                    with e.points("xy") as pts:
+                        points = [(float(p[0]), float(p[1])) for p in pts]
+                else:
+                    # POLYLINE (heavy): .points() returns Vec3 iterator
+                    points = [(float(p[0]), float(p[1])) for p in e.points()]
             except Exception:
                 return
             if len(points) >= 2:
@@ -82,7 +87,8 @@ def _load_dxf_into_scene(dxf_path: Path, scene: QGraphicsScene) -> bool:
                         first = False
                     else:
                         path.lineTo(x, -y)
-                if getattr(e, "closed", False):
+                closed = getattr(e, "closed", getattr(e, "is_closed", False))
+                if closed:
                     path.closeSubpath()
                 scene.addPath(path, pen)
                 drew_anything = True

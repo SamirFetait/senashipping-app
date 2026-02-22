@@ -586,3 +586,33 @@ vtkWin32OpenGLRenderWindow (0000026071B9FF10): wglMakeCurrent failed in Clean(),
 2026-02-22 15:54:34,011 [INFO] senashipping_app.config.settings - Logging initialized. DB at D:\New folder\Sena\Project\senashipping-app\senashipping_app_data\senashipping.db
 2026-02-22 15:59:00,045 [INFO] senashipping_app.config.settings - Logging initialized. DB at D:\New folder\Sena\Project\senashipping-app\senashipping_app_data\senashipping.db
 2026-02-22 16:05:02,786 [INFO] senashipping_app.config.settings - Logging initialized. DB at D:\New folder\Sena\Project\senashipping-app\senashipping_app_data\senashipping.db
+2026-02-22 18:05:55,385 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 18:08:05,868 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 18:13:22,797 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 18:35:33,952 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 18:46:08,273 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 18:50:33,190 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 18:58:23,708 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 19:04:58,015 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 19:09:18,487 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 19:12:36,622 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 19:20:21,693 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 19:26:34,932 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 19:28:26,417 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 19:31:52,455 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 19:39:03,777 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 19:43:28,110 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 19:47:32,838 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 19:50:37,420 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 19:55:48,618 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 19:59:19,662 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 20:31:13,414 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 20:38:25,038 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 20:42:20,907 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 20:43:41,771 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 20:46:44,052 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 20:50:04,432 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 20:58:54,323 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 21:01:41,775 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 21:02:02,041 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db
+2026-02-22 21:07:08,163 [INFO] senashipping_app.config.settings - Logging initialized. DB at E:\Python\Sena\senashipping_app\senashipping_app_data\senashipping.db

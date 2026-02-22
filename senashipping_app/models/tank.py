@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import List, Tuple
 
+# Minimum absolute area to treat polygon as non-degenerate in centroid calculation
+_POLYGON_AREA_EPS = 1e-12
+
 
 class TankType(Enum):
     CARGO = auto()
@@ -15,12 +18,14 @@ class TankType(Enum):
 
 @dataclass(slots=True)
 class TankSoundingRow:
-    """One row of a tank sounding table: volume and CoG (VCG, LCG, TCG) in metres."""
+    """One row of a tank sounding table: volume, CoG (VCG, LCG, TCG), and optional Ullage/FSM in metres."""
     sounding_m: float = 0.0
     volume_m3: float = 0.0
     vcg_m: float = 0.0
     lcg_m: float = 0.0
     tcg_m: float = 0.0
+    ullage_m: float = 0.0
+    fsm_mt: float = 0.0
 
 
 def polygon_centroid_2d(points: List[Tuple[float, float]]) -> Tuple[float, float]:
@@ -47,7 +52,7 @@ def polygon_centroid_2d(points: List[Tuple[float, float]]) -> Tuple[float, float
         cx += (xi + xj) * cross
         cy += (yi + yj) * cross
     area *= 0.5
-    if abs(area) < 1e-12:
+    if abs(area) < _POLYGON_AREA_EPS:
         return sum(p[0] for p in points) / n, sum(p[1] for p in points) / n
     cx /= 6.0 * area
     cy /= 6.0 * area

@@ -95,6 +95,10 @@ class ConditionTableWidget(QWidget):
         self._tank_cog_callback: Optional[Callable[[int, float], Optional[Tuple[float, float, float]]]] = None
         # Fallback when sounding returns None: (tank_id) -> (vcg_m, lcg_m, tcg_m) so VCG/LCG/TCG still update
         self._tank_default_cog_callback: Optional[Callable[[int], Tuple[float, float, float]]] = None
+        # (tank_id, volume_m3) -> (ullage_m, fsm_mt) so UII/Snd and FSt update from volume like VCG/LCG/TCG
+        self._tank_ullage_fsm_callback: Optional[Callable[[int, float], Tuple[Optional[float], Optional[float]]]] = None
+        # Ullage (m) and FSM (tonne.m) from Excel: tank_id -> (ullage_m, fsm_mt); fallback when callback returns None
+        self._tank_ullage_fsm: Dict[int, Tuple[float, float]] = {}
 
         self._create_tabs()
         
@@ -329,6 +333,10 @@ class ConditionTableWidget(QWidget):
     def set_tank_default_cog_callback(self, callback: Optional[Callable[[int], Tuple[float, float, float]]]) -> None:
         """Set fallback (tank_id) -> (vcg_m, lcg_m, tcg_m) when sounding returns None, so VCG/LCG/TCG still update when weight changes."""
         self._tank_default_cog_callback = callback
+
+    def set_tank_ullage_fsm_callback(self, callback: Optional[Callable[[int, float], Tuple[Optional[float], Optional[float]]]]) -> None:
+        """Set callback (tank_id, volume_m3) -> (ullage_m, fsm_mt) so UII/Snd and FSt update when volume changes, like VCG/LCG/TCG."""
+        self._tank_ullage_fsm_callback = callback
 
     def get_tank_volumes_from_tables(self) -> Dict[int, float]:
         """Read current Volume (m³) per tank from all tank category tables. Used so Compute/Save use the same volumes as shown (real volume → dynamic CG from sounding)."""
@@ -583,6 +591,7 @@ class ConditionTableWidget(QWidget):
         cargo_types: Optional[List[Any]] = None,
         ship_id: Optional[int] = None,
         default_cargo_name: Optional[str] = None,
+        tank_ullage_fsm: Optional[Dict[int, Tuple[float, float]]] = None,
     ) -> None:
         """
         Update all tables with current pens and tanks data.
@@ -710,8 +719,13 @@ class ConditionTableWidget(QWidget):
                     preserved_head_counts=preserved_head_counts,
                 )
             
-        # Update tank category tabs
-        self._populate_tank_tabs(tanks, tank_volumes, preserved_tank_weights=preserved_tank_weights)
+        # Update tank category tabs (store ullage/FSM so row recalc can re-apply when weight changes)
+        self._tank_ullage_fsm = tank_ullage_fsm or {}
+        self._populate_tank_tabs(
+            tanks, tank_volumes,
+            preserved_tank_weights=preserved_tank_weights,
+            tank_ullage_fsm=self._tank_ullage_fsm,
+        )
         
         # Update "All" tab
         self._populate_all_tab(
@@ -1642,8 +1656,12 @@ class ConditionTableWidget(QWidget):
         tanks: List[Tank],
         tank_volumes: Dict[int, float],
         preserved_tank_weights: Optional[Dict[int, float]] = None,
+        tank_ullage_fsm: Optional[Dict[int, Tuple[float, float]]] = None,
     ) -> None:
-        """Populate each tank category tab by tank category (Storing dropdown in Ship Manager)."""
+        """Populate each tank category tab by tank category (Storing dropdown in Ship Manager).
+        tank_ullage_fsm: tank_id -> (ullage_m, fsm_mt) from Excel for Ull/Snd and FSt columns.
+        """
+        tank_ullage_fsm = tank_ullage_fsm or {}
         for cat in TANK_CATEGORY_NAMES:
             table = self._table_widgets.get(cat)
             if not table:
@@ -1719,8 +1737,11 @@ class ConditionTableWidget(QWidget):
                 name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_NAME, name_item)
                 
-                # Ull/Snd (col 2) - optional, read-only
-                ull_item = QTableWidgetItem("")
+                # Ull/Snd (col 2) - from Excel Ullage (m) when available
+                tid_key = int(tank_id) if tank_id is not None else -1
+                ull_fsm = tank_ullage_fsm.get(tid_key, (None, None))
+                ull_m = ull_fsm[0] if ull_fsm and ull_fsm[0] is not None else None
+                ull_item = QTableWidgetItem(f"{ull_m:.3f}" if ull_m is not None else "")
                 ull_item.setFlags(ull_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_ULL_SND, ull_item)
                 
@@ -1730,19 +1751,19 @@ class ConditionTableWidget(QWidget):
                 table.setItem(row, self.TANK_COL_UTRIM, utrim_item)
                 
                 # Capacity (col 4) - from ship manager, read-only
-                cap_item = QTableWidgetItem(f"{tank.capacity_m3:.2f}")
+                cap_item = QTableWidgetItem(f"{tank.capacity_m3:.3f}")
                 cap_item.setFlags(cap_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_CAPACITY, cap_item)
                 
                 # %Full (col 5) - calculated from volume and capacity, read-only
-                fill_item = QTableWidgetItem(f"{fill_pct:.1f}")
+                fill_item = QTableWidgetItem(f"{fill_pct:.3f}")
                 fill_item.setFlags(fill_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_PCT_FULL, fill_item)
                 
                 # Volume (col 6) - calculated from weight and density, but capped at capacity, read-only
                 # Ensure volume doesn't exceed capacity
                 vol = min(vol, tank.capacity_m3) if tank.capacity_m3 > 0 else vol
-                vol_item = QTableWidgetItem(f"{vol:.2f}")
+                vol_item = QTableWidgetItem(f"{vol:.3f}")
                 vol_item.setFlags(vol_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_VOLUME, vol_item)
                 
@@ -1751,9 +1772,9 @@ class ConditionTableWidget(QWidget):
                 table.setItem(row, self.TANK_COL_DENS, dens_item)
                 
                 # Weight (col 8) - editable by user (only editable column)
-                weight_item = QTableWidgetItem(f"{weight_mt:.2f}")
+                weight_item = QTableWidgetItem(f"{weight_mt:.3f}")
                 table.setItem(row, self.TANK_COL_WEIGHT, weight_item)
-                
+
                 # VCG (col 9) - from ship manager or sounding table, read-only
                 vcg_item = QTableWidgetItem(f"{vcg:.3f}")
                 vcg_item.setFlags(vcg_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -1774,8 +1795,9 @@ class ConditionTableWidget(QWidget):
                 fsopt_item.setFlags(fsopt_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_FSOPT, fsopt_item)
                 
-                # FSt (col 13) - calculated, read-only
-                fst_item = QTableWidgetItem("")
+                # FSt (col 13) - from Excel FSM (tonne.m) when available
+                fsm_mt = ull_fsm[1] if ull_fsm and len(ull_fsm) > 1 and ull_fsm[1] is not None else None
+                fst_item = QTableWidgetItem(f"{fsm_mt:.3f}" if fsm_mt is not None else "")
                 fst_item.setFlags(fst_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_FST, fst_item)
             if cat_tanks:
@@ -1787,9 +1809,9 @@ class ConditionTableWidget(QWidget):
                           self.TANK_COL_DENS, self.TANK_COL_VCG, self.TANK_COL_LCG,
                           self.TANK_COL_TCG, self.TANK_COL_FSOPT, self.TANK_COL_FST):
                     table.setItem(row, c, QTableWidgetItem(""))
-                table.setItem(row, self.TANK_COL_CAPACITY, QTableWidgetItem(f"{total_cap:.2f}"))
-                table.setItem(row, self.TANK_COL_VOLUME, QTableWidgetItem(f"{total_vol:.2f}"))
-                table.setItem(row, self.TANK_COL_WEIGHT, QTableWidgetItem(f"{total_weight:.2f}"))
+                table.setItem(row, self.TANK_COL_CAPACITY, QTableWidgetItem(f"{total_cap:.3f}"))
+                table.setItem(row, self.TANK_COL_VOLUME, QTableWidgetItem(f"{total_vol:.3f}"))
+                table.setItem(row, self.TANK_COL_WEIGHT, QTableWidgetItem(f"{total_weight:.3f}"))
             # When Weight/Dens cell is edited or when you leave that cell (tab/click), recalc row
             table.itemChanged.connect(self._make_tank_item_changed(table))
             table.currentCellChanged.connect(
@@ -1881,26 +1903,26 @@ class ConditionTableWidget(QWidget):
             # Update Weight (col 8) if it was adjusted due to capacity constraint
             if weight_adjusted:
                 if table.item(row, self.TANK_COL_WEIGHT):
-                    table.item(row, self.TANK_COL_WEIGHT).setText(f"{weight_mt:.2f}")
+                    table.item(row, self.TANK_COL_WEIGHT).setText(f"{weight_mt:.3f}")
                 else:
-                    weight_item = QTableWidgetItem(f"{weight_mt:.2f}")
+                    weight_item = QTableWidgetItem(f"{weight_mt:.3f}")
                     table.setItem(row, self.TANK_COL_WEIGHT, weight_item)
             
             # Update Volume (col 6) - capped at capacity
             if table.item(row, self.TANK_COL_VOLUME):
-                table.item(row, self.TANK_COL_VOLUME).setText(f"{vol:.2f}")
+                table.item(row, self.TANK_COL_VOLUME).setText(f"{vol:.3f}")
             else:
-                vol_item = QTableWidgetItem(f"{vol:.2f}")
+                vol_item = QTableWidgetItem(f"{vol:.3f}")
                 vol_item.setFlags(vol_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_VOLUME, vol_item)
             # Update %Full (col 5)
             if table.item(row, self.TANK_COL_PCT_FULL):
-                table.item(row, self.TANK_COL_PCT_FULL).setText(f"{fill_pct:.1f}")
+                table.item(row, self.TANK_COL_PCT_FULL).setText(f"{fill_pct:.3f}")
             else:
-                fill_item = QTableWidgetItem(f"{fill_pct:.1f}")
+                fill_item = QTableWidgetItem(f"{fill_pct:.3f}")
                 fill_item.setFlags(fill_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_PCT_FULL, fill_item)
-            # Update VCG/LCG/TCG when weight/volume changed: sounding first, then tank default so cells always update
+            # On weight/volume change: update LCG, VCG, TCG (from sounding or tank default) and UII/Snd, FSt (from cache)
             tank_id_val = name_item.data(Qt.ItemDataRole.UserRole)
             tid = int(tank_id_val) if tank_id_val is not None else -1
             cog = None
@@ -1914,24 +1936,53 @@ class ConditionTableWidget(QWidget):
             if cog is None:
                 cog = (0.0, 0.0, 0.0)
             vcg, lcg, tcg = cog
-            if table.item(row, self.TANK_COL_VCG):
-                table.item(row, self.TANK_COL_VCG).setText(f"{vcg:.3f}")
+            # Always update VCG, LCG, TCG cells
+            vcg_item = table.item(row, self.TANK_COL_VCG)
+            if vcg_item:
+                vcg_item.setText(f"{vcg:.3f}")
             else:
                 vcg_item = QTableWidgetItem(f"{vcg:.3f}")
                 vcg_item.setFlags(vcg_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_VCG, vcg_item)
-            if table.item(row, self.TANK_COL_LCG):
-                table.item(row, self.TANK_COL_LCG).setText(f"{lcg:.3f}")
+            lcg_item = table.item(row, self.TANK_COL_LCG)
+            if lcg_item:
+                lcg_item.setText(f"{lcg:.3f}")
             else:
                 lcg_item = QTableWidgetItem(f"{lcg:.3f}")
                 lcg_item.setFlags(lcg_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_LCG, lcg_item)
-            if table.item(row, self.TANK_COL_TCG):
-                table.item(row, self.TANK_COL_TCG).setText(f"{tcg:.3f}")
+            tcg_item = table.item(row, self.TANK_COL_TCG)
+            if tcg_item:
+                tcg_item.setText(f"{tcg:.3f}")
             else:
                 tcg_item = QTableWidgetItem(f"{tcg:.3f}")
                 tcg_item.setFlags(tcg_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_TCG, tcg_item)
+            # Always update UII/Snd and FSt cells (from volume callback like VCG/LCG/TCG, else static cache)
+            ull, fst = None, None
+            if self._tank_ullage_fsm_callback and tid >= 0:
+                try:
+                    ull, fst = self._tank_ullage_fsm_callback(tid, vol)
+                except Exception:
+                    pass
+            if ull is None and fst is None:
+                ull_fsm = self._tank_ullage_fsm.get(tid, (None, None))
+                ull = ull_fsm[0] if ull_fsm and ull_fsm[0] is not None else None
+                fst = ull_fsm[1] if ull_fsm and len(ull_fsm) > 1 and ull_fsm[1] is not None else None
+            ull_item = table.item(row, self.TANK_COL_ULL_SND)
+            if ull_item:
+                ull_item.setText(f"{ull:.3f}" if ull is not None else "")
+            else:
+                ull_item = QTableWidgetItem(f"{ull:.3f}" if ull is not None else "")
+                ull_item.setFlags(ull_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row, self.TANK_COL_ULL_SND, ull_item)
+            fst_item = table.item(row, self.TANK_COL_FST)
+            if fst_item:
+                fst_item.setText(f"{fst:.3f}" if fst is not None else "")
+            else:
+                fst_item = QTableWidgetItem(f"{fst:.3f}" if fst is not None else "")
+                fst_item.setFlags(fst_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                table.setItem(row, self.TANK_COL_FST, fst_item)
             table.viewport().update()
             table.repaint()
             QApplication.processEvents()
@@ -1981,11 +2032,11 @@ class ConditionTableWidget(QWidget):
             except (TypeError, ValueError):
                 pass
         if table.item(tot_row, self.TANK_COL_CAPACITY):
-            table.item(tot_row, self.TANK_COL_CAPACITY).setText(f"{total_cap:.2f}")
+            table.item(tot_row, self.TANK_COL_CAPACITY).setText(f"{total_cap:.3f}")
         if table.item(tot_row, self.TANK_COL_VOLUME):
-            table.item(tot_row, self.TANK_COL_VOLUME).setText(f"{total_vol:.2f}")
+            table.item(tot_row, self.TANK_COL_VOLUME).setText(f"{total_vol:.3f}")
         if table.item(tot_row, self.TANK_COL_WEIGHT):
-            table.item(tot_row, self.TANK_COL_WEIGHT).setText(f"{total_weight:.2f}")
+            table.item(tot_row, self.TANK_COL_WEIGHT).setText(f"{total_weight:.3f}")
 
     def refresh_all_tank_cog_cells(self) -> None:
         """Refresh VCG/LCG/TCG for every tank row in every tank category table from current Volume. Call after update_data so all tabs show correct CoG."""
@@ -2027,6 +2078,30 @@ class ConditionTableWidget(QWidget):
                         table.item(row, self.TANK_COL_LCG).setText(f"{lcg:.3f}")
                     if table.item(row, self.TANK_COL_TCG):
                         table.item(row, self.TANK_COL_TCG).setText(f"{tcg:.3f}")
+                    ull, fst = None, None
+                    if self._tank_ullage_fsm_callback and tid >= 0:
+                        try:
+                            ull, fst = self._tank_ullage_fsm_callback(tid, vol)
+                        except Exception:
+                            pass
+                    if ull is None and fst is None:
+                        ull_fsm = self._tank_ullage_fsm.get(tid, (None, None))
+                        ull = ull_fsm[0] if ull_fsm and ull_fsm[0] is not None else None
+                        fst = ull_fsm[1] if ull_fsm and len(ull_fsm) > 1 and ull_fsm[1] is not None else None
+                    ull_item = table.item(row, self.TANK_COL_ULL_SND)
+                    if ull_item:
+                        ull_item.setText(f"{ull:.3f}" if ull is not None else "")
+                    else:
+                        ull_item = QTableWidgetItem(f"{ull:.3f}" if ull is not None else "")
+                        ull_item.setFlags(ull_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                        table.setItem(row, self.TANK_COL_ULL_SND, ull_item)
+                    fst_item = table.item(row, self.TANK_COL_FST)
+                    if fst_item:
+                        fst_item.setText(f"{fst:.3f}" if fst is not None else "")
+                    else:
+                        fst_item = QTableWidgetItem(f"{fst:.3f}" if fst is not None else "")
+                        fst_item.setFlags(fst_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                        table.setItem(row, self.TANK_COL_FST, fst_item)
                 finally:
                     self._skip_item_changed = False
 

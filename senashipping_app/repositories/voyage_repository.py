@@ -5,7 +5,7 @@ Repository for voyages and loading conditions.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from sqlalchemy import Integer, String, Float, Text, DateTime, ForeignKey
@@ -13,6 +13,11 @@ from sqlalchemy.orm import Mapped, mapped_column, Session
 
 from .database import Base
 from ..models import Voyage, LoadingCondition
+
+
+def _utc_now() -> datetime:
+    """Return current UTC time (timezone-aware). Replaces deprecated datetime.utcnow()."""
+    return datetime.now(timezone.utc)
 
 
 class VoyageORM(Base):
@@ -23,7 +28,7 @@ class VoyageORM(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     departure_port: Mapped[str] = mapped_column(String(128), default="")
     arrival_port: Mapped[str] = mapped_column(String(128), default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
 
 
 class LoadingConditionORM(Base):
@@ -40,7 +45,7 @@ class LoadingConditionORM(Base):
     draft_m: Mapped[float] = mapped_column(Float, default=0.0)
     trim_m: Mapped[float] = mapped_column(Float, default=0.0)
     gm_m: Mapped[float] = mapped_column(Float, default=0.0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
 
 
 class VoyageRepository:

@@ -7,11 +7,25 @@ User enters cargo type; tanks/pens and ship particulars are static.
 
 from __future__ import annotations
 
+import math
+import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
 # Project excels folder (sounding tables loaded automatically from here)
 _EXCELS_DIR = Path(__file__).resolve().parent.parent.parent / "excels"
+
+
+def _normalize_tank_name_for_match(name: str | None) -> str:
+    """Normalize tank name for matching Excel sheet/tank column to ship tank.
+    Collapses spaces, lowercases, removes periods so e.g. 'TK. 3' matches 'TK 3'.
+    """
+    if name is None:
+        return ""
+    s = (name or "").strip().lower()
+    s = re.sub(r"\s+", " ", s)
+    s = s.replace(".", "")
+    return s.strip()
 
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import QFileDialog
@@ -41,7 +55,7 @@ from ..services.condition_service import (
 )
 from ..services.voyage_service import VoyageService, VoyageValidationError
 from ..services.sounding_import import parse_sounding_file_all_tanks
-from ..services.sounding import interpolate_cog_from_volume
+from ..services.sounding import interpolate_cog_from_volume, interpolate_ullage_fsm_from_volume
 from ..utils.sorting import get_pen_sort_key, get_tank_sort_key
 from .deck_profile_widget import DeckProfileWidget
 from .results_panel import ResultsPanel
@@ -115,6 +129,8 @@ class ConditionEditorView(QWidget):
 
         # Sounding table cache: ship_id -> tank_id -> List[TankSoundingRow] (for LCG/VCG/TCG from volume)
         self._sounding_cache: Dict[int, Dict[int, list]] = {}
+        # Ullage (m) and FSM (tonne.m) from Excel: ship_id -> tank_id -> (ullage_m, fsm_mt)
+        self._ullage_fsm_cache: Dict[int, Dict[int, tuple]] = {}
 
         self._build_layout()
         self._connect_signals()
@@ -127,6 +143,8 @@ class ConditionEditorView(QWidget):
         self._condition_table.set_tank_cog_callback(self._get_tank_cog_for_display)
         # Fallback when no sounding data: use tank default so VCG/LCG/TCG still update when weight changes
         self._condition_table.set_tank_default_cog_callback(self._get_tank_default_cog)
+        # Callback so UII/Snd and FSt update from volume (interpolate from sounding or use Excel cache)
+        self._condition_table.set_tank_ullage_fsm_callback(self._get_tank_ullage_fsm_for_display)
         # Initialize cargo types first to ensure "-- Blank --" is available
         self._refresh_cargo_types()
         self._load_ships()
@@ -879,6 +897,9 @@ class ConditionEditorView(QWidget):
             default_cargo_name = current_cargo_text
         
         cargo_type_names = [c.name for c in self._cargo_types] if self._cargo_types else None
+        tank_ullage_fsm = {}
+        if self._current_ship and self._current_ship.id and self._current_ship.id in self._ullage_fsm_cache:
+            tank_ullage_fsm = self._ullage_fsm_cache[self._current_ship.id]
         self._condition_table.update_data(
             pens, tanks, pen_loadings, tank_volumes,
             cargo_type=selected_cargo,
@@ -886,6 +907,7 @@ class ConditionEditorView(QWidget):
             cargo_types=self._cargo_types,
             ship_id=self._current_ship.id if self._current_ship else None,
             default_cargo_name=default_cargo_name,
+            tank_ullage_fsm=tank_ullage_fsm,
         )
         
     # Public methods for toolbar access
@@ -962,10 +984,10 @@ class ConditionEditorView(QWidget):
             except Exception:
                 return
         try:
-            by_name = parse_sounding_file_all_tanks(path)
+            by_name, ullage_fsm_by_name = parse_sounding_file_all_tanks(path)
         except Exception:
             return
-        if not by_name:
+        if not by_name and not ullage_fsm_by_name:
             return
         if database.SessionLocal is None:
             return
@@ -975,11 +997,28 @@ class ConditionEditorView(QWidget):
         ship_id = ship.id
         if ship_id not in self._sounding_cache:
             self._sounding_cache[ship_id] = {}
+        if ship_id not in self._ullage_fsm_cache:
+            self._ullage_fsm_cache[ship_id] = {}
         for key, rows in by_name.items():
-            key_norm = (key or "").strip().lower()
-            tank = next((t for t in tanks if ((t.name or "").strip().lower() == key_norm)), None)
+            key_norm = _normalize_tank_name_for_match(key)
+            tank = next(
+                (t for t in tanks if _normalize_tank_name_for_match(t.name) == key_norm),
+                None,
+            )
             if tank and tank.id is not None:
                 self._sounding_cache[ship_id][tank.id] = rows
+                if key in ullage_fsm_by_name:
+                    self._ullage_fsm_cache[ship_id][int(tank.id)] = ullage_fsm_by_name[key]
+        for key in ullage_fsm_by_name:
+            if key in by_name:
+                continue
+            key_norm = _normalize_tank_name_for_match(key)
+            tank = next(
+                (t for t in tanks if _normalize_tank_name_for_match(t.name) == key_norm),
+                None,
+            )
+            if tank and tank.id is not None:
+                self._ullage_fsm_cache[ship_id][int(tank.id)] = ullage_fsm_by_name[key]
 
     def _get_tank_cog_for_display(self, tank_id: int, volume_m3: float) -> Optional[tuple]:
         """Return (vcg_m, lcg_m, tcg_m) from sounding table for display, or None if no sounding data."""
@@ -991,17 +1030,55 @@ class ConditionEditorView(QWidget):
         rows = ship_cache.get(tank_id)
         if not rows:
             return None
-        return interpolate_cog_from_volume(volume_m3, rows)
+        cog = interpolate_cog_from_volume(volume_m3, rows)
+        if cog is None:
+            return None
+        vcg, lcg, tcg = cog
+        # Guard against NaN from bad sounding data so UI never shows "nan"
+        vcg = 0.0 if math.isnan(vcg) else vcg
+        lcg = 0.0 if math.isnan(lcg) else lcg
+        tcg = 0.0 if math.isnan(tcg) else tcg
+        return (vcg, lcg, tcg)
+
+    def _get_tank_ullage_fsm_for_display(self, tank_id: int, volume_m3: float) -> tuple:
+        """Return (ullage_m, fsm_mt) from sounding table (interpolated by volume) or Excel cache, so UII/Snd and FSt update like VCG/LCG/TCG."""
+        out: tuple = (None, None)
+        if self._current_ship and self._current_ship.id:
+            ship_cache = self._sounding_cache.get(self._current_ship.id)
+            if ship_cache:
+                rows = ship_cache.get(tank_id)
+                if rows:
+                    uf = interpolate_ullage_fsm_from_volume(volume_m3, rows)
+                    if uf is not None:
+                        ull, fsm = uf
+                        ull = 0.0 if math.isnan(ull) else ull
+                        fsm = 0.0 if math.isnan(fsm) else fsm
+                        return (ull, fsm)
+            # Fallback: static Ullage/FSM from Excel (first row or summary)
+            ullage_cache = self._ullage_fsm_cache.get(self._current_ship.id, {})
+            if tank_id in ullage_cache:
+                uf = ullage_cache[tank_id]
+                if uf and (uf[0] is not None or (len(uf) > 1 and uf[1] is not None)):
+                    return (uf[0] or 0.0, (uf[1] if len(uf) > 1 else 0.0) or 0.0)
+        return out
 
     def _get_tank_default_cog(self, tank_id: int) -> tuple:
         """Return (vcg_m, lcg_m, tcg_m) from tank defaults when no sounding data. Used so VCG/LCG/TCG still update when weight changes."""
         tank = next((t for t in (self._current_tanks or []) if (t.id or -1) == tank_id), None)
         if tank is None:
             return (0.0, 0.0, 0.0)
-        vcg = getattr(tank, "kg_m", 0.0) or 0.0
-        lcg = getattr(tank, "lcg_m", 0.0) or 0.0
-        tcg = getattr(tank, "tcg_m", 0.0) or 0.0
-        return (vcg, lcg, tcg)
+        vcg = getattr(tank, "kg_m", 0.0)
+        lcg = getattr(tank, "lcg_m", 0.0)
+        tcg = getattr(tank, "tcg_m", 0.0)
+        # Coerce NaN/None (e.g. SILO with unset kg_m or NULL from DB) so UI never shows "nan"
+        def _safe_float(x) -> float:
+            if x is None:
+                return 0.0
+            try:
+                return 0.0 if math.isnan(float(x)) else float(x)
+            except (TypeError, ValueError):
+                return 0.0
+        return (_safe_float(vcg), _safe_float(lcg), _safe_float(tcg))
 
     def _build_tank_cog_override(self, tank_volumes: Dict[int, float]) -> Dict[int, tuple]:
         """Build tank_id -> (vcg_m, lcg_m, tcg_m) from sounding cache and tank_volumes."""
@@ -1017,7 +1094,12 @@ class ConditionEditorView(QWidget):
                 continue
             cog = interpolate_cog_from_volume(vol, rows)
             if cog is not None:
-                override[tank_id] = cog
+                vcg, lcg, tcg = cog
+                override[tank_id] = (
+                    0.0 if (vcg is None or (isinstance(vcg, float) and math.isnan(vcg))) else float(vcg),
+                    0.0 if (lcg is None or (isinstance(lcg, float) and math.isnan(lcg))) else float(lcg),
+                    0.0 if (tcg is None or (isinstance(tcg, float) and math.isnan(tcg))) else float(tcg),
+                )
         return override
 
     def import_sounding_table(self) -> None:
@@ -1036,15 +1118,15 @@ class ConditionEditorView(QWidget):
         if not path:
             return
         try:
-            by_name = parse_sounding_file_all_tanks(path)
+            by_name, ullage_fsm_by_name = parse_sounding_file_all_tanks(path)
         except Exception as e:
             QMessageBox.warning(
                 self, "Import sounding", f"Could not parse file: {e}"
             )
             return
-        if not by_name:
+        if not by_name and not ullage_fsm_by_name:
             QMessageBox.information(
-                self, "Import sounding", "No valid sounding tables found in the file."
+                self, "Import sounding", "No valid sounding tables or Ullage/FSM data found in the file."
             )
             return
         with database.SessionLocal() as db:
@@ -1053,22 +1135,53 @@ class ConditionEditorView(QWidget):
         ship_id = self._current_ship.id
         if ship_id not in self._sounding_cache:
             self._sounding_cache[ship_id] = {}
+        if ship_id not in self._ullage_fsm_cache:
+            self._ullage_fsm_cache[ship_id] = {}
         matched = 0
+        matched_ullage = 0
         unmatched: List[str] = []
         for key, rows in by_name.items():
-            key_norm = key.strip().lower() if key else ""
-            tank = next((t for t in tanks if (t.name or "").strip().lower() == key_norm), None)
+            key_norm = _normalize_tank_name_for_match(key)
+            tank = next(
+                (t for t in tanks if _normalize_tank_name_for_match(t.name) == key_norm),
+                None,
+            )
             if tank and tank.id is not None:
                 self._sounding_cache[ship_id][tank.id] = rows
+                if key in ullage_fsm_by_name:
+                    self._ullage_fsm_cache[ship_id][int(tank.id)] = ullage_fsm_by_name[key]
+                    matched_ullage += 1
                 matched += 1
             elif key_norm:
                 unmatched.append(key)
+        for key in ullage_fsm_by_name:
+            if key in by_name:
+                continue
+            key_norm = _normalize_tank_name_for_match(key)
+            tank = next(
+                (t for t in tanks if _normalize_tank_name_for_match(t.name) == key_norm),
+                None,
+            )
+            if tank and tank.id is not None:
+                self._ullage_fsm_cache[ship_id][int(tank.id)] = ullage_fsm_by_name[key]
+                matched_ullage += 1
+            elif key_norm:
+                unmatched.append(key)
         msg = f"Imported soundings for {matched} tank(s)."
+        if matched_ullage > 0:
+            msg += f" Ullage/FSM for {matched_ullage} tank(s)."
         if unmatched:
-            msg += f" Sheets not matched to ship tanks: {', '.join(unmatched[:10])}"
+            msg += f" Not matched: {', '.join(unmatched[:10])}"
             if len(unmatched) > 10:
                 msg += f" ... and {len(unmatched) - 10} more"
         QMessageBox.information(self, "Import sounding", msg)
+        if matched > 0 or matched_ullage > 0:
+            self._update_condition_table(
+                self._current_pens or [],
+                self._current_tanks or [],
+                getattr(self._current_condition, "pen_loadings", {}) or {},
+                getattr(self._current_condition, "tank_volumes_m3", {}) or {},
+            )
 
     def _on_tank_table_changed(self, item: QTableWidgetItem) -> None:
         """Called when a tank table cell is edited. When Fill % changes, refresh condition table so Volume/Weight/VCG/LCG/TCG update immediately."""
