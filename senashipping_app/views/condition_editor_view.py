@@ -7,9 +7,14 @@ User enters cargo type; tanks/pens and ship particulars are static.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Dict, List, Optional
 
+# Project excels folder (sounding tables loaded automatically from here)
+_EXCELS_DIR = Path(__file__).resolve().parent.parent.parent / "excels"
+
 from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtWidgets import QFileDialog
 from PyQt6.QtGui import QShowEvent
 from PyQt6.QtWidgets import (
     QWidget,
@@ -35,6 +40,8 @@ from ..services.condition_service import (
     ConditionResults,
 )
 from ..services.voyage_service import VoyageService, VoyageValidationError
+from ..services.sounding_import import parse_sounding_file_all_tanks
+from ..services.sounding import interpolate_cog_from_volume
 from ..utils.sorting import get_pen_sort_key, get_tank_sort_key
 from .deck_profile_widget import DeckProfileWidget
 from .results_panel import ResultsPanel
@@ -106,6 +113,9 @@ class ConditionEditorView(QWidget):
         # Store last computed results
         self._last_results: Optional[ConditionResults] = None
 
+        # Sounding table cache: ship_id -> tank_id -> List[TankSoundingRow] (for LCG/VCG/TCG from volume)
+        self._sounding_cache: Dict[int, Dict[int, list]] = {}
+
         self._build_layout()
         self._connect_signals()
         # Single-ship: save to voyage disabled; user saves via File ΓåÆ Save
@@ -113,6 +123,10 @@ class ConditionEditorView(QWidget):
         self._save_condition_btn.setToolTip("Save to file via File ΓåÆ Save")
         # Connect deck profile widget to condition table for bidirectional synchronization
         self._condition_table.set_deck_profile_widget(self._deck_profile_widget)
+        # Callback so condition table can show VCG/LCG/TCG from sounding table when weight/volume changes
+        self._condition_table.set_tank_cog_callback(self._get_tank_cog_for_display)
+        # Fallback when no sounding data: use tank default so VCG/LCG/TCG still update when weight changes
+        self._condition_table.set_tank_default_cog_callback(self._get_tank_default_cog)
         # Initialize cargo types first to ensure "-- Blank --" is available
         self._refresh_cargo_types()
         self._load_ships()
@@ -362,6 +376,7 @@ class ConditionEditorView(QWidget):
 
     def _set_current_ship(self, ship: Ship) -> None:
         self._current_ship = ship
+        self._load_sounding_for_ship(ship)
         if database.SessionLocal is None:
             return
         with database.SessionLocal() as db:
@@ -393,28 +408,32 @@ class ConditionEditorView(QWidget):
         self, tanks: List[Tank], volumes: Dict[int, float] | None = None
     ) -> None:
         volumes = volumes or {}
-        self._tank_table.setRowCount(0)
-        # Sort tanks by the 3-level key: number -> letter pattern (A,B,D,C) -> deck
-        sorted_tanks = sorted(tanks, key=get_tank_sort_key)
-        for tank in sorted_tanks:
-            row = self._tank_table.rowCount()
-            self._tank_table.insertRow(row)
+        self._tank_table.blockSignals(True)
+        try:
+            self._tank_table.setRowCount(0)
+            # Sort tanks by the 3-level key: number -> letter pattern (A,B,D,C) -> deck
+            sorted_tanks = sorted(tanks, key=get_tank_sort_key)
+            for tank in sorted_tanks:
+                row = self._tank_table.rowCount()
+                self._tank_table.insertRow(row)
 
-            name_item = QTableWidgetItem(tank.name)
-            name_item.setData(Qt.ItemDataRole.UserRole, tank.id)
-            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Read-only
+                name_item = QTableWidgetItem(tank.name)
+                name_item.setData(Qt.ItemDataRole.UserRole, tank.id)
+                name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Read-only
 
-            cap_item = QTableWidgetItem(f"{tank.capacity_m3:.2f}")
-            cap_item.setFlags(cap_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Read-only
-            
-            vol = volumes.get(tank.id or -1, 0.0)
-            fill_pct = (vol / tank.capacity_m3 * 100.0) if tank.capacity_m3 > 0 else 0.0
-            fill_item = QTableWidgetItem(f"{fill_pct:.1f}")
-            # Fill % is editable (user can change loading)
+                cap_item = QTableWidgetItem(f"{tank.capacity_m3:.2f}")
+                cap_item.setFlags(cap_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Read-only
 
-            self._tank_table.setItem(row, 0, name_item)
-            self._tank_table.setItem(row, 1, cap_item)
-            self._tank_table.setItem(row, 2, fill_item)
+                vol = volumes.get(tank.id or -1, 0.0)
+                fill_pct = (vol / tank.capacity_m3 * 100.0) if tank.capacity_m3 > 0 else 0.0
+                fill_item = QTableWidgetItem(f"{fill_pct:.1f}")
+                # Fill % is editable (user can change loading)
+
+                self._tank_table.setItem(row, 0, name_item)
+                self._tank_table.setItem(row, 1, cap_item)
+                self._tank_table.setItem(row, 2, fill_item)
+        finally:
+            self._tank_table.blockSignals(False)
 
     def _populate_pens_table(
         self, pens: list, pen_loadings: Dict[int, int] | None = None
@@ -444,6 +463,48 @@ class ConditionEditorView(QWidget):
             # Head Count is editable (user can change loading)
             self._pen_table.setItem(row, 3, head_item)
 
+    def _tank_volumes_from_simple_table(self) -> Dict[int, float]:
+        """Build tank_id -> volume from simple tank table (Fill % and capacity)."""
+        tank_by_id = {t.id: t for t in self._current_tanks} if self._current_tanks else {}
+        out: Dict[int, float] = {}
+        for row in range(self._tank_table.rowCount()):
+            name_item = self._tank_table.item(row, 0)
+            fill_item = self._tank_table.item(row, 2)
+            if not name_item or not fill_item:
+                continue
+            tank_id = name_item.data(Qt.ItemDataRole.UserRole)
+            if tank_id is None:
+                continue
+            try:
+                fill_pct = float((fill_item.text() or "0").strip())
+            except (TypeError, ValueError):
+                fill_pct = 0.0
+            fill_pct = max(0.0, min(100.0, fill_pct))
+            tank = tank_by_id.get(int(tank_id))
+            if tank and tank.capacity_m3 > 0:
+                out[int(tank_id)] = tank.capacity_m3 * (fill_pct / 100.0)
+            else:
+                out[int(tank_id)] = 0.0
+        return out
+
+    def _pen_loadings_from_pen_table(self) -> Dict[int, int]:
+        """Build pen_id -> head count from pen table."""
+        out: Dict[int, int] = {}
+        for row in range(self._pen_table.rowCount()):
+            name_item = self._pen_table.item(row, 0)
+            head_item = self._pen_table.item(row, 3)
+            if not name_item or not head_item:
+                continue
+            pen_id = name_item.data(Qt.ItemDataRole.UserRole)
+            if pen_id is None:
+                continue
+            try:
+                heads = int(float((head_item.text() or "0").strip()))
+                out[int(pen_id)] = max(0, heads)
+            except (TypeError, ValueError):
+                out[int(pen_id)] = 0
+        return out
+
     def load_condition(self, voyage_id: int, condition_id: int) -> None:
         """Load a stored condition for editing. Called when user clicks Edit in Voyage Planner."""
         if database.SessionLocal is None:
@@ -464,6 +525,7 @@ class ConditionEditorView(QWidget):
                 self._ship_combo.addItem(ship.name, ship.id)
 
         self._current_ship = ship
+        self._load_sounding_for_ship(ship)
         self._current_voyage = voyage
         self._current_condition = condition
 
@@ -577,28 +639,29 @@ class ConditionEditorView(QWidget):
             tanks = cond_service.get_tanks_for_ship(self._current_ship.id)
             tank_by_id = {t.id: t for t in tanks}
 
+        # Build volumes from simple table (fill % * capacity) first
         for row in range(self._tank_table.rowCount()):
             name_item = self._tank_table.item(row, 0)
             fill_item = self._tank_table.item(row, 2)
             if not name_item or not fill_item:
                 continue
-
             tank_id = name_item.data(Qt.ItemDataRole.UserRole)
             if tank_id is None:
                 continue
-
             try:
                 fill_pct = float(fill_item.text())
             except (TypeError, ValueError):
                 fill_pct = 0.0
-
             fill_pct = max(0.0, min(100.0, fill_pct))
             tank = tank_by_id.get(int(tank_id))
             if not tank:
                 continue
+            tank_volumes[int(tank_id)] = tank.capacity_m3 * (fill_pct / 100.0)
 
-            vol = tank.capacity_m3 * (fill_pct / 100.0)
-            tank_volumes[int(tank_id)] = vol
+        # Overlay volumes from condition table (Weight/Dens → Volume) so real volume drives CG
+        ct_vols = self._condition_table.get_tank_volumes_from_tables()
+        for tid, vol in ct_vols.items():
+            tank_volumes[tid] = vol
 
         for row in range(self._pen_table.rowCount()):
             name_item = self._pen_table.item(row, 0)
@@ -623,10 +686,12 @@ class ConditionEditorView(QWidget):
             (c for c in self._cargo_types if c.name == self._cargo_type_combo.currentText().strip()),
             None,
         )
+        tank_cog_override = self._build_tank_cog_override(tank_volumes)
         try:
             results: ConditionResults = cond_service.compute(
                 self._current_ship, condition, tank_volumes,
                 cargo_type=selected_cargo,
+                tank_cog_override=tank_cog_override if tank_cog_override else None,
             )
         except ConditionValidationError as exc:
             QMessageBox.warning(self, "Validation", str(exc))
@@ -648,7 +713,7 @@ class ConditionEditorView(QWidget):
             pens = cond_service.get_pens_for_ship(self._current_ship.id)
             tanks = cond_service.get_tanks_for_ship(self._current_ship.id)
         self._update_condition_table(pens, tanks, pen_loadings, tank_volumes)
-        
+        self._populate_tanks_table(tanks, tank_volumes)
         self.condition_computed.emit(results, self._current_ship, condition, voyage)
         validation = getattr(results, "validation", None)
         if validation and getattr(validation, "has_errors", False):
@@ -724,6 +789,10 @@ class ConditionEditorView(QWidget):
                 continue
             tank_volumes[int(tank_id)] = tank.capacity_m3 * (fill_pct / 100.0)
 
+        ct_vols = self._condition_table.get_tank_volumes_from_tables()
+        for tid, vol in ct_vols.items():
+            tank_volumes[tid] = vol
+
         for row in range(self._pen_table.rowCount()):
             name_item = self._pen_table.item(row, 0)
             head_item = self._pen_table.item(row, 3)
@@ -754,10 +823,12 @@ class ConditionEditorView(QWidget):
                 (c for c in self._cargo_types if c.name == self._cargo_type_combo.currentText().strip()),
                 None,
             )
+            tank_cog_override = self._build_tank_cog_override(tank_volumes)
             try:
                 results = cond_svc.compute(
                     self._current_ship, condition, tank_volumes,
                     cargo_type=selected_cargo,
+                    tank_cog_override=tank_cog_override if tank_cog_override else None,
                 )
                 condition.displacement_t = results.displacement_t
                 condition.draft_m = results.draft_m
@@ -778,7 +849,7 @@ class ConditionEditorView(QWidget):
                 pens = cond_service.get_pens_for_ship(self._current_ship.id)
                 tanks = cond_service.get_tanks_for_ship(self._current_ship.id)
             self._update_condition_table(pens, tanks, pen_loadings, tank_volumes)
-        
+            self._populate_tanks_table(tanks, tank_volumes)
         QMessageBox.information(self, "Saved", "Condition saved.")
         
     def _update_condition_table(
@@ -789,6 +860,8 @@ class ConditionEditorView(QWidget):
         tank_volumes: Dict[int, float],
     ) -> None:
         """Helper to update the condition table widget (uses selected cargo type for dynamic AvW/Area; Cargo column dropdown from library)."""
+        self._current_pens = pens
+        self._current_tanks = tanks
         current_cargo_text = self._cargo_type_combo.currentText().strip()
         # Default to "-- Blank --" if no cargo is selected or combo is empty
         if not current_cargo_text or current_cargo_text == "":
@@ -850,37 +923,159 @@ class ConditionEditorView(QWidget):
             self._set_current_ship(self._current_ship)
         
     def zoom_in_graphics(self) -> None:
-        """Zoom in on 3D STL views."""
-        self._deck_profile_widget._profile_stl_view.zoom_in()
+        """Zoom in on profile and deck views."""
+        self._deck_profile_widget._profile_view.zoom_in()
         current_deck = self._deck_profile_widget.get_current_deck()
         deck_tab = self._deck_profile_widget._deck_tab_widgets.get(current_deck)
         if deck_tab:
-            deck_tab._deck_stl_view.zoom_in()
+            deck_tab._deck_view.zoom_in()
 
     def zoom_out_graphics(self) -> None:
-        """Zoom out on 3D STL views."""
-        self._deck_profile_widget._profile_stl_view.zoom_out()
+        """Zoom out on profile and deck views."""
+        self._deck_profile_widget._profile_view.zoom_out()
         current_deck = self._deck_profile_widget.get_current_deck()
         deck_tab = self._deck_profile_widget._deck_tab_widgets.get(current_deck)
         if deck_tab:
-            deck_tab._deck_stl_view.zoom_out()
+            deck_tab._deck_view.zoom_out()
 
     def reset_zoom_graphics(self) -> None:
-        """Reset zoom on 3D STL views."""
-        self._deck_profile_widget._profile_stl_view.fit_to_view()
+        """Reset zoom on profile and deck views (fit to section)."""
+        self._deck_profile_widget._profile_view.fit_to_view()
         current_deck = self._deck_profile_widget.get_current_deck()
         deck_tab = self._deck_profile_widget._deck_tab_widgets.get(current_deck)
         if deck_tab:
-            deck_tab._deck_stl_view.fit_to_view()
-            
-        
+            deck_tab._deck_view.fit_to_view()
+
+    def _load_sounding_for_ship(self, ship: Optional[Ship]) -> None:
+        """Load sounding table from project excels/ for this ship (no user import)."""
+        if not ship or not ship.id:
+            return
+        # Try "SOUNDING <ship name>.xlsx" then any SOUNDING*.xlsx in excels/
+        safe_name = (ship.name or "").strip()
+        path = _EXCELS_DIR / f"SOUNDING {safe_name}.xlsx"
+        if not path.exists():
+            try:
+                candidates = list(_EXCELS_DIR.glob("SOUNDING*.xlsx"))
+                if not candidates:
+                    return
+                path = candidates[0]
+            except Exception:
+                return
+        try:
+            by_name = parse_sounding_file_all_tanks(path)
+        except Exception:
+            return
+        if not by_name:
+            return
+        if database.SessionLocal is None:
+            return
+        with database.SessionLocal() as db:
+            cond_service = ConditionService(db)
+            tanks = cond_service.get_tanks_for_ship(ship.id)
+        ship_id = ship.id
+        if ship_id not in self._sounding_cache:
+            self._sounding_cache[ship_id] = {}
+        for key, rows in by_name.items():
+            key_norm = (key or "").strip().lower()
+            tank = next((t for t in tanks if ((t.name or "").strip().lower() == key_norm)), None)
+            if tank and tank.id is not None:
+                self._sounding_cache[ship_id][tank.id] = rows
+
+    def _get_tank_cog_for_display(self, tank_id: int, volume_m3: float) -> Optional[tuple]:
+        """Return (vcg_m, lcg_m, tcg_m) from sounding table for display, or None if no sounding data."""
+        if not self._current_ship or not self._current_ship.id:
+            return None
+        ship_cache = self._sounding_cache.get(self._current_ship.id)
+        if not ship_cache:
+            return None
+        rows = ship_cache.get(tank_id)
+        if not rows:
+            return None
+        return interpolate_cog_from_volume(volume_m3, rows)
+
+    def _get_tank_default_cog(self, tank_id: int) -> tuple:
+        """Return (vcg_m, lcg_m, tcg_m) from tank defaults when no sounding data. Used so VCG/LCG/TCG still update when weight changes."""
+        tank = next((t for t in (self._current_tanks or []) if (t.id or -1) == tank_id), None)
+        if tank is None:
+            return (0.0, 0.0, 0.0)
+        vcg = getattr(tank, "kg_m", 0.0) or 0.0
+        lcg = getattr(tank, "lcg_m", 0.0) or 0.0
+        tcg = getattr(tank, "tcg_m", 0.0) or 0.0
+        return (vcg, lcg, tcg)
+
+    def _build_tank_cog_override(self, tank_volumes: Dict[int, float]) -> Dict[int, tuple]:
+        """Build tank_id -> (vcg_m, lcg_m, tcg_m) from sounding cache and tank_volumes."""
+        override: Dict[int, tuple] = {}
+        if not self._current_ship or not self._current_ship.id:
+            return override
+        ship_cache = self._sounding_cache.get(self._current_ship.id)
+        if not ship_cache:
+            return override
+        for tank_id, vol in tank_volumes.items():
+            rows = ship_cache.get(tank_id)
+            if not rows:
+                continue
+            cog = interpolate_cog_from_volume(vol, rows)
+            if cog is not None:
+                override[tank_id] = cog
+        return override
+
+    def import_sounding_table(self) -> None:
+        """Import tank sounding tables from Excel; match by tank name and cache for current ship."""
+        if not self._current_ship or not self._current_ship.id:
+            QMessageBox.information(
+                self, "Import sounding", "Select a ship first."
+            )
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import sounding table",
+            str(Path.home()),
+            "Excel Files (*.xlsx *.xls);;CSV Files (*.csv);;All Files (*)",
+        )
+        if not path:
+            return
+        try:
+            by_name = parse_sounding_file_all_tanks(path)
+        except Exception as e:
+            QMessageBox.warning(
+                self, "Import sounding", f"Could not parse file: {e}"
+            )
+            return
+        if not by_name:
+            QMessageBox.information(
+                self, "Import sounding", "No valid sounding tables found in the file."
+            )
+            return
+        with database.SessionLocal() as db:
+            cond_service = ConditionService(db)
+            tanks = cond_service.get_tanks_for_ship(self._current_ship.id)
+        ship_id = self._current_ship.id
+        if ship_id not in self._sounding_cache:
+            self._sounding_cache[ship_id] = {}
+        matched = 0
+        unmatched: List[str] = []
+        for key, rows in by_name.items():
+            key_norm = key.strip().lower() if key else ""
+            tank = next((t for t in tanks if (t.name or "").strip().lower() == key_norm), None)
+            if tank and tank.id is not None:
+                self._sounding_cache[ship_id][tank.id] = rows
+                matched += 1
+            elif key_norm:
+                unmatched.append(key)
+        msg = f"Imported soundings for {matched} tank(s)."
+        if unmatched:
+            msg += f" Sheets not matched to ship tanks: {', '.join(unmatched[:10])}"
+            if len(unmatched) > 10:
+                msg += f" ... and {len(unmatched) - 10} more"
+        QMessageBox.information(self, "Import sounding", msg)
+
     def _on_tank_table_changed(self, item: QTableWidgetItem) -> None:
-        """Called when a tank table cell is edited."""
+        """Called when a tank table cell is edited. When Fill % changes, refresh condition table so Volume/Weight/VCG/LCG/TCG update immediately."""
         if item.column() == 2:  # Fill % column
             try:
                 value = float(item.text())
                 if value < 0 or value > 100:
-                    # Highlight invalid values
                     from PyQt6.QtGui import QColor
                     item.setForeground(QColor(200, 0, 0))
                 else:
@@ -889,6 +1084,11 @@ class ConditionEditorView(QWidget):
             except ValueError:
                 from PyQt6.QtGui import QColor
                 item.setForeground(QColor(200, 0, 0))
+            # Refresh condition table immediately so Volume, Weight, VCG/LCG/TCG update from new volumes
+            if self._current_ship and self._current_tanks:
+                tank_volumes = self._tank_volumes_from_simple_table()
+                pen_loads = self._pen_loadings_from_pen_table()
+                self._update_condition_table(self._current_pens, self._current_tanks, pen_loads, tank_volumes)
                 
     def _on_pen_table_changed(self, item: QTableWidgetItem) -> None:
         """Called when a pen table cell is edited."""

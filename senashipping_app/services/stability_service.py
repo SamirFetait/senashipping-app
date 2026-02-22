@@ -7,7 +7,7 @@ Uses hydrostatic and longitudinal strength modules for improved results.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 from ..models import Ship, Tank, LoadingCondition, LivestockPen
 
@@ -77,35 +77,46 @@ def compute_condition(
     pen_loadings: Dict[int, int] | None = None,
     mass_per_head_t: float = 0.5,
     vcg_from_deck_m: float = 0.0,
+    tank_cog_override: Optional[Dict[int, Tuple[float, float, float]]] = None,
 ) -> ConditionResults:
     """
     Compute displacement, draft, trim, GM, and basic strength for a condition.
 
     Uses ship dimensions for hydrostatic estimates when available.
     Optionally includes livestock pen weights (Phase 2).
+    If tank_cog_override is set (tank_id -> (vcg_m, lcg_m, tcg_m)), those CoG values
+    are used for tank moments instead of tank.kg_m / longitudinal_pos / tcg_m.
     """
     volumes: Dict[int, float] = condition.tank_volumes_m3
     loadings: Dict[int, int] = pen_loadings or getattr(condition, "pen_loadings", None) or {}
     pens_list = pens or []
+    L = max(1e-6, ship.length_overall_m)
 
     total_mass_t = 0.0
     total_lcg_moment = 0.0
     total_vcg_moment = 0.0
     total_tcg_moment = 0.0
 
+    override = tank_cog_override or {}
     for tank in tanks:
         vol = volumes.get(tank.id or -1, 0.0)
         mass = vol * cargo_density_t_per_m3
         total_mass_t += mass
-        total_lcg_moment += mass * tank.longitudinal_pos
-        total_vcg_moment += mass * tank.kg_m  # VCG = KG for tanks
-        total_tcg_moment += mass * tank.tcg_m
+        tid = tank.id or -1
+        if tid in override:
+            vcg_m, lcg_m, tcg_m = override[tid]
+            total_lcg_moment += mass * (lcg_m / L)
+            total_vcg_moment += mass * vcg_m
+            total_tcg_moment += mass * tcg_m
+        else:
+            total_lcg_moment += mass * tank.longitudinal_pos
+            total_vcg_moment += mass * tank.kg_m  # VCG = KG for tanks
+            total_tcg_moment += mass * tank.tcg_m
 
     pen_mass, pen_vcg, pen_lcg, pen_tcg = _pen_mass_and_moments(
         pens_list, loadings, mass_per_head_t, vcg_from_deck_m
     )
     total_mass_t += pen_mass
-    L = max(1e-6, ship.length_overall_m)
     total_lcg_moment += pen_lcg / L  # pen_lcg in m, convert to 0-1 norm
     total_vcg_moment += pen_vcg
     total_tcg_moment += pen_tcg
@@ -139,6 +150,7 @@ def compute_condition(
         pens=pens_list,
         pen_loadings=loadings,
         mass_per_head=mass_per_head_t,
+        tank_cog_override=override,
     )
 
     # Draft at marks (trim +ve = stern down)

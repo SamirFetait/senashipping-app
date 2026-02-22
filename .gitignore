@@ -2,3 +2,5 @@
 .pytest_cache
 db.sqlite3
 __pycache__
+.gitignore
+.senashipping_app_data

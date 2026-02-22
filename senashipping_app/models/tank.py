@@ -13,6 +13,16 @@ class TankType(Enum):
     OTHER = auto()
 
 
+@dataclass(slots=True)
+class TankSoundingRow:
+    """One row of a tank sounding table: volume and CoG (VCG, LCG, TCG) in metres."""
+    sounding_m: float = 0.0
+    volume_m3: float = 0.0
+    vcg_m: float = 0.0
+    lcg_m: float = 0.0
+    tcg_m: float = 0.0
+
+
 def polygon_centroid_2d(points: List[Tuple[float, float]]) -> Tuple[float, float]:
     """
     Return (cx, cy) centroid of a 2D polygon. Uses signed area formula.

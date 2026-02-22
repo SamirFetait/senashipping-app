@@ -5,7 +5,7 @@ Longitudinal strength (simplified shear force and bending moment).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 from ..models import Tank, LivestockPen
 
@@ -34,12 +34,15 @@ def compute_strength(
     pens: List[LivestockPen] | None = None,
     pen_loadings: Dict[int, int] | None = None,
     mass_per_head: float = 0.5,
+    tank_cog_override: Optional[Dict[int, Tuple[float, float, float]]] = None,
 ) -> StrengthResult:
     """
     Simplified still-water bending moment and shear.
 
     Assumes uniform buoyancy distribution; compares to actual weight
     distribution from tanks to get approximate BM.
+    If tank_cog_override is set (tank_id -> (vcg_m, lcg_m, tcg_m)), LCG from
+    override is used for tank moment about amidships.
     """
     if length_m <= 0 or displacement_t <= 0:
         return StrengthResult(
@@ -48,6 +51,7 @@ def compute_strength(
             still_water_bm_approx_tm=0.0,
         )
 
+    override = tank_cog_override or {}
     # Total weight moment about amidships (stern positive = LCG aft)
     total_mass = 0.0
     moment_sum = 0.0
@@ -55,8 +59,13 @@ def compute_strength(
         vol = tank_volumes.get(tank.id or -1, 0.0)
         mass = vol * cargo_density
         total_mass += mass
-        pos = tank.longitudinal_pos
-        moment_sum += (pos - 0.5) * length_m * mass
+        tid = tank.id or -1
+        if tid in override:
+            _vcg_m, lcg_m, _tcg_m = override[tid]
+            moment_sum += (lcg_m - length_m * 0.5) * mass
+        else:
+            pos = tank.longitudinal_pos
+            moment_sum += (pos - 0.5) * length_m * mass
 
     loadings = pen_loadings or {}
     for pen in (pens or []):

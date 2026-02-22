@@ -5,7 +5,7 @@ Business logic for loading conditions and interaction with the calculation engin
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -50,10 +50,12 @@ class ConditionService:
         tank_fill_volumes: Dict[int, float],
         cargo_density_t_per_m3: float = 1.0,
         cargo_type: Optional[CargoType] = None,
+        tank_cog_override: Optional[Dict[int, Tuple[float, float, float]]] = None,
     ) -> ConditionResults:
         """
         Validate the condition and run the stability calculation.
         If cargo_type is set, uses its avg_weight_per_head_kg and vcg_from_deck_m for pen calculations.
+        If tank_cog_override is set (tank_id -> (vcg_m, lcg_m, tcg_m)), those CoG values are used for tanks.
         """
         pen_loadings = getattr(condition, "pen_loadings", None) or {}
         if not tank_fill_volumes and not pen_loadings:
@@ -79,6 +81,7 @@ class ConditionService:
             pen_loadings=pen_loadings,
             mass_per_head_t=mass_per_head_t,
             vcg_from_deck_m=vcg_from_deck_m,
+            tank_cog_override=tank_cog_override,
         )
 
         # Run validation (negative GM, extreme trim, over-limit BM, etc.)
