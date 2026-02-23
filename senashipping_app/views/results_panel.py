@@ -137,6 +137,7 @@ class ResultsPanel(QWidget):
     def _clear_all(self) -> None:
         """Clear all values."""
         self._calc_status_label.setText("—")
+        self._calc_status_label.setToolTip("")
         self._calc_method_label.setText("—")
         self._sea_sg_label.setText("—")
         self._displacement_label.setText("—")
@@ -170,12 +171,16 @@ class ResultsPanel(QWidget):
         # Check for zero displacement (no cargo loaded)
         if results.displacement_t < 0.001:  # Essentially zero
             self._calc_status_label.set_status("NO CARGO", False)
+            self._calc_status_label.setToolTip("No cargo loaded; enter tank/pen data and compute.")
         elif has_errors:
             self._calc_status_label.set_status("FAILED", False)
+            self._calc_status_label.setToolTip("Condition was calculated but fails one or more limits (e.g. GM, draft, trim). Check Alarms and Criteria tabs.")
         elif has_warnings:
             self._calc_status_label.set_status("WARNING", False)
+            self._calc_status_label.setToolTip("Condition meets limits but has warnings. Review Alarms and Criteria.")
         else:
             self._calc_status_label.set_status("OK", True)
+            self._calc_status_label.setToolTip("Condition calculated and within limits.")
             
         self._calc_method_label.set_status("Intact", True)
         

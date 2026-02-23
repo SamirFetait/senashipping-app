@@ -83,6 +83,9 @@ class ShipManagerView(QWidget):
         self._tanks_table.setAlternatingRowColors(True)
         self._tanks_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._tanks_table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked | QTableWidget.EditTrigger.SelectedClicked)
+        vh_t = self._tanks_table.verticalHeader()
+        if vh_t is not None:
+            vh_t.setDefaultSectionSize(max(vh_t.defaultSectionSize(), 24))
 
         self._tank_add_btn = QPushButton("Add Tank", self)
         self._tank_delete_btn = QPushButton("Delete Selected Tank", self)
@@ -109,6 +112,9 @@ class ShipManagerView(QWidget):
         self._pens_table.setAlternatingRowColors(True)
         self._pens_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._pens_table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked | QTableWidget.EditTrigger.SelectedClicked)
+        vh_p = self._pens_table.verticalHeader()
+        if vh_p is not None:
+            vh_p.setDefaultSectionSize(max(vh_p.defaultSectionSize(), 24))
         self._pen_add_btn = QPushButton("Add Pen", self)
         self._pen_delete_btn = QPushButton("Delete Selected Pen", self)
         self._pen_save_btn = QPushButton("Save Pens", self)
@@ -270,6 +276,8 @@ class ShipManagerView(QWidget):
                 deck = "A"  # Default to deck A
             
             deck_combo = QComboBox(self)
+            deck_combo.setMinimumHeight(22)
+            deck_combo.setMinimumWidth(80)
             deck_combo.addItems(deck_options)
             deck_combo.setCurrentText(deck)
             self._pens_table.setCellWidget(row, 1, deck_combo)
@@ -326,6 +334,8 @@ class ShipManagerView(QWidget):
                 if category not in TANK_CATEGORY_NAMES:
                     category = "Misc. Tanks"
                 category_combo = QComboBox(self)
+                category_combo.setMinimumHeight(22)
+                category_combo.setMinimumWidth(80)
                 category_combo.addItems(TANK_CATEGORY_NAMES)
                 category_combo.setCurrentText(category)
                 self._tanks_table.setCellWidget(row, 1, category_combo)
@@ -527,6 +537,8 @@ class ShipManagerView(QWidget):
         
         # Category dropdown
         category_combo = QComboBox(self)
+        category_combo.setMinimumHeight(22)
+        category_combo.setMinimumWidth(80)
         category_combo.addItems(TANK_CATEGORY_NAMES)
         category_combo.setCurrentText("Misc. Tanks")
         self._tanks_table.setCellWidget(row, 1, category_combo)
@@ -735,6 +747,8 @@ class ShipManagerView(QWidget):
         
         # Deck dropdown
         deck_combo = QComboBox(self)
+        deck_combo.setMinimumHeight(22)
+        deck_combo.setMinimumWidth(80)
         deck_combo.addItems(["A", "B", "C", "D", "E", "F", "G", "H"])
         deck_combo.setCurrentText("A")  # Default to deck A
         self._pens_table.setCellWidget(row, 1, deck_combo)

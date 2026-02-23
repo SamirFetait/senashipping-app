@@ -323,6 +323,10 @@ class ConditionTableWidget(QWidget):
         table.setAlternatingRowColors(True)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)  # Allow multi-selection
+        # Minimum row height so cell widgets (e.g. QComboBox) never get zero-size paint device (QPainter engine == 0)
+        vh = table.verticalHeader()
+        if vh is not None:
+            vh.setDefaultSectionSize(max(vh.defaultSectionSize(), 24))
         # Connect selection changes to sync with deck layout
         table.itemSelectionChanged.connect(lambda: self._on_table_selection_changed(table))
     
@@ -894,6 +898,9 @@ class ConditionTableWidget(QWidget):
             table.setItem(row, 0, name_item)
             if cargo_type_names:
                 combo = QComboBox(table)
+                # Avoid QPainter "paint device returned engine == 0" when combo is in a table cell
+                combo.setMinimumHeight(22)
+                combo.setMinimumWidth(80)
                 # Add blank cargo option first, then regular cargo types
                 all_cargo_names = ["-- Blank --"] + cargo_type_names
                 combo.addItems(all_cargo_names)

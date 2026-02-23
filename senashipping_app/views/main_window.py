@@ -46,9 +46,7 @@ from .ship_manager_view import ShipManagerView
 from .voyage_planner_view import VoyagePlannerView
 from .condition_editor_view import ConditionEditorView
 from .results_view import ResultsView
-from .hydrostatic_curves_view import HydrostaticCurvesView
 from .cargo_library_dialog import CargoLibraryDialog
-from .hydrostatic_calculator_dialog import HydrostaticCalculatorDialog
 
 
 @dataclass
@@ -57,7 +55,6 @@ class _PageIndexes:
     voyage_planner: int
     condition_editor: int
     results: int
-    hydrostatic_curves: int
 
 
 class MainWindow(QMainWindow):
@@ -99,16 +96,11 @@ class MainWindow(QMainWindow):
         self._voyage_planner = VoyagePlannerView(self)
         self._condition_editor = ConditionEditorView(self)
         self._results_view = ResultsView(self)
-        self._hydrostatic_curves_view = HydrostaticCurvesView(
-            self,
-            get_current_ship=lambda: getattr(self._condition_editor, "_current_ship", None),
-        )
 
         ship_idx = self._stack.addWidget(self._ship_manager)
         voy_idx = self._stack.addWidget(self._voyage_planner)
         cond_idx = self._stack.addWidget(self._condition_editor)
         res_idx = self._stack.addWidget(self._results_view)
-        curves_idx = self._stack.addWidget(self._hydrostatic_curves_view)
 
         # Default page
         self._stack.setCurrentIndex(ship_idx)
@@ -118,7 +110,6 @@ class MainWindow(QMainWindow):
             voyage_planner=voy_idx,
             condition_editor=cond_idx,
             results=res_idx,
-            hydrostatic_curves=curves_idx,
         )
 
         # Wire condition editor to results view
@@ -549,35 +540,33 @@ class MainWindow(QMainWindow):
         """)
 
     def _create_toolbar(self) -> None:
-        """Create comprehensive toolbar with icons and actions."""
+        """Create comprehensive toolbar with text labels (no icons to avoid QPainter engine==0 on some platforms)."""
         toolbar = QToolBar("Main Toolbar", self)
         toolbar.setMovable(False)
         toolbar.setFloatable(False)
-        toolbar.setIconSize(QSize(24, 24))
-        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.addToolBar(toolbar)
 
-        # File actions
-        style = self.style()
-        new_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_FileIcon), "New", self)
+        # File actions (text-only to avoid pixmap paint device errors)
+        new_action = QAction("New", self)
         new_action.setShortcut("Ctrl+N")
         new_action.setToolTip("New Loading Condition (Ctrl+N)")
         new_action.triggered.connect(self._on_new_condition)
         toolbar.addAction(new_action)
 
-        open_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon), "Open", self)
+        open_action = QAction("Open", self)
         open_action.setShortcut("Ctrl+O")
         open_action.setToolTip("Open Loading Condition (Ctrl+O)")
         open_action.triggered.connect(self._on_open_condition)
         toolbar.addAction(open_action)
 
-        save_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_DriveFDIcon), "Save", self)
+        save_action = QAction("Save", self)
         save_action.setShortcut("Ctrl+S")
         save_action.setToolTip("Save Loading Condition (Ctrl+S)")
         save_action.triggered.connect(self._on_save)
         toolbar.addAction(save_action)
 
-        print_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_FileDialogListView), "Print/Export", self)
+        print_action = QAction("Print/Export", self)
         print_action.setShortcut("Ctrl+P")
         print_action.setToolTip("Print or Export (Ctrl+P)")
         print_action.triggered.connect(self._on_print_export)
@@ -589,9 +578,8 @@ class MainWindow(QMainWindow):
         nav_group = QActionGroup(self)
         nav_group.setExclusive(True)
 
-        def add_nav_action(text: str, icon_name: str, page_index: int, status: str, shortcut: str | None = None) -> None:
-            icon = style.standardIcon(getattr(QStyle.StandardPixmap, icon_name, QStyle.StandardPixmap.SP_ComputerIcon))
-            action = QAction(icon, text, self)
+        def add_nav_action(text: str, page_index: int, status: str, shortcut: str | None = None) -> None:
+            action = QAction(text, self)
             action.setCheckable(True)
             if shortcut:
                 action.setShortcut(shortcut)
@@ -602,15 +590,14 @@ class MainWindow(QMainWindow):
             nav_group.addAction(action)
             self._nav_actions[page_index] = action
 
-        # Single-ship app: Loading Condition, Results, Hydrostatic Curves in main nav
-        add_nav_action("Loading Condition", "SP_FileDialogDetailedView", self._page_indexes.condition_editor, "Loading Condition", "F2")
-        add_nav_action("Results", "SP_FileDialogInfoView", self._page_indexes.results, "Results", "F3")
-        add_nav_action("Curves", "SP_FileDialogContentsView", self._page_indexes.hydrostatic_curves, "Hydrostatic Curves", "F4")
+        # Single-ship app: Loading Condition, Results in main nav
+        add_nav_action("Loading Condition", self._page_indexes.condition_editor, "Loading Condition", "F2")
+        add_nav_action("Results", self._page_indexes.results, "Results", "F3")
 
         toolbar.addSeparator()
 
         # Compute action
-        compute_action = QAction(style.standardIcon(QStyle.StandardPixmap.SP_MediaPlay), "Compute", self)
+        compute_action = QAction("Compute", self)
         compute_action.setShortcut("F9")
         compute_action.setToolTip("Compute Results (F9)")
         compute_action.triggered.connect(self._on_compute)

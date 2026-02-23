@@ -30,6 +30,7 @@
 - [⚙️ Configuration](#-configuration)
 - [📖 Stability manual reference](#-stability-manual-reference)
 - [📐 Hydrostatic curves & draft solver](#-hydrostatic-curves--draft-solver)
+- [📘 Stability calculations (how everything is calculated)](#-stability-calculations-how-everything-is-calculated)
 - [🧪 Testing](#-testing)
 - [📄 License & credits](#-license--credits)
 
@@ -168,14 +169,25 @@ Tank list is not embedded in the app; refer to the PDF for tank identification.
 
 ## 📐 Hydrostatic curves & draft solver
 
-The app **generates** hydrostatic curves from ship dimensions (no import):
+The app **generates** hydrostatic curves in two ways (no need to import if you don’t want to):
 
+1. **From ship dimensions (default)** — Formula-based curves from L, B, design draft (and block coefficient). Use *Use ship dimensions* on the Curves page to (re)generate.
+2. **From a hull STL (Python library)** — Use **trimesh** (pure Python, no Rust) to generate curves from a 3D hull mesh. On the Curves page (F4), click *Generate from hull (STL)…* and select an STL file (units: metres). Requires: `pip install trimesh`. The app integrates waterplane areas over draft to get displacement, KB, LCB, and uses waterplane I_T, I_L at each draft.
+
+You can also **import** curves from JSON (e.g. digitized from your stability PDF) via *Import curves from JSON…*.
+
+- **Curves page (F4)** — **Dynamic like your stability PDF**: Query by **draft (m)** or **displacement (t)** to see the operating point and read off Draft, Displacement, KB, LCB, I_T, I_L, MTC. A red marker and reference lines show the selected condition on each plot.
 - **Draft solver (Step 2)**: Solves **Displacement(draft) = total weight** using the displacement curve (or formula fallback) so the ship floats correctly.
-- **Trim solver (Step 3)**: Longitudinal balance: trim from **LCG vs LCB** and MTC so trim is realistic.
-- **Curves page (F4)**: Plots displacement vs draft, KB vs draft, LCB vs draft, and waterplane moments of inertia (I_T, I_L) vs draft. Built by `services/hydrostatic_curves.py` from L, B, and design draft.
-- **Waterline (Step 4)**: After Compute, the profile view redraws the waterline from the solved draft (aft, mid, fwd) so the drawing matches the calculation.
+- **Trim solver (Step 3)**: Longitudinal balance: trim from **LCG vs LCB** and MTC.
+- **Waterline (Step 4)**: After Compute, the profile view redraws the waterline from the solved draft (aft, mid, fwd).
 
-Curves are formula-based by default; table-based curves (e.g. from a stability booklet) can be loaded via `load_curves_from_dict` when provided.
+STL generation uses `trimesh` (in `requirements.txt`). If NavalToolbox is installed, it is tried first; if it fails (e.g. Rust not available), the app falls back to trimesh.
+
+---
+
+## 📘 Stability calculations (how everything is calculated)
+
+A separate document **[STABILITY_CALCULATIONS.md](STABILITY_CALCULATIONS.md)** describes in detail how every value is computed: mass and centers of gravity (tanks + livestock), displacement, draft solver, trim (LCG/LCB/MTC), KB, BM, KM, GM, free surface correction, draft at marks, heel, longitudinal strength, ancillary (prop immersion, visibility, air draft), validation rules, and IMO/livestock criteria. Use it to understand the numbers on the Results panel and the meaning of Calculation Status (OK / WARNING / FAILED).
 
 ---
 

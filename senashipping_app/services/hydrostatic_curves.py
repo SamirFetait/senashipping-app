@@ -8,7 +8,7 @@ Used by the iterative draft solver and stability pipeline when curves are availa
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 # Default seawater density t/m³
 RHO_SEA = 1.025
@@ -92,6 +92,13 @@ def interpolate_draft_from_displacement(
     )
 
 
+def get_displacement_at_draft(draft_m: float, curves: HydrostaticCurves) -> Optional[float]:
+    """Displacement (t) at given draft from curves. Returns None if curves invalid."""
+    if not curves.is_valid():
+        return None
+    return _interpolate(draft_m, curves.draft_m, curves.displacement_t)
+
+
 def get_kb(draft_m: float, curves: HydrostaticCurves) -> Optional[float]:
     """Get KB (m) at given draft from curves. Returns None if not available."""
     if not curves.kb_m or len(curves.kb_m) != len(curves.draft_m):
@@ -158,6 +165,289 @@ def build_curves_from_formulas(
         i_t_m4=i_t_list,
         i_l_m4=i_l_list,
     )
+
+
+def _polygon_properties_2d(vertices: List[Tuple[float, float]]) -> Tuple[float, float, float, float, float]:
+    """Given closed polygon vertices (x,y), return (area, cx, cy, i_xx, i_yy). i_xx = int y^2 dA, i_yy = int x^2 dA (about origin)."""
+    n = len(vertices)
+    if n < 3:
+        return 0.0, 0.0, 0.0, 0.0, 0.0
+    area = 0.0
+    cx_num = 0.0
+    cy_num = 0.0
+    i_xx = 0.0
+    i_yy = 0.0
+    for i in range(n):
+        j = (i + 1) % n
+        xi, yi = vertices[i][0], vertices[i][1]
+        xj, yj = vertices[j][0], vertices[j][1]
+        cross = xi * yj - xj * yi
+        area += cross
+        cx_num += (xi + xj) * cross
+        cy_num += (yi + yj) * cross
+        i_xx += (yi * yi + yi * yj + yj * yj) * cross
+        i_yy += (xi * xi + xi * xj + xj * xj) * cross
+    area *= 0.5
+    if abs(area) < EPS:
+        return 0.0, 0.0, 0.0, 0.0, 0.0
+    cx = cx_num / (6.0 * area)
+    cy = cy_num / (6.0 * area)
+    i_xx = abs(i_xx) / 12.0 - area * (cy ** 2)
+    i_yy = abs(i_yy) / 12.0 - area * (cx ** 2)
+    return abs(area), cx, cy, max(0.0, i_xx), max(0.0, i_yy)
+
+
+def _trimesh_section_waterplane(mesh: Any, draft: float) -> Tuple[float, float, float, float, float]:
+    """Get waterplane area, centroid (x,y), I_T, I_L at given draft. Returns (area, cx, cy, i_t, i_l)."""
+    try:
+        section = mesh.section(plane_origin=[0, 0, draft], plane_normal=[0, 0, 1])
+        if section is None:
+            return 0.0, 0.0, 0.0, 0.0, 0.0
+        planar, _ = section.to_planar()
+        if planar is None:
+            return 0.0, 0.0, 0.0, 0.0, 0.0
+        total_area = 0.0
+        total_cx = 0.0
+        total_cy = 0.0
+        total_i_t = 0.0
+        total_i_l = 0.0
+        entities = getattr(planar, "entities", [])
+        for entity in entities:
+            try:
+                pts = entity.discrete(planar) if hasattr(entity, "discrete") else None
+            except Exception:
+                pts = None
+            if pts is None:
+                continue
+            try:
+                if hasattr(pts, "__iter__") and len(pts) >= 3:
+                    if hasattr(pts, "shape"):
+                        verts = [(float(pts[i][0]), float(pts[i][1])) for i in range(pts.shape[0])]
+                    else:
+                        verts = [(float(p[0]), float(p[1])) for p in pts]
+                else:
+                    continue
+            except (TypeError, IndexError):
+                continue
+            if len(verts) < 3:
+                continue
+            a, cx, cy, i_xx, i_yy = _polygon_properties_2d(verts)
+            total_area += a
+            if a > EPS:
+                total_cx += cx * a
+                total_cy += cy * a
+                total_i_t += i_xx
+                total_i_l += i_yy
+        if total_area < EPS:
+            return 0.0, 0.0, 0.0, 0.0, 0.0
+        return total_area, total_cx / total_area, total_cy / total_area, total_i_t, total_i_l
+    except Exception:
+        return 0.0, 0.0, 0.0, 0.0, 0.0
+
+
+def build_curves_from_hull_stl_trimesh(
+    stl_path: str,
+    design_draft_m: float,
+    rho: float = RHO_SEA,
+    num_points: int = 25,
+) -> Optional[HydrostaticCurves]:
+    """
+    Generate hydrostatic curves from a hull STL using trimesh (pure Python, no Rust).
+
+    Requires: pip install trimesh. STL units: metres. X = longitudinal, Z = vertical (keel up).
+    Integrates waterplane areas over draft to get displacement, KB, LCB; uses waterplane I_T, I_L at each draft.
+    """
+    try:
+        import trimesh
+    except ImportError:
+        return None
+    try:
+        mesh = trimesh.load(stl_path, force="mesh")
+        if mesh is None or not hasattr(mesh, "bounds"):
+            return None
+        bounds = mesh.bounds  # (min_pt, max_pt)
+        x_min, x_max = float(bounds[0][0]), float(bounds[1][0])
+        z_min, z_max = float(bounds[0][2]), float(bounds[1][2])
+        length_m = max(1e-6, x_max - x_min)
+        max_draft = min(design_draft_m, max(0.01, z_max - z_min))
+        if max_draft <= 0:
+            max_draft = design_draft_m
+        drafts = [max_draft * i / max(num_points - 1, 1) for i in range(num_points)]
+        areas: List[float] = []
+        cxs: List[float] = []
+        cys: List[float] = []
+        i_ts: List[float] = []
+        i_ls: List[float] = []
+        for t in drafts:
+            a, cx, cy, i_t, i_l = _trimesh_section_waterplane(mesh, z_min + t)
+            areas.append(a)
+            cxs.append(cx)
+            cys.append(cy)
+            i_ts.append(i_t)
+            i_ls.append(i_l)
+        vol_at_draft: List[float] = []
+        moment_z: List[float] = []
+        moment_x: List[float] = []
+        for i in range(num_points):
+            if i == 0:
+                vol_at_draft.append(0.0)
+                moment_z.append(0.0)
+                moment_x.append(0.0)
+            else:
+                dz = drafts[i] - drafts[i - 1]
+                v = 0.5 * (areas[i] + areas[i - 1]) * dz
+                mz = 0.5 * ((drafts[i] + z_min) * areas[i] + (drafts[i - 1] + z_min) * areas[i - 1]) * dz
+                mx = 0.5 * (cxs[i] * areas[i] + cxs[i - 1] * areas[i - 1]) * dz
+                vol_at_draft.append(vol_at_draft[-1] + v)
+                moment_z.append(moment_z[-1] + mz)
+                moment_x.append(moment_x[-1] + mx)
+        draft_list: List[float] = []
+        disp_list: List[float] = []
+        kb_list: List[float] = []
+        lcb_list: List[float] = []
+        i_t_list: List[float] = []
+        i_l_list: List[float] = []
+        for i in range(num_points):
+            draft_list.append(drafts[i])
+            v = vol_at_draft[i]
+            disp_list.append(rho * v)
+            if v > EPS:
+                kb_list.append(moment_z[i] / v)
+                lcb_m = moment_x[i] / v
+                lcb_norm = (lcb_m - x_min) / length_m if length_m > 0 else 0.5
+                lcb_list.append(max(0.0, min(1.0, lcb_norm)))
+            else:
+                kb_list.append(0.0)
+                lcb_list.append(0.5)
+            i_t_list.append(i_ts[i])
+            i_l_list.append(i_ls[i])
+        return HydrostaticCurves(
+            draft_m=draft_list,
+            displacement_t=disp_list,
+            kb_m=kb_list,
+            lcb_norm=lcb_list,
+            i_t_m4=i_t_list,
+            i_l_m4=i_l_list,
+        )
+    except Exception:
+        return None
+
+
+def build_curves_from_hull_stl(
+    stl_path: str,
+    design_draft_m: float,
+    rho: float = RHO_SEA,
+    num_points: int = 25,
+    nominal_vcg_frac: float = 0.5,
+) -> Optional[HydrostaticCurves]:
+    """
+    Generate hydrostatic curves from a hull STL file.
+
+    Tries NavalToolbox first (pip install navaltoolbox; requires Rust on some systems).
+    Falls back to trimesh (pip install trimesh; pure Python, no Rust).
+    STL units: metres. X = longitudinal (AP to FP), Z = vertical (keel up).
+    """
+    # Try NavalToolbox first (may fail if Rust not available)
+    try:
+        from navaltoolbox import Hull, Vessel, HydrostaticsCalculator
+    except ImportError:
+        pass
+    else:
+        try:
+            return _build_curves_from_hull_stl_navaltoolbox(
+                stl_path, design_draft_m, rho, num_points, nominal_vcg_frac
+            )
+        except Exception:
+            pass
+    # Fallback: trimesh (pure Python)
+    return build_curves_from_hull_stl_trimesh(stl_path, design_draft_m, rho, num_points)
+
+
+def _build_curves_from_hull_stl_navaltoolbox(
+    stl_path: str,
+    design_draft_m: float,
+    rho: float,
+    num_points: int,
+    nominal_vcg_frac: float,
+) -> Optional[HydrostaticCurves]:
+    """NavalToolbox-based STL curve generation (requires Rust to install)."""
+    try:
+        from navaltoolbox import Hull, Vessel, HydrostaticsCalculator
+    except ImportError:
+        return None
+    try:
+        hull = Hull(stl_path)
+        vessel = Vessel(hull)
+        calc = HydrostaticsCalculator(vessel, water_density=rho * 1000.0)  # kg/m³
+        bounds = hull.get_bounds()
+        # bounds may be (x_min, x_max, y_min, y_max, z_min, z_max) or dict/list
+        try:
+            if hasattr(bounds, "__len__") and len(bounds) >= 6:
+                x_min, x_max = float(bounds[0]), float(bounds[1])
+                z_min, z_max = float(bounds[4]), float(bounds[5])
+            else:
+                x_min, x_max = 0.0, 1.0
+                z_min, z_max = 0.0, design_draft_m
+        except (TypeError, IndexError):
+            x_min, x_max = 0.0, 1.0
+            z_min, z_max = 0.0, design_draft_m
+        length_m = max(1e-6, x_max - x_min)
+        max_draft = min(design_draft_m, max(0.01, z_max - z_min))
+        if max_draft <= 0:
+            max_draft = design_draft_m
+        draft_list: List[float] = []
+        disp_list: List[float] = []
+        kb_list: List[float] = []
+        lcb_list: List[float] = []
+        i_t_list: List[float] = []
+        i_l_list: List[float] = []
+        for i in range(num_points):
+            t = max_draft * (i / max(num_points - 1, 1))
+            draft_list.append(t)
+            vcg = nominal_vcg_frac * max_draft
+            state = calc.from_draft(draft=t, vcg=vcg)
+            vol = getattr(state, "volume", 0.0) or 0.0
+            disp_t = (getattr(state, "displacement", 0.0) or 0.0) / 1000.0
+            disp_list.append(disp_t)
+            cob = getattr(state, "cob", (length_m * 0.5, 0.0, t * 0.5))
+            if isinstance(cob, (list, tuple)) and len(cob) >= 3:
+                lcb_x = float(cob[0])
+                kb_list.append(float(cob[2]))
+                lcb_norm = (lcb_x - x_min) / length_m if length_m > 0 else 0.5
+                lcb_norm = max(0.0, min(1.0, lcb_norm))
+                lcb_list.append(lcb_norm)
+            else:
+                kb_list.append(t * 0.53)
+                lcb_list.append(0.5)
+            # I_T = BM_t * V; KM = KB + BM_t, GM = KM - KG => BM_t = KM - KB = (GM + KG) - KB
+            kb_val = kb_list[-1]
+            gmt_dry = getattr(state, "gmt_dry", None)
+            if gmt_dry is not None and vol > EPS:
+                km = (gmt_dry + vcg)
+                bm_t = max(0.0, km - kb_val)
+                i_t_list.append(bm_t * vol)
+            else:
+                b = length_m * 0.2  # fallback breadth guess
+                i_t_list.append(length_m * (b ** 3) / 12)
+            # I_L: use longitudinal metacentric radius if available, else rectangular WP
+            gml = getattr(state, "gml", None) or getattr(state, "longitudinal_metacentric_height", None)
+            if gml is not None and vol > EPS:
+                kb_val = kb_list[-1]
+                bm_l = max(0.0, (gml + vcg) - kb_val)
+                i_l_list.append(bm_l * vol)
+            else:
+                b = length_m * 0.2
+                i_l_list.append(b * (length_m ** 3) / 12)
+        return HydrostaticCurves(
+            draft_m=draft_list,
+            displacement_t=disp_list,
+            kb_m=kb_list,
+            lcb_norm=lcb_list,
+            i_t_m4=i_t_list,
+            i_l_m4=i_l_list,
+        )
+    except Exception:
+        return None
 
 
 @dataclass
