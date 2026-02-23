@@ -29,6 +29,7 @@
 - [▶️ Running the app](#-running-the-app)
 - [⚙️ Configuration](#-configuration)
 - [📖 Stability manual reference](#-stability-manual-reference)
+- [📐 Hydrostatic curves & draft solver](#-hydrostatic-curves--draft-solver)
 - [🧪 Testing](#-testing)
 - [📄 License & credits](#-license--credits)
 
@@ -48,12 +49,14 @@
 
 | Area | Description |
 |------|-------------|
-| **Loading condition** | Cargo type, tank fill (%), livestock deck head counts (Livestock-DK1…DK8). |
-| **Compute** | Displacement, draft (aft/mid/fwd), trim, heel, GM (with free surface correction), longitudinal strength (BM %, SF %). |
-| **Results** | Calculation status, alarms table, IMO & livestock criteria checklist, traceability, text report. |
-| **Export** | PDF and Excel from the Results view. |
+| **Loading condition** | Condition name (saved on Compute, used in PDF/Excel), cargo type, tank fill (%), livestock deck head counts (Livestock-DK1…DK8). Save Condition button saves to file (prompts for path if needed). |
+| **Compute** | Draft solver: Displacement(draft) = total weight. Trim from LCG/LCB balance. Displacement, draft (aft/mid/fwd), trim, heel, GM (with free surface correction), longitudinal strength (BM %, SF %). Waterline on profile redraws from solved draft. |
+| **Results** | Calculation status, alarms, Weights / Trim & Stability / Strength / Cargo tabs, IMO & livestock criteria checklist, traceability, text report. Cargo tab shows pen name and deck (not pen ID). |
+| **Curves** | Dedicated page (F4) showing app-generated hydrostatic curves: displacement vs draft, KB, LCB, waterplane I_T/I_L. Built from ship dimensions; no import. |
+| **Export** | PDF and Excel from the Results view (condition name from Compute). |
 | **Ship & data** | Ship particulars, tanks (with categories), livestock pens per deck, cargo type library (mass per head, area per head, VCG from deck). |
 | **Stability manual** | Operating restrictions and reference from the vessel Loading Manual (Program Notes + Results tab). |
+| **Tools** | Ship & data setup; Hydrostatic Calculator (optional quick draft/trim from displacement). |
 
 ---
 
@@ -78,9 +81,9 @@ senashipping-app/
 │   │   └── stability_manual_ref.py   # Manual-derived constants & operating restrictions
 │   ├── models/                # Ship, Tank, LivestockPen, Voyage, LoadingCondition, CargoType
 │   ├── repositories/         # SQLite/ORM access
-│   ├── services/              # Stability, validation, criteria, alarms, hydrostatics, etc.
+│   ├── services/              # Stability, validation, criteria, alarms, hydrostatics, hydrostatic_curves, etc.
 │   ├── reports/               # Text, PDF, Excel export
-│   ├── views/                 # PyQt6 UI (main window, condition editor, results, ship manager, …)
+│   ├── views/                 # PyQt6 UI (main window, condition editor, results, curves view, ship manager, …)
 │   └── tests/
 ├── senashipping_app_data/     # Default DB & log (created at runtime)
 ├── requirements.txt
@@ -133,8 +136,10 @@ python senashipping_app/main.py
 ```
 
 - **First run**: The app creates the SQLite database and default data path (e.g. `senashipping_app_data/`). You can preload the *Osama Bay* ship/tanks/pens via the initializer if provided.
-- **Navigation**: Use the top bar to switch between **Loading Condition** and **Results**. Use **Tools → Ship & data setup** to add ships, tanks, and livestock pens.
-- **Compute**: In the Loading Condition view, set cargo type and tank/livestock data, then click **Compute Results** (or **F9**). Check the Results tab for status and criteria.
+- **Navigation**: Toolbar: **Loading Condition** (F2), **Results** (F3), **Curves** (F4). Use **Tools → Ship & data setup** to add ships, tanks, and livestock pens.
+- **Condition name**: Enter a name in the Loading Condition view (before cargo type); it is saved when you click **Compute Results** and used in PDF/Excel export.
+- **Compute**: Set condition name, cargo type, and tank/livestock data, then click **Compute Results** (or **F9**). Draft and trim are solved from displacement and LCG/LCB; the profile waterline updates. Check the Results view for status and criteria.
+- **Save Condition**: Saves the current condition to file (or opens Save As if no path). **Curves** page shows generated hydrostatic curves for the current ship.
 
 ---
 
@@ -158,6 +163,19 @@ The app uses data from the vessel **Loading Manual and Intact Stability Informat
   - **Results** tab → *Stability manual reference* section.
 
 Tank list is not embedded in the app; refer to the PDF for tank identification.
+
+---
+
+## 📐 Hydrostatic curves & draft solver
+
+The app **generates** hydrostatic curves from ship dimensions (no import):
+
+- **Draft solver (Step 2)**: Solves **Displacement(draft) = total weight** using the displacement curve (or formula fallback) so the ship floats correctly.
+- **Trim solver (Step 3)**: Longitudinal balance: trim from **LCG vs LCB** and MTC so trim is realistic.
+- **Curves page (F4)**: Plots displacement vs draft, KB vs draft, LCB vs draft, and waterplane moments of inertia (I_T, I_L) vs draft. Built by `services/hydrostatic_curves.py` from L, B, and design draft.
+- **Waterline (Step 4)**: After Compute, the profile view redraws the waterline from the solved draft (aft, mid, fwd) so the drawing matches the calculation.
+
+Curves are formula-based by default; table-based curves (e.g. from a stability booklet) can be loaded via `load_curves_from_dict` when provided.
 
 ---
 
