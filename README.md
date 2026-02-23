@@ -68,7 +68,8 @@
 ```
 senashipping-app/
 ├── assets/
-│   └── stability.pdf          # Vessel Loading Manual (reference; used for limits & UI)
+│   ├── stability.pdf                    # Vessel Loading Manual (reference; used for limits & UI)
+│   └── MV OSAMA BEY- Ship's Particulars.pdf   # Ship documentation (particulars, capacities, etc.)
 ├── senashipping_app/
 │   ├── main.py                # Entry point
 │   ├── config/

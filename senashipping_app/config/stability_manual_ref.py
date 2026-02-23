@@ -3,7 +3,8 @@ Reference data and formulas from the vessel Loading Manual and Intact Stability 
 
 Source: assets/stability.pdf (OSAMA BEY – Loading Manual, Infinity Marine Consultants,
 IMO 9141041, Livestock). Used for limits, criteria, formulas and operating rules.
-Tank list is not included; see the PDF for tank identification.
+Ship documentation: assets/MV OSAMA BEY- Ship's Particulars.pdf (ship particulars).
+Tank list is not included; see the PDFs for tank identification.
 """
 
 from __future__ import annotations
