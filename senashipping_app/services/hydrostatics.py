@@ -15,6 +15,14 @@ from typing import List
 
 from ..models import Ship, Tank
 
+from .hydrostatic_curves import (
+    HydrostaticCurves,
+    interpolate_draft_from_displacement as _curve_draft_from_disp,
+    get_kb as _curve_kb,
+    get_lcb_norm as _curve_lcb,
+    get_i_t_i_l as _curve_i_t_i_l,
+)
+
 # Seawater density t/m³ (manual p.9: 1.025)
 RHO_SEA = 1.025
 
@@ -170,3 +178,92 @@ def compute_kg_from_tanks(
 def compute_gm(km_m: float, kg_m: float) -> float:
     """GM = KM - KG."""
     return max(0.0, km_m - kg_m)
+
+
+def solve_draft_from_displacement(
+    displacement_t: float,
+    length_m: float,
+    breadth_m: float,
+    lcg_norm: float,
+    rho: float = RHO_SEA,
+    cb: float = DEFAULT_CB,
+    curves: HydrostaticCurves | None = None,
+) -> tuple[float, float]:
+    """
+    Step 2 — Draft solver: solve Displacement(draft) = total weight (via curve or formula).
+    Step 3 — Trim solver: longitudinal balance so trim is realistic (LCG vs LCB, MTC).
+    Returns (draft_m, trim_m). When curves is None, uses formula and LCB=0.5.
+    """
+    if displacement_t <= 0 or length_m <= 0 or breadth_m <= 0:
+        return 0.0, 0.0
+    if curves is None or not curves.is_valid():
+        draft_m = displacement_to_draft(displacement_t, length_m, breadth_m, cb, rho)
+        trim_m = compute_trim(displacement_t, lcg_norm, length_m, breadth_m, draft_m, lcb_norm=0.5)
+        return draft_m, trim_m
+    draft_m = _curve_draft_from_disp(displacement_t, curves)
+    if draft_m <= 0:
+        draft_m = displacement_to_draft(displacement_t, length_m, breadth_m, cb, rho)
+    lcb_norm = _curve_lcb(draft_m, curves)
+    if lcb_norm is None:
+        lcb_norm = 0.5
+    i_t_i_l = _curve_i_t_i_l(draft_m, curves)
+    if i_t_i_l is not None:
+        i_t, i_l = i_t_i_l
+        v = displacement_t / rho
+        if v > EPS and i_l > 0:
+            bm_l = i_l / v
+            mtc = displacement_t * bm_l / (length_m * 100)
+            if mtc > EPS:
+                lcg_m = lcg_norm * length_m
+                lcb_m = lcb_norm * length_m
+                trim_m = (lcg_m - lcb_m) * displacement_t / mtc
+                return draft_m, trim_m
+    trim_m = compute_trim(displacement_t, lcg_norm, length_m, breadth_m, draft_m, lcb_norm=lcb_norm)
+    return draft_m, trim_m
+
+
+def get_kb_for_draft(draft_m: float, curves: HydrostaticCurves | None = None) -> float:
+    """KB (m) at given draft: from curves if available, else formula."""
+    if curves is not None and curves.is_valid():
+        kb = _curve_kb(draft_m, curves)
+        if kb is not None:
+            return kb
+    return compute_kb(draft_m)
+
+
+def get_bm_t_from_curves(
+    displacement_t: float,
+    draft_m: float,
+    length_m: float,
+    breadth_m: float,
+    rho: float,
+    curves: HydrostaticCurves | None = None,
+) -> float:
+    """Transverse BM: from curves I_T/V if available, else formula."""
+    if curves is not None and curves.is_valid():
+        i_t_i_l = _curve_i_t_i_l(draft_m, curves)
+        if i_t_i_l is not None:
+            i_t, _ = i_t_i_l
+            v = displacement_t / rho
+            if v > EPS:
+                return i_t / v
+    return compute_bm_t(displacement_t, length_m, breadth_m, rho)
+
+
+def get_bm_l_from_curves(
+    displacement_t: float,
+    draft_m: float,
+    length_m: float,
+    breadth_m: float,
+    rho: float,
+    curves: HydrostaticCurves | None = None,
+) -> float:
+    """Longitudinal BM: from curves I_L/V if available, else formula."""
+    if curves is not None and curves.is_valid():
+        i_t_i_l = _curve_i_t_i_l(draft_m, curves)
+        if i_t_i_l is not None:
+            _, i_l = i_t_i_l
+            v = displacement_t / rho
+            if v > EPS:
+                return i_l / v
+    return compute_bm_l(displacement_t, length_m, breadth_m, rho)

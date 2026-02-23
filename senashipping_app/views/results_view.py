@@ -33,6 +33,8 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 from ..models import Voyage
+from ..repositories import database
+from ..services.condition_service import ConditionService
 from ..config.stability_manual_ref import (
     MANUAL_VESSEL_NAME,
     MANUAL_IMO,
@@ -192,10 +194,10 @@ class ResultsView(QWidget):
         strength_layout.addSpacing(4)
         strength_layout.addLayout(strength_form)
 
-        # Cargo tab: livestock table Pen ID | Head count | Weight (t)
+        # Cargo tab: livestock table Pen name | Pen deck | Head count | Weight (t)
         self._cargo_table = QTableWidget(self)
-        self._cargo_table.setColumnCount(3)
-        self._cargo_table.setHorizontalHeaderLabels(["Pen ID", "Head count", "Weight (t)"])
+        self._cargo_table.setColumnCount(4)
+        self._cargo_table.setHorizontalHeaderLabels(["Pen name", "Pen deck", "Head count", "Weight (t)"])
         self._cargo_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self._cargo_table.setMaximumHeight(220)
         self._cargo_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -433,34 +435,51 @@ class ResultsView(QWidget):
         self._strength_sf_pct.setText(f"{getattr(strength, 'sf_pct_allow', 0):.1f}%")
         self._strength_sf_max.setText(f"{getattr(strength, 'shear_force_max_t', 0):,.1f}")
 
-    def _populate_cargo_tab(self, condition: Any) -> None:
-        """Fill Cargo tab from condition.pen_loadings (pen_id, head count, weight)."""
+    def _populate_cargo_tab(self, condition: Any, ship: Any) -> None:
+        """Fill Cargo tab from condition.pen_loadings; show pen name and deck instead of pen ID."""
         self._cargo_table.setRowCount(0)
         pen_loadings = getattr(condition, "pen_loadings", None) or {}
         if not pen_loadings:
             self._cargo_table.insertRow(0)
             self._cargo_table.setItem(0, 0, QTableWidgetItem("—"))
-            self._cargo_table.setItem(0, 1, QTableWidgetItem("No livestock loaded"))
-            self._cargo_table.setItem(0, 2, QTableWidgetItem("—"))
+            self._cargo_table.setItem(0, 1, QTableWidgetItem("—"))
+            self._cargo_table.setItem(0, 2, QTableWidgetItem("No livestock loaded"))
+            self._cargo_table.setItem(0, 3, QTableWidgetItem("—"))
             return
+        # Resolve pen_id -> (name, deck) from DB
+        pen_by_id: dict[int, Any] = {}
+        if ship and getattr(ship, "id", None) and database.SessionLocal:
+            with database.SessionLocal() as db:
+                pens = ConditionService(db).get_pens_for_ship(ship.id)
+                pen_by_id = {p.id: p for p in pens if p.id is not None}
         total_heads = 0
         total_weight = 0.0
-        for row, (pen_id, heads) in enumerate(sorted(pen_loadings.items())):
+        # Sort by (deck, name) for display
+        def sort_key(item: tuple) -> tuple:
+            pen_id, heads = item
+            p = pen_by_id.get(pen_id)
+            return (p.deck if p else "", p.name if p else str(pen_id), pen_id)
+        for pen_id, heads in sorted(pen_loadings.items(), key=sort_key):
             if heads <= 0:
                 continue
             w_t = heads * MASS_PER_HEAD_T
             total_heads += heads
             total_weight += w_t
+            p = pen_by_id.get(pen_id)
+            pen_name = p.name if p else str(pen_id)
+            pen_deck = p.deck if p else ""
             self._cargo_table.insertRow(self._cargo_table.rowCount())
             r = self._cargo_table.rowCount() - 1
-            self._cargo_table.setItem(r, 0, QTableWidgetItem(str(pen_id)))
-            self._cargo_table.setItem(r, 1, QTableWidgetItem(str(heads)))
-            self._cargo_table.setItem(r, 2, QTableWidgetItem(f"{w_t:,.1f}"))
+            self._cargo_table.setItem(r, 0, QTableWidgetItem(pen_name))
+            self._cargo_table.setItem(r, 1, QTableWidgetItem(pen_deck))
+            self._cargo_table.setItem(r, 2, QTableWidgetItem(str(heads)))
+            self._cargo_table.setItem(r, 3, QTableWidgetItem(f"{w_t:,.1f}"))
         self._cargo_table.insertRow(self._cargo_table.rowCount())
         r = self._cargo_table.rowCount() - 1
         self._cargo_table.setItem(r, 0, QTableWidgetItem("Total"))
-        self._cargo_table.setItem(r, 1, QTableWidgetItem(str(total_heads)))
-        self._cargo_table.setItem(r, 2, QTableWidgetItem(f"{total_weight:,.1f}"))
+        self._cargo_table.setItem(r, 1, QTableWidgetItem(""))
+        self._cargo_table.setItem(r, 2, QTableWidgetItem(str(total_heads)))
+        self._cargo_table.setItem(r, 3, QTableWidgetItem(f"{total_weight:,.1f}"))
 
     def update_results(
         self,
@@ -548,7 +567,7 @@ class ResultsView(QWidget):
         self._populate_weights_tab(results, condition)
         self._populate_trim_stability_tab(results, validation)
         self._populate_strength_tab(results)
-        self._populate_cargo_tab(condition)
+        self._populate_cargo_tab(condition, ship)
 
         # Populate criteria checklist
         self._populate_criteria_table(getattr(results, "criteria", None))

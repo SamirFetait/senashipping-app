@@ -13,13 +13,15 @@ from ..models import Ship, Tank, LoadingCondition, LivestockPen
 
 from .hydrostatics import (
     RHO_SEA,
-    displacement_to_draft,
-    compute_trim,
-    compute_kb,
-    compute_bm_t,
+    DEFAULT_CB,
     compute_kg_from_tanks,
     compute_gm,
+    solve_draft_from_displacement,
+    get_kb_for_draft,
+    get_bm_t_from_curves,
+    get_bm_l_from_curves,
 )
+from .hydrostatic_curves import build_curves_from_formulas, HydrostaticCurves
 from .longitudinal_strength import compute_strength, StrengthResult
 from .ancillary_calculations import compute_ancillary, AncillaryResults
 
@@ -124,23 +126,28 @@ def compute_condition(
     displacement_t = total_mass_t
 
     B = max(1e-6, ship.breadth_m)
+    design_draft = max(0.0, ship.design_draft_m) or 1.0
 
-    # Draft from displacement
-    draft_m = displacement_to_draft(displacement_t, L, B)
+    # Hydrostatic curves: formula-based when no table loaded (Path B)
+    curves: HydrostaticCurves | None = build_curves_from_formulas(
+        L, B, design_draft, cb=DEFAULT_CB, rho=RHO_SEA
+    )
 
-    # Trim from LCG (normalized 0-1)
+    # Draft and trim from iterative solver (or formula fallback when curves=None)
     if total_mass_t > 0:
         lcg_norm = total_lcg_moment / total_mass_t
     else:
         lcg_norm = 0.5
-    trim_m = compute_trim(displacement_t, lcg_norm, L, B, draft_m)
+    draft_m, trim_m = solve_draft_from_displacement(
+        displacement_t, L, B, lcg_norm, RHO_SEA, DEFAULT_CB, curves
+    )
 
     # KG = total VCG moment / total mass (tanks + pens)
     kg_m = total_vcg_moment / total_mass_t if total_mass_t > 1e-9 else 0.0
 
-    # KB, BM, KM, GM
-    kb_m = compute_kb(draft_m)
-    bm_t = compute_bm_t(displacement_t, L, B)
+    # KB, BM, KM, GM (from curves when available)
+    kb_m = get_kb_for_draft(draft_m, curves)
+    bm_t = get_bm_t_from_curves(displacement_t, draft_m, L, B, RHO_SEA, curves)
     km_m = kb_m + bm_t
     gm_m = compute_gm(km_m, kg_m)
 

@@ -46,7 +46,9 @@ from .ship_manager_view import ShipManagerView
 from .voyage_planner_view import VoyagePlannerView
 from .condition_editor_view import ConditionEditorView
 from .results_view import ResultsView
+from .hydrostatic_curves_view import HydrostaticCurvesView
 from .cargo_library_dialog import CargoLibraryDialog
+from .hydrostatic_calculator_dialog import HydrostaticCalculatorDialog
 
 
 @dataclass
@@ -55,6 +57,7 @@ class _PageIndexes:
     voyage_planner: int
     condition_editor: int
     results: int
+    hydrostatic_curves: int
 
 
 class MainWindow(QMainWindow):
@@ -96,11 +99,16 @@ class MainWindow(QMainWindow):
         self._voyage_planner = VoyagePlannerView(self)
         self._condition_editor = ConditionEditorView(self)
         self._results_view = ResultsView(self)
+        self._hydrostatic_curves_view = HydrostaticCurvesView(
+            self,
+            get_current_ship=lambda: getattr(self._condition_editor, "_current_ship", None),
+        )
 
         ship_idx = self._stack.addWidget(self._ship_manager)
         voy_idx = self._stack.addWidget(self._voyage_planner)
         cond_idx = self._stack.addWidget(self._condition_editor)
         res_idx = self._stack.addWidget(self._results_view)
+        curves_idx = self._stack.addWidget(self._hydrostatic_curves_view)
 
         # Default page
         self._stack.setCurrentIndex(ship_idx)
@@ -110,6 +118,7 @@ class MainWindow(QMainWindow):
             voyage_planner=voy_idx,
             condition_editor=cond_idx,
             results=res_idx,
+            hydrostatic_curves=curves_idx,
         )
 
         # Wire condition editor to results view
@@ -358,6 +367,11 @@ class MainWindow(QMainWindow):
         import_stl_action.triggered.connect(self._on_import_tanks_from_stl)
         tools_menu.addAction(import_stl_action)
 
+        # Hydrostatic Calculator – opens dialog with current ship
+        hydro_action = QAction("Hydrostatic Calculator...", self)
+        hydro_action.triggered.connect(self._on_hydrostatic_calculator)
+        tools_menu.addAction(hydro_action)
+
         # Remaining items
         items = [
             "Observed Drafts...",
@@ -366,7 +380,6 @@ class MainWindow(QMainWindow):
             "Advanced Load/Discharge Sequencer...",
             "Load/Discharge/BWE Sequence...",
             "Ship Squat Entry...",
-            "Hydrostatic Calculator...",
             "Air Drafts...",
             "Navigation Drafts..."
         ]
@@ -589,9 +602,10 @@ class MainWindow(QMainWindow):
             nav_group.addAction(action)
             self._nav_actions[page_index] = action
 
-        # Single-ship app: only Loading Condition and Results in main nav
+        # Single-ship app: Loading Condition, Results, Hydrostatic Curves in main nav
         add_nav_action("Loading Condition", "SP_FileDialogDetailedView", self._page_indexes.condition_editor, "Loading Condition", "F2")
         add_nav_action("Results", "SP_FileDialogInfoView", self._page_indexes.results, "Results", "F3")
+        add_nav_action("Curves", "SP_FileDialogContentsView", self._page_indexes.hydrostatic_curves, "Hydrostatic Curves", "F4")
 
         toolbar.addSeparator()
 
@@ -658,6 +672,13 @@ class MainWindow(QMainWindow):
             # Update cargo types in condition table widget and refresh dropdowns
             if hasattr(cond_editor, '_condition_table') and hasattr(cond_editor._condition_table, 'update_cargo_types'):
                 cond_editor._condition_table.update_cargo_types(cond_editor._cargo_types)
+
+    def _on_hydrostatic_calculator(self) -> None:
+        """Open Hydrostatic Calculator dialog; use current ship dimensions if available."""
+        cond_editor = self._stack.widget(self._page_indexes.condition_editor)
+        ship = getattr(cond_editor, "_current_ship", None) if isinstance(cond_editor, ConditionEditorView) else None
+        dlg = HydrostaticCalculatorDialog(self, ship=ship)
+        dlg.exec()
 
     def _on_import_tanks_from_stl(self) -> None:
         """Import STL mesh(es) as tank objects; volume and LCG, VCG, TCG from mesh."""

@@ -735,7 +735,18 @@ class ConditionEditorView(QWidget):
         ship_dwt = getattr(self._current_ship, "deadweight_t", 0.0) if self._current_ship else 0.0
         self._results_panel.update_results(results, ship_dwt)
         
-        # Waterline visualization removed - no update needed
+        # Step 4 — Connect UI to engine: redraw waterline from solved draft so the drawing is meaningful
+        L = getattr(self._current_ship, "length_overall_m", 0) or 0
+        D = getattr(self._current_ship, "depth_m", 0) or 0
+        if L > 0:
+            self._deck_profile_widget.update_waterline(
+                results.draft_m,
+                getattr(results, "draft_aft_m", results.draft_m + results.trim_m / 2),
+                getattr(results, "draft_fwd_m", results.draft_m - results.trim_m / 2),
+                ship_length=L,
+                ship_depth=D if D > 0 else None,
+                trim_m=results.trim_m,
+            )
         
         # Update condition table with current data
         with database.SessionLocal() as db:
