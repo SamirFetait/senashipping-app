@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
 )
 
+from ..config.limits import MIN_GM_LIVESTOCK_M
 from ..services.stability_service import ConditionResults
 
 
@@ -236,8 +237,11 @@ class ResultsPanel(QWidget):
         gmt_ok = gm_display > 0.0
         self._gmt_label.set_status(gmt_str, gmt_ok)
         
-        # GMt Margin (simplified - would need ship-specific limits)
-        self._gmt_margin_label.setText("N/A")
+        # GMt Margin vs minimum required (livestock: MIN_GM_LIVESTOCK_M)
+        gmt_margin = gm_display - MIN_GM_LIVESTOCK_M
+        margin_str = f"{gmt_margin:+.3f} m"
+        margin_ok = gmt_margin >= 0.0
+        self._gmt_margin_label.set_status(margin_str, margin_ok)
         
         # Max BMom %Allow
         strength = getattr(results, "strength", None)

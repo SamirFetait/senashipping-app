@@ -12,8 +12,8 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
-# Project excels folder (sounding tables loaded automatically from here)
-_EXCELS_DIR = Path(__file__).resolve().parent.parent.parent / "excels"
+# Project assets folder (sounding tables loaded automatically from here)
+_assets_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
 
 
 def _normalize_tank_name_for_match(name: str | None) -> str:
@@ -681,21 +681,26 @@ class ConditionEditorView(QWidget):
         for tid, vol in ct_vols.items():
             tank_volumes[tid] = vol
 
-        for row in range(self._pen_table.rowCount()):
-            name_item = self._pen_table.item(row, 0)
-            head_item = self._pen_table.item(row, 3)
-            if not name_item or not head_item:
-                continue
-            pen_id = name_item.data(Qt.ItemDataRole.UserRole)
-            if pen_id is None:
-                continue
-            try:
-                heads = int(float(head_item.text()))
-            except (TypeError, ValueError):
-                heads = 0
-            heads = max(0, heads)
-            if heads > 0:
-                pen_loadings[int(pen_id)] = heads
+        # Pen loadings: use condition table (Livestock-DK1..DK8) as source of truth so livestock decks affect calculations
+        ct_pen_loads = self._condition_table.get_pen_loadings_from_tables()
+        if ct_pen_loads:
+            pen_loadings = {pid: h for pid, h in ct_pen_loads.items() if h > 0}
+        else:
+            for row in range(self._pen_table.rowCount()):
+                name_item = self._pen_table.item(row, 0)
+                head_item = self._pen_table.item(row, 3)
+                if not name_item or not head_item:
+                    continue
+                pen_id = name_item.data(Qt.ItemDataRole.UserRole)
+                if pen_id is None:
+                    continue
+                try:
+                    heads = int(float(head_item.text()))
+                except (TypeError, ValueError):
+                    heads = 0
+                heads = max(0, heads)
+                if heads > 0:
+                    pen_loadings[int(pen_id)] = heads
 
         condition.tank_volumes_m3 = tank_volumes
         condition.pen_loadings = pen_loadings
@@ -811,20 +816,25 @@ class ConditionEditorView(QWidget):
         for tid, vol in ct_vols.items():
             tank_volumes[tid] = vol
 
-        for row in range(self._pen_table.rowCount()):
-            name_item = self._pen_table.item(row, 0)
-            head_item = self._pen_table.item(row, 3)
-            if not name_item or not head_item:
-                continue
-            pen_id = name_item.data(Qt.ItemDataRole.UserRole)
-            if pen_id is None:
-                continue
-            try:
-                heads = int(float(head_item.text()))
-            except (TypeError, ValueError):
-                heads = 0
-            if heads > 0:
-                pen_loadings[int(pen_id)] = heads
+        # Pen loadings: use condition table (Livestock-DK1..DK8) so livestock decks affect saved condition
+        ct_pen_loads = self._condition_table.get_pen_loadings_from_tables()
+        if ct_pen_loads:
+            pen_loadings = {pid: h for pid, h in ct_pen_loads.items() if h > 0}
+        else:
+            for row in range(self._pen_table.rowCount()):
+                name_item = self._pen_table.item(row, 0)
+                head_item = self._pen_table.item(row, 3)
+                if not name_item or not head_item:
+                    continue
+                pen_id = name_item.data(Qt.ItemDataRole.UserRole)
+                if pen_id is None:
+                    continue
+                try:
+                    heads = int(float(head_item.text()))
+                except (TypeError, ValueError):
+                    heads = 0
+                if heads > 0:
+                    pen_loadings[int(pen_id)] = heads
 
         condition = LoadingCondition(
             id=self._current_condition.id if self._current_condition else None,
@@ -969,15 +979,15 @@ class ConditionEditorView(QWidget):
             deck_tab._deck_view.fit_to_view()
 
     def _load_sounding_for_ship(self, ship: Optional[Ship]) -> None:
-        """Load sounding table from project excels/ for this ship (no user import)."""
+        """Load sounding table from project assets/ for this ship (no user import)."""
         if not ship or not ship.id:
             return
-        # Try "SOUNDING <ship name>.xlsx" then any SOUNDING*.xlsx in excels/
+        # Try "SOUNDING <ship name>.xlsx" then any SOUNDING*.xlsx in assets/
         safe_name = (ship.name or "").strip()
-        path = _EXCELS_DIR / f"SOUNDING {safe_name}.xlsx"
+        path = _assets_DIR / f"SOUNDING {safe_name}.xlsx"
         if not path.exists():
             try:
-                candidates = list(_EXCELS_DIR.glob("SOUNDING*.xlsx"))
+                candidates = list(_assets_DIR.glob("SOUNDING*.xlsx"))
                 if not candidates:
                     return
                 path = candidates[0]

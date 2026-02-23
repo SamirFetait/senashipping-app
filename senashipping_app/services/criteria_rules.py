@@ -1,7 +1,9 @@
 """
 IMO and Livestock criteria rule sets with hierarchical lines structure.
 
-Rules are evaluated against condition results and return pass/fail with margins.
+Rules follow vessel Loading Manual (assets/stability.pdf) and IMO IS Code A.749(18):
+general intact stability (§3.1), weather criterion (§3.2), applied livestock (§3.3).
+Evaluated against condition results; return pass/fail with margins.
 """
 
 from __future__ import annotations

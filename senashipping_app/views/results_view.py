@@ -27,15 +27,25 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QSplitter,
     QGroupBox,
+    QAbstractItemView,
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
 
 from ..models import Voyage
+from ..config.stability_manual_ref import (
+    MANUAL_VESSEL_NAME,
+    MANUAL_IMO,
+    MANUAL_REF,
+    MANUAL_SOURCE,
+    OPERATING_RESTRICTIONS,
+)
 from ..reports import build_condition_summary_text, export_condition_to_pdf, export_condition_to_excel
 from ..services.stability_service import ConditionResults
 from ..services.validation import ValidationResult
 from ..services.criteria_rules import CriterionResult
 from ..services.alarms import build_alarm_rows, AlarmStatus
+from ..config.limits import MASS_PER_HEAD_T
 
 
 class ResultsView(QWidget):
@@ -87,6 +97,84 @@ class ResultsView(QWidget):
         )
         self._alarms_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self._alarms_table.setMaximumHeight(200)
+        self._alarms_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+
+        # Weights tab: table Item | Weight (t)
+        self._weights_table = QTableWidget(self)
+        self._weights_table.setColumnCount(2)
+        self._weights_table.setHorizontalHeaderLabels(["Item", "Weight (t)"])
+        self._weights_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self._weights_table.setMaximumHeight(220)
+        self._weights_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._weights_tab_widget = QWidget(self)
+        weights_layout = QVBoxLayout(self._weights_tab_widget)
+        weight_breakdown_label = QLabel("Weight breakdown", self._weights_tab_widget)
+        weight_breakdown_label.setFont(QFont(weight_breakdown_label.font().family(), -1, QFont.Weight.Bold))
+        weights_layout.addWidget(weight_breakdown_label)
+        weights_layout.addWidget(self._weights_table)
+
+        # Trim & Stability tab: form layout
+        self._trim_draft_aft = QLineEdit(self)
+        self._trim_draft_mid = QLineEdit(self)
+        self._trim_draft_fwd = QLineEdit(self)
+        self._trim_trim = QLineEdit(self)
+        self._trim_heel = QLineEdit(self)
+        self._trim_gm = QLineEdit(self)
+        self._trim_kg = QLineEdit(self)
+        self._trim_km = QLineEdit(self)
+        for w in (
+            self._trim_draft_aft,
+            self._trim_draft_mid,
+            self._trim_draft_fwd,
+            self._trim_trim,
+            self._trim_heel,
+            self._trim_gm,
+            self._trim_kg,
+            self._trim_km,
+        ):
+            w.setReadOnly(True)
+        trim_form = QFormLayout()
+        trim_form.addRow("Draft Aft (m):", self._trim_draft_aft)
+        trim_form.addRow("Draft Mid (m):", self._trim_draft_mid)
+        trim_form.addRow("Draft Fwd (m):", self._trim_draft_fwd)
+        trim_form.addRow("Trim (m):", self._trim_trim)
+        trim_form.addRow("Heel (°):", self._trim_heel)
+        trim_form.addRow("GM (m):", self._trim_gm)
+        trim_form.addRow("KG (m):", self._trim_kg)
+        trim_form.addRow("KM (m):", self._trim_km)
+        self._trim_stability_tab_widget = QWidget(self)
+        trim_stability_layout = QVBoxLayout(self._trim_stability_tab_widget)
+        trim_stability_layout.addWidget(QLabel("Trim & stability parameters", self._trim_stability_tab_widget))
+        trim_stability_layout.addLayout(trim_form)
+
+        # Strength tab: table / form
+        self._strength_swbm = QLineEdit(self)
+        self._strength_bm_pct = QLineEdit(self)
+        self._strength_sf_pct = QLineEdit(self)
+        self._strength_sf_max = QLineEdit(self)
+        for w in (self._strength_swbm, self._strength_bm_pct, self._strength_sf_pct, self._strength_sf_max):
+            w.setReadOnly(True)
+        strength_form = QFormLayout()
+        strength_form.addRow("Still water BM (tm):", self._strength_swbm)
+        strength_form.addRow("BM % Allow:", self._strength_bm_pct)
+        strength_form.addRow("Max shear (t):", self._strength_sf_max)
+        strength_form.addRow("SF % Allow:", self._strength_sf_pct)
+        self._strength_tab_widget = QWidget(self)
+        strength_layout = QVBoxLayout(self._strength_tab_widget)
+        strength_layout.addWidget(QLabel("Longitudinal strength", self._strength_tab_widget))
+        strength_layout.addLayout(strength_form)
+
+        # Cargo tab: livestock table Pen ID | Head count | Weight (t)
+        self._cargo_table = QTableWidget(self)
+        self._cargo_table.setColumnCount(3)
+        self._cargo_table.setHorizontalHeaderLabels(["Pen ID", "Head count", "Weight (t)"])
+        self._cargo_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self._cargo_table.setMaximumHeight(220)
+        self._cargo_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._cargo_tab_widget = QWidget(self)
+        cargo_layout = QVBoxLayout(self._cargo_tab_widget)
+        cargo_layout.addWidget(QLabel("Livestock / cargo summary", self._cargo_tab_widget))
+        cargo_layout.addWidget(self._cargo_table)
 
         self._report_view = QPlainTextEdit(self)
         self._report_view.setReadOnly(True)
@@ -104,9 +192,27 @@ class ResultsView(QWidget):
         )
         self._criteria_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self._criteria_table.setMaximumHeight(180)
+        self._criteria_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
         self._trace_label = QLabel(self)
         self._trace_label.setWordWrap(True)
+
+        # Stability manual reference (from Loading Manual – operating restrictions)
+        self._manual_ref_group = QGroupBox("Stability manual reference")
+        self._manual_ref_text = QPlainTextEdit(self)
+        self._manual_ref_text.setReadOnly(True)
+        self._manual_ref_text.setMaximumHeight(120)
+        self._manual_ref_text.setPlaceholderText("Loading Manual reference and operating restrictions.")
+        _manual_lines = [
+            f"Source: {MANUAL_SOURCE}  |  {MANUAL_VESSEL_NAME}  IMO {MANUAL_IMO}",
+            f"Criteria: {MANUAL_REF}",
+            "",
+            "Operating restrictions:",
+        ] + [f"  • {r}" for r in OPERATING_RESTRICTIONS]
+        self._manual_ref_text.setPlainText("\n".join(_manual_lines))
+        manual_layout = QVBoxLayout()
+        manual_layout.addWidget(self._manual_ref_text)
+        self._manual_ref_group.setLayout(manual_layout)
 
         self._export_pdf_btn = QPushButton("Export PDF", self)
         self._export_excel_btn = QPushButton("Export Excel", self)
@@ -128,14 +234,10 @@ class ResultsView(QWidget):
         # Alarms panel with tabs
         alarms_tabs = QTabWidget()
         alarms_tabs.addTab(self._alarms_table, "Alarms")
-        alarms_weights = QLabel("Weights view – coming soon", self)
-        alarms_tabs.addTab(alarms_weights, "Weights")
-        alarms_trim = QLabel("Trim & Stability – coming soon", self)
-        alarms_tabs.addTab(alarms_trim, "Trim & Stability")
-        alarms_str = QLabel("Strength – coming soon", self)
-        alarms_tabs.addTab(alarms_str, "Strength")
-        alarms_cargo = QLabel("Cargo – coming soon", self)
-        alarms_tabs.addTab(alarms_cargo, "Cargo")
+        alarms_tabs.addTab(self._weights_tab_widget, "Weights")
+        alarms_tabs.addTab(self._trim_stability_tab_widget, "Trim & Stability")
+        alarms_tabs.addTab(self._strength_tab_widget, "Strength")
+        alarms_tabs.addTab(self._cargo_tab_widget, "Cargo")
         splitter.addWidget(alarms_tabs)
 
         # Calculation summary group
@@ -170,6 +272,7 @@ class ResultsView(QWidget):
         root.addWidget(self._criteria_table)
         root.addWidget(QLabel("Calculation traceability", self))
         root.addWidget(self._trace_label)
+        root.addWidget(self._manual_ref_group)
         root.addWidget(QLabel("Text Report", self))
         root.addWidget(self._report_view, 1)
 
@@ -239,6 +342,83 @@ class ResultsView(QWidget):
         self._trace_label.setText(
             f"Calculated: {ts_str} | Ship: {ship} | Condition: {cond} | {summary}"
         )
+
+    def _populate_weights_tab(self, results: ConditionResults, condition: Any) -> None:
+        """Fill Weights tab: displacement and optional breakdown (livestock, tanks & other)."""
+        self._weights_table.setRowCount(0)
+        disp = results.displacement_t
+        pen_loadings = getattr(condition, "pen_loadings", None) or {}
+        livestock_t = sum(h * MASS_PER_HEAD_T for h in pen_loadings.values())
+        tank_other = disp - livestock_t if disp >= 0 else 0.0
+        rows = [
+            ("Total displacement", f"{disp:,.1f}"),
+            ("Livestock (from head count)", f"{livestock_t:,.1f}" if pen_loadings else "—"),
+            ("Tanks & other", f"{tank_other:,.1f}"),
+        ]
+        for i, (item, weight) in enumerate(rows):
+            self._weights_table.insertRow(i)
+            self._weights_table.setItem(i, 0, QTableWidgetItem(item))
+            self._weights_table.setItem(i, 1, QTableWidgetItem(weight))
+
+    def _populate_trim_stability_tab(
+        self, results: ConditionResults, validation: ValidationResult | None
+    ) -> None:
+        """Fill Trim & Stability tab from results."""
+        draft_aft = getattr(results, "draft_aft_m", results.draft_m + results.trim_m / 2)
+        draft_fwd = getattr(results, "draft_fwd_m", results.draft_m - results.trim_m / 2)
+        heel = getattr(results, "heel_deg", 0.0)
+        gm_display = validation.gm_effective if validation else results.gm_m
+        self._trim_draft_aft.setText(f"{draft_aft:.3f}")
+        self._trim_draft_mid.setText(f"{results.draft_m:.3f}")
+        self._trim_draft_fwd.setText(f"{draft_fwd:.3f}")
+        self._trim_trim.setText(f"{results.trim_m:.3f}")
+        self._trim_heel.setText(f"{heel:.2f}")
+        self._trim_gm.setText(f"{gm_display:.3f}")
+        self._trim_kg.setText(f"{results.kg_m:.3f}")
+        self._trim_km.setText(f"{results.km_m:.3f}")
+
+    def _populate_strength_tab(self, results: ConditionResults) -> None:
+        """Fill Strength tab from results.strength."""
+        strength = getattr(results, "strength", None)
+        if not strength:
+            self._strength_swbm.setText("")
+            self._strength_bm_pct.setText("")
+            self._strength_sf_pct.setText("")
+            self._strength_sf_max.setText("")
+            return
+        self._strength_swbm.setText(f"{getattr(strength, 'still_water_bm_approx_tm', 0):,.0f}")
+        self._strength_bm_pct.setText(f"{getattr(strength, 'bm_pct_allow', 0):.1f}%")
+        self._strength_sf_pct.setText(f"{getattr(strength, 'sf_pct_allow', 0):.1f}%")
+        self._strength_sf_max.setText(f"{getattr(strength, 'shear_force_max_t', 0):,.1f}")
+
+    def _populate_cargo_tab(self, condition: Any) -> None:
+        """Fill Cargo tab from condition.pen_loadings (pen_id, head count, weight)."""
+        self._cargo_table.setRowCount(0)
+        pen_loadings = getattr(condition, "pen_loadings", None) or {}
+        if not pen_loadings:
+            self._cargo_table.insertRow(0)
+            self._cargo_table.setItem(0, 0, QTableWidgetItem("—"))
+            self._cargo_table.setItem(0, 1, QTableWidgetItem("No livestock loaded"))
+            self._cargo_table.setItem(0, 2, QTableWidgetItem("—"))
+            return
+        total_heads = 0
+        total_weight = 0.0
+        for row, (pen_id, heads) in enumerate(sorted(pen_loadings.items())):
+            if heads <= 0:
+                continue
+            w_t = heads * MASS_PER_HEAD_T
+            total_heads += heads
+            total_weight += w_t
+            self._cargo_table.insertRow(self._cargo_table.rowCount())
+            r = self._cargo_table.rowCount() - 1
+            self._cargo_table.setItem(r, 0, QTableWidgetItem(str(pen_id)))
+            self._cargo_table.setItem(r, 1, QTableWidgetItem(str(heads)))
+            self._cargo_table.setItem(r, 2, QTableWidgetItem(f"{w_t:,.1f}"))
+        self._cargo_table.insertRow(self._cargo_table.rowCount())
+        r = self._cargo_table.rowCount() - 1
+        self._cargo_table.setItem(r, 0, QTableWidgetItem("Total"))
+        self._cargo_table.setItem(r, 1, QTableWidgetItem(str(total_heads)))
+        self._cargo_table.setItem(r, 2, QTableWidgetItem(f"{total_weight:,.1f}"))
 
     def update_results(
         self,
@@ -321,6 +501,12 @@ class ResultsView(QWidget):
 
         # Populate alarms table
         self._populate_alarms_table(results, validation, getattr(results, "criteria", None))
+
+        # Populate Weights, Trim & Stability, Strength, Cargo tabs
+        self._populate_weights_tab(results, condition)
+        self._populate_trim_stability_tab(results, validation)
+        self._populate_strength_tab(results)
+        self._populate_cargo_tab(condition)
 
         # Populate criteria checklist
         self._populate_criteria_table(getattr(results, "criteria", None))

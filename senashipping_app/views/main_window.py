@@ -25,11 +25,20 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QMessageBox,
     QFileDialog,
+    QDialog,
+    QPlainTextEdit,
 )
 
 from typing import Dict
 
 from ..config.settings import Settings
+from ..config.stability_manual_ref import (
+    MANUAL_VESSEL_NAME,
+    MANUAL_IMO,
+    MANUAL_REF,
+    MANUAL_SOURCE,
+    OPERATING_RESTRICTIONS,
+)
 from ..services.file_service import save_condition_to_file, load_condition_from_file
 from ..reports import export_condition_to_excel, export_condition_to_pdf
 from ..repositories import database
@@ -186,7 +195,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(summary_action)
 
         program_notes_action = QAction("&Program Notes ...", self)
-        program_notes_action.triggered.connect(lambda: self._status_bar.showMessage("Program Notes"))
+        program_notes_action.triggered.connect(self._on_program_notes)
         file_menu.addAction(program_notes_action)
 
         send_loading_condition_by_email_action = QAction("&Send Loading condition by email ...", self)
@@ -1041,6 +1050,31 @@ class MainWindow(QMainWindow):
                 "Export Error",
                 f"Failed to export Excel file:\n{str(e)}"
             )
+
+    def _on_program_notes(self) -> None:
+        """Show Program Notes dialog with stability manual reference and operating restrictions."""
+        lines = [
+            f"Stability manual reference: {MANUAL_SOURCE}",
+            f"Vessel: {MANUAL_VESSEL_NAME}  IMO: {MANUAL_IMO}",
+            f"Criteria: {MANUAL_REF}",
+            "",
+            "Operating restrictions (from Loading Manual):",
+        ]
+        for r in OPERATING_RESTRICTIONS:
+            lines.append(f"  • {r}")
+        text = "\n".join(lines)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Program Notes – Stability Manual Reference")
+        layout = QVBoxLayout(dlg)
+        te = QPlainTextEdit(dlg)
+        te.setPlainText(text)
+        te.setReadOnly(True)
+        te.setMinimumSize(480, 280)
+        layout.addWidget(te)
+        ok_btn = QPushButton("OK", dlg)
+        ok_btn.clicked.connect(dlg.accept)
+        layout.addWidget(ok_btn)
+        dlg.exec()
 
     def _on_print_export(self) -> None:
         """Handle print/export action from toolbar."""

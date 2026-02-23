@@ -362,6 +362,35 @@ class ConditionTableWidget(QWidget):
                 out[int(tank_id)] = max(0.0, vol)
         return out
 
+    def get_pen_loadings_from_tables(self) -> Dict[int, int]:
+        """Read current head count per pen from Livestock-DK1..DK8 deck tabs only. All and Selected tabs are UI-only and must not affect calculations (to avoid double-counting)."""
+        out: Dict[int, int] = {}
+        for deck_num in range(1, 9):
+            tab_name = f"Livestock-DK{deck_num}"
+            table = self._table_widgets.get(tab_name)
+            if not table:
+                continue
+            is_deck8 = deck_num == 8
+            # DK1..DK7: col 0 = name (pen id), col 2 = # Head; DK8: col 0 = name (pen id), col 1 = Quantity
+            head_col = 1 if is_deck8 else 2
+            for row in range(table.rowCount()):
+                name_item = table.item(row, 0)
+                if not name_item or "Totals" in (name_item.text() or ""):
+                    continue
+                pen_id = name_item.data(Qt.ItemDataRole.UserRole)
+                if pen_id is None:
+                    continue
+                head_item = table.item(row, head_col)
+                if not head_item:
+                    continue
+                try:
+                    heads = int(float((head_item.text() or "0").strip()))
+                except (ValueError, TypeError):
+                    heads = 0
+                heads = max(0, heads)
+                out[int(pen_id)] = heads
+        return out
+
     def set_deck_profile_widget(self, deck_profile_widget) -> None:
         """Set reference to deck profile widget for bidirectional synchronization."""
         self._deck_profile_widget = deck_profile_widget

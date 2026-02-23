@@ -2,8 +2,9 @@
 Hydrostatic calculations.
 
 Uses ship principal dimensions and simplified formulas when full
-hydrostatic tables are not available. Includes numerical safeguards
-against division-by-zero and floating-point issues.
+hydrostatic tables are not available. Draft/trim formulas align with
+vessel Loading Manual (assets/stability.pdf): t = Disp*(LCB-LCG)/MT1*100,
+GM = KM - KG - GG'. Includes numerical safeguards against division-by-zero.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from typing import List
 
 from ..models import Ship, Tank
 
-# Seawater density t/m³
+# Seawater density t/m³ (manual p.9: 1.025)
 RHO_SEA = 1.025
 
 # Floating-point tolerance for safe divisions
@@ -99,13 +100,15 @@ def compute_trim(
     Approximate trim (m, positive = stern down) from LCG vs LCB.
 
     trim ≈ (LCG - LCB) * disp / MTC
-    MTC ≈ (disp * BM_L) / (100 * L) for 1cm; for 1m divide by 100.
-    Simplified: trim = (lcg - lcb) * L * factor
+    MTC uses longitudinal BM (I_L = B*L³/12), not transverse.
     """
     if displacement_t <= 0 or length_m <= 0:
         return 0.0
-    # MTC in tm/m (simplified from BM_L * disp / L)
-    bm_l = (breadth_m ** 3) * length_m / (12 * (displacement_t / RHO_SEA))
+    # Longitudinal BM for trim: I_L = B*L³/12, BM_L = I_L/V
+    bm_l = compute_bm_l(displacement_t, length_m, breadth_m, RHO_SEA)
+    if bm_l <= 0:
+        return 0.0
+    # MTC in tm/m (moment to change trim 1 m)
     mtc = displacement_t * bm_l / (length_m * 100)
     if mtc <= 0:
         return 0.0
