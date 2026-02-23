@@ -48,7 +48,25 @@ from ..services.alarms import build_alarm_rows, AlarmStatus
 from ..config.limits import MASS_PER_HEAD_T
 
 
+# Fixed height and style for Condition Results section headers (tabs and main sections)
+SECTION_HEADER_HEIGHT = 28
+SECTION_HEADER_STYLE = "font-weight: bold; color: #2c3e50;"
+
+
 class ResultsView(QWidget):
+    @staticmethod
+    def _section_header(parent: QWidget, text: str, *, is_main: bool = False) -> QLabel:
+        """Return a consistent section header label with fixed height and style."""
+        label = QLabel(text, parent)
+        label.setFixedHeight(SECTION_HEADER_HEIGHT)
+        label.setStyleSheet(SECTION_HEADER_STYLE)
+        font = label.font()
+        font.setWeight(QFont.Weight.Bold)
+        if is_main:
+            font.setPointSize(max(11, font.pointSize() + 1))
+        label.setFont(font)
+        return label
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
@@ -98,6 +116,12 @@ class ResultsView(QWidget):
         self._alarms_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self._alarms_table.setMaximumHeight(200)
         self._alarms_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._alarms_tab_widget = QWidget(self)
+        alarms_layout = QVBoxLayout(self._alarms_tab_widget)
+        alarms_layout.setContentsMargins(8, 10, 8, 8)
+        alarms_layout.addWidget(self._section_header(self._alarms_tab_widget, "Alarm messages"))
+        alarms_layout.addSpacing(4)
+        alarms_layout.addWidget(self._alarms_table)
 
         # Weights tab: table Item | Weight (t)
         self._weights_table = QTableWidget(self)
@@ -108,9 +132,9 @@ class ResultsView(QWidget):
         self._weights_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._weights_tab_widget = QWidget(self)
         weights_layout = QVBoxLayout(self._weights_tab_widget)
-        weight_breakdown_label = QLabel("Weight breakdown", self._weights_tab_widget)
-        weight_breakdown_label.setFont(QFont(weight_breakdown_label.font().family(), -1, QFont.Weight.Bold))
-        weights_layout.addWidget(weight_breakdown_label)
+        weights_layout.setContentsMargins(8, 10, 8, 8)
+        weights_layout.addWidget(self._section_header(self._weights_tab_widget, "Weight breakdown"))
+        weights_layout.addSpacing(4)
         weights_layout.addWidget(self._weights_table)
 
         # Trim & Stability tab: form layout
@@ -144,7 +168,9 @@ class ResultsView(QWidget):
         trim_form.addRow("KM (m):", self._trim_km)
         self._trim_stability_tab_widget = QWidget(self)
         trim_stability_layout = QVBoxLayout(self._trim_stability_tab_widget)
-        trim_stability_layout.addWidget(QLabel("Trim & stability parameters", self._trim_stability_tab_widget))
+        trim_stability_layout.setContentsMargins(8, 10, 8, 8)
+        trim_stability_layout.addWidget(self._section_header(self._trim_stability_tab_widget, "Trim & stability parameters"))
+        trim_stability_layout.addSpacing(4)
         trim_stability_layout.addLayout(trim_form)
 
         # Strength tab: table / form
@@ -161,7 +187,9 @@ class ResultsView(QWidget):
         strength_form.addRow("SF % Allow:", self._strength_sf_pct)
         self._strength_tab_widget = QWidget(self)
         strength_layout = QVBoxLayout(self._strength_tab_widget)
-        strength_layout.addWidget(QLabel("Longitudinal strength", self._strength_tab_widget))
+        strength_layout.setContentsMargins(8, 10, 8, 8)
+        strength_layout.addWidget(self._section_header(self._strength_tab_widget, "Longitudinal strength"))
+        strength_layout.addSpacing(4)
         strength_layout.addLayout(strength_form)
 
         # Cargo tab: livestock table Pen ID | Head count | Weight (t)
@@ -173,7 +201,9 @@ class ResultsView(QWidget):
         self._cargo_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._cargo_tab_widget = QWidget(self)
         cargo_layout = QVBoxLayout(self._cargo_tab_widget)
-        cargo_layout.addWidget(QLabel("Livestock / cargo summary", self._cargo_tab_widget))
+        cargo_layout.setContentsMargins(8, 10, 8, 8)
+        cargo_layout.addWidget(self._section_header(self._cargo_tab_widget, "Livestock / cargo summary"))
+        cargo_layout.addSpacing(4)
         cargo_layout.addWidget(self._cargo_table)
 
         self._report_view = QPlainTextEdit(self)
@@ -227,22 +257,30 @@ class ResultsView(QWidget):
 
     def _build_layout(self) -> None:
         root = QVBoxLayout(self)
-        root.addWidget(QLabel("Condition Results", self))
+        root.setSpacing(10)
+        root.addWidget(self._section_header(self, "Condition Results", is_main=True))
+        root.addSpacing(4)
 
         # Top split: Alarms (left) | Calculation Summary (right)
         splitter = QSplitter(Qt.Orientation.Horizontal)
         # Alarms panel with tabs
         alarms_tabs = QTabWidget()
-        alarms_tabs.addTab(self._alarms_table, "Alarms")
+        alarms_tabs.addTab(self._alarms_tab_widget, "Alarms")
         alarms_tabs.addTab(self._weights_tab_widget, "Weights")
         alarms_tabs.addTab(self._trim_stability_tab_widget, "Trim & Stability")
         alarms_tabs.addTab(self._strength_tab_widget, "Strength")
         alarms_tabs.addTab(self._cargo_tab_widget, "Cargo")
         splitter.addWidget(alarms_tabs)
 
-        # Calculation summary group
+        # Calculation summary group – enhanced styling
         summary_group = QGroupBox("Calculation Summary")
+        summary_group.setStyleSheet(
+            "QGroupBox { font-weight: bold; color: #2c3e50; } "
+            "QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 2px 6px; }"
+        )
+        summary_group.setMinimumWidth(260)
         summary_form = QFormLayout()
+        summary_form.setSpacing(6)
         summary_form.addRow("Ship:", self._ship_name)
         summary_form.addRow("Condition:", self._condition_name)
         summary_form.addRow("Displacement (t):", self._disp_edit)
@@ -266,14 +304,18 @@ class ResultsView(QWidget):
         root.addWidget(splitter)
 
         root.addWidget(self._status_label)
-        root.addWidget(QLabel("Validation messages", self))
+        root.addWidget(self._section_header(self, "Validation messages"))
+        root.addSpacing(2)
         root.addWidget(self._warnings_edit)
-        root.addWidget(QLabel("IMO & Livestock Criteria Checklist", self))
+        root.addWidget(self._section_header(self, "IMO & Livestock Criteria Checklist"))
+        root.addSpacing(2)
         root.addWidget(self._criteria_table)
-        root.addWidget(QLabel("Calculation traceability", self))
+        root.addWidget(self._section_header(self, "Calculation traceability"))
+        root.addSpacing(2)
         root.addWidget(self._trace_label)
         root.addWidget(self._manual_ref_group)
-        root.addWidget(QLabel("Text Report", self))
+        root.addWidget(self._section_header(self, "Text Report"))
+        root.addSpacing(2)
         root.addWidget(self._report_view, 1)
 
         export_row = QHBoxLayout()

@@ -1,5 +1,6 @@
 .env
 .pytest_cache
+temp_*.py
 db.sqlite3
 __pycache__
 .gitignore

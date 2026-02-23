@@ -67,6 +67,8 @@ class ConditionEditorView(QWidget):
     # Signal emitted when a condition has been computed:
     # args: results, ship, condition, voyage (or None for ad-hoc)
     condition_computed = pyqtSignal(object, object, object, object)
+    # Emitted when user clicks Save Condition but there is no voyage (single-ship): main window should run File → Save
+    save_condition_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -91,6 +93,8 @@ class ConditionEditorView(QWidget):
         self._cargo_type_combo.setMinimumWidth(180)
         self._cargo_library_btn = QPushButton("Edit library...", self)
         self._condition_name_edit = QLineEdit(self)
+        self._condition_name_edit.setPlaceholderText("e.g. Ballast departure")
+        self._condition_name_edit.setMinimumWidth(180)
         self._tank_table = QTableWidget(self)
         self._tank_table.setColumnCount(3)
         self._tank_table.setHorizontalHeaderLabels(
@@ -134,9 +138,7 @@ class ConditionEditorView(QWidget):
 
         self._build_layout()
         self._connect_signals()
-        # Single-ship: save to voyage disabled; user saves via File ΓåÆ Save
-        self._save_condition_btn.setEnabled(False)
-        self._save_condition_btn.setToolTip("Save to file via File ΓåÆ Save")
+        self._save_condition_btn.setToolTip("Save condition to file (prompts for path if not saved yet)")
         # Connect deck profile widget to condition table for bidirectional synchronization
         self._condition_table.set_deck_profile_widget(self._deck_profile_widget)
         # Callback so condition table can show VCG/LCG/TCG from sounding table when weight/volume changes
@@ -206,12 +208,14 @@ class ConditionEditorView(QWidget):
             }
         """)
 
-        # Top controls ΓÇô single-ship: ship is read-only, user only enters cargo type
+        # Top controls – single-ship: ship read-only; condition name then cargo type
         top = QHBoxLayout()
-        top.setSpacing(4)
+        top.setSpacing(8)
         top.addWidget(QLabel("Ship:", self))
         top.addWidget(self._ship_label, 1)
         self._ship_label.setStyleSheet("color: #555; padding: 4px;")
+        top.addWidget(QLabel("Condition name:", self))
+        top.addWidget(self._condition_name_edit, 1)
         top.addWidget(QLabel("Cargo type:", self))
         top.addWidget(self._cargo_type_combo, 2)
         top.addWidget(self._cargo_library_btn)
@@ -221,7 +225,6 @@ class ConditionEditorView(QWidget):
         self._ship_combo.hide()
         self._voyage_combo.hide()
         self._condition_combo.hide()
-        self._condition_name_edit.hide()
 
         # Main content area: left (profile+deck), right (results)
         main_splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -295,16 +298,18 @@ class ConditionEditorView(QWidget):
         # Single-ship: use first ship only, show name in read-only label
         if self._ships:
             self._current_ship = self._ships[0]
-            self._ship_label.setText(self._current_ship.name or "ΓÇö No ship ΓÇö")
+            self._ship_label.setText(self._current_ship.name or "— No ship —")
             self._ship_combo.setCurrentIndex(0)
             # Ensure cargo is set to "-- Blank --" before loading ship data
             if self._cargo_type_combo.count() > 0:
                 self._cargo_type_combo.setCurrentIndex(0)  # "-- Blank --"
             self._load_voyages()
             self._set_current_ship(self._current_ship)
+            self._save_condition_btn.setEnabled(True)
         else:
-            self._ship_label.setText("ΓÇö No ship ΓÇö Add one via Tools ΓåÆ Ship & data setup")
+            self._ship_label.setText("— No ship — Add one via Tools → Ship & data setup")
             self._current_ship = None
+            self._save_condition_btn.setEnabled(False)
 
     def showEvent(self, event: QShowEvent) -> None:
         """Refresh pens and tanks from DB when view is shown (e.g. returning from Ship Manager)."""
@@ -571,7 +576,7 @@ class ConditionEditorView(QWidget):
 
         self._condition_name_edit.setText(condition.name)
         self._set_cargo_type_text(condition.name)
-        self._ship_label.setText(ship.name if ship else "ΓÇö")
+        self._ship_label.setText(ship.name if ship else "—")
         self._save_condition_btn.setEnabled(True)
         if ship:
             with database.SessionLocal() as db:
@@ -610,7 +615,7 @@ class ConditionEditorView(QWidget):
             self._current_voyage = self._voyages[index - 1]
             self._current_condition = None
         self._load_conditions()
-        self._save_condition_btn.setEnabled(self._current_voyage is not None)
+        self._save_condition_btn.setEnabled(True)
         if self._current_ship:
             self._set_current_ship(self._current_ship)
 
@@ -632,12 +637,14 @@ class ConditionEditorView(QWidget):
         if not self._current_ship or self._current_ship.id is None:
             QMessageBox.information(
                 self, "No ship",
-                "Add a ship first via Tools ΓåÆ Ship & data setup.",
+                "Add a ship first via Tools → Ship & data setup.",
             )
             return
 
-        condition_name = self._cargo_type_combo.currentText().strip() or "Condition"
-        self._condition_name_edit.setText(condition_name)
+        # Use condition name from field; fall back to cargo type when empty (saved on Compute and used in PDF/Excel)
+        condition_name = self._condition_name_edit.text().strip() or self._cargo_type_combo.currentText().strip() or "Condition"
+        if not self._condition_name_edit.text().strip():
+            self._condition_name_edit.setText(condition_name)
 
         condition = LoadingCondition(
             id=self._current_condition.id if self._current_condition else None,
@@ -774,18 +781,20 @@ class ConditionEditorView(QWidget):
                 msg.show()
 
     def _on_save_condition(self) -> None:
-        if not self._current_voyage or not self._current_voyage.id:
+        if not self._current_ship:
             QMessageBox.information(
-                self, "Save", "Select a voyage first to save a condition."
+                self, "Save", "Select a ship first (Tools → Ship & data setup)."
             )
             return
-        if not self._current_ship:
+        # If we have a voyage in the DB, save to voyage; otherwise trigger file save from main window
+        if not self._current_voyage or not self._current_voyage.id:
+            self.save_condition_requested.emit()
             return
         if database.SessionLocal is None:
             return
 
         # Build condition from current form (same as compute but we need volumes)
-        condition_name = self._condition_name_edit.text().strip() or "Condition"
+        condition_name = self._condition_name_edit.text().strip() or self._cargo_type_combo.currentText().strip() or "Condition"
         tank_volumes: Dict[int, float] = {}
         pen_loadings: Dict[int, int] = {}
 

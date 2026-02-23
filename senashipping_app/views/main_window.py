@@ -116,6 +116,8 @@ class MainWindow(QMainWindow):
         self._condition_editor.condition_computed.connect(
             self._results_view.update_results
         )
+        # Save Condition button (no voyage): trigger File → Save / Save As
+        self._condition_editor.save_condition_requested.connect(self._on_save)
 
         # Wire voyage planner: when user clicks Edit Condition, switch to editor and load it
         self._voyage_planner.condition_selected.connect(
@@ -914,9 +916,9 @@ class MainWindow(QMainWindow):
         condition = condition_widget._current_condition
 
         if not condition:
-            # Create condition from current form state (single-ship: name = cargo type)
+            # Create condition from current form state (condition name from field, else cargo type)
             from ..models import LoadingCondition
-            condition_name = condition_widget._cargo_type_combo.currentText().strip() or condition_widget._condition_name_edit.text().strip() or "Condition"
+            condition_name = condition_widget._condition_name_edit.text().strip() or condition_widget._cargo_type_combo.currentText().strip() or "Condition"
             condition = LoadingCondition(
                 voyage_id=condition_widget._current_voyage.id if condition_widget._current_voyage else None,
                 name=condition_name,
@@ -963,6 +965,11 @@ class MainWindow(QMainWindow):
 
             condition.tank_volumes_m3 = tank_volumes
             condition.pen_loadings = pen_loadings
+        else:
+            # Keep condition name in sync with the form (e.g. user edited after Compute)
+            name_from_form = condition_widget._condition_name_edit.text().strip()
+            if name_from_form:
+                condition.name = name_from_form
 
         try:
             save_condition_to_file(file_path, condition)
