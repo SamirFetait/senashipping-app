@@ -612,6 +612,7 @@ class DeckView(ShipGraphicsView):
                 outline = getattr(t, "outline_xy", None)
                 if (deck or "").strip().upper() == deck_name.upper() and outline and len(outline) >= 3:
                     deck_tanks.append(t)
+
         for tank in deck_tanks:
             path = _outline_to_path(tank.outline_xy)
             item = TankPolygonItem(tank.id or -1, path)
@@ -656,23 +657,41 @@ class DeckView(ShipGraphicsView):
         if not deck_pens:
             return
 
-        # Get scene bounds to estimate ship dimensions
+        # Map ship LCG/TCG range to the DXF bounding box by scaling and centring,
+        # so pen rectangles sit on top of the drawing even if the absolute
+        # origins differ.
         bounds = self._scene.itemsBoundingRect()
-        ship_length = max(bounds.width(), 100.0)
-        ship_breadth = max(bounds.height(), 20.0)
+        if not bounds.isValid() or bounds.isEmpty():
+            return
+
+        lcg_vals = [float(getattr(p, "lcg_m", 0.0) or 0.0) for p in deck_pens]
+        tcg_vals = [float(getattr(p, "tcg_m", 0.0) or 0.0) for p in deck_pens]
+        lcg_min, lcg_max = min(lcg_vals), max(lcg_vals)
+        tcg_min, tcg_max = min(tcg_vals), max(tcg_vals)
+
+        span_lcg = max(lcg_max - lcg_min, 1e-6)
+        span_tcg = max(max(abs(tcg_min), abs(tcg_max)), 1e-6)
+
+        scale_x = bounds.width() / span_lcg
+        scale_y = (bounds.height() / 2.0) / span_tcg
+
+        cx0 = bounds.left()
+        cy0 = bounds.center().y()
 
         for pen in deck_pens:
             if not pen.id:
                 continue
 
-            # Position: LCG along ship, TCG from centerline
-            x_center = pen.lcg_m
-            y_center = ship_breadth / 2 + pen.tcg_m  # TCG: positive = starboard, negative = port
+            lcg = float(getattr(pen, "lcg_m", 0.0) or 0.0)
+            tcg = float(getattr(pen, "tcg_m", 0.0) or 0.0)
 
-            # Size rectangle based on area
+            # X: map [lcg_min, lcg_max] -> [bounds.left, bounds.right]
+            x_center = cx0 + (lcg - lcg_min) * scale_x
+            # Y: map TCG (m from CL) symmetrically about the vertical centre of bounds
+            y_center = cy0 - tcg * scale_y
+
             area_m2 = pen.area_m2 or 10.0
-            # For deck view: create square-ish rectangles based on area
-            size = max(area_m2 ** 0.5 * 1.5, 3.0)  # Scale sqrt(area), min 3
+            size = max(area_m2 ** 0.5 * 1.5, 3.0)
 
             rect = QRectF(x_center - size / 2, y_center - size / 2, size, size)
             marker = PenMarkerItem(pen.id, rect)
