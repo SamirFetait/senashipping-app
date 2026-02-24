@@ -97,7 +97,7 @@ The ship is assumed in **salt water (ρ = 1.025 t/m³)**. Underwater volume (m³
 The app can use:
 
 - **Formula-based curves (Path B):** Built from ship dimensions (L, B, design draft) and a block coefficient **Cb ≈ 0.78**.
-- **Curves from tables (if loaded):** Draft vs displacement, KB, LCB, waterplane inertias I_T, I_L.
+- **Curves from data (if loaded):** Draft vs displacement, KB, LCB, waterplane inertias I_T, I_L. These may come from a hydrostatic table or from a hull STL file.
 
 **Formula-based generation** (`hydrostatic_curves.build_curves_from_formulas`):
 
@@ -107,7 +107,7 @@ The app can use:
 - **Waterplane inertias** (rectangular waterplane):  
   **I_T = L×B³/12**, **I_L = B×L³/12** (same at all drafts in this simplified model).
 
-These curves are used to get **draft from displacement** and **KB, I_T, I_L** at that draft for trim and GM.
+These curves are used to get **draft from displacement** (via inverse interpolation) and **KB, I_T, I_L** at that draft for trim and GM.
 
 ---
 
@@ -199,12 +199,16 @@ If **GM** is zero or negative, heel is set to 0. This is an approximate steady h
 
 **Slack tanks** (partially filled) reduce effective stability. The app applies a **free surface correction (FSC)** in metres:
 
-- For each tank with fill ratio between about **5% and 95%**, a correction term is added based on tank mass, displacement, and a **free surface factor** (see `config/limits.py`: `FREE_SURFACE_FACTOR`).
-- **GM_effective = GM − FSC** (not below zero).
+- For each tank with fill ratio between about **5% and 95%**, a correction term is added based on tank mass, displacement, and a configurable **free surface factor** (`FREE_SURFACE_FACTOR` in `config/limits.py`).  
+  In code:  
+  FSC ≈ Σ over slack tanks of  
+  *(mass / Δ) × FREE_SURFACE_FACTOR × (1 − fill_ratio)*,  
+  capped at a maximum total correction.
+- **GM_effective = max(0, GM − FSC)**.
 
 **Loading Manual:**  
 **GG' = Total FSM / Δ**, **GM = KM − KG − GG'**.  
-The app’s FSC is a simplified implementation of this idea. Validation and criteria use **GM_effective** when checking minimum GM.
+The app’s FSC is a simplified implementation of this idea. **Validation and IMO/livestock criteria always use GM_effective** when checking minimum GM.
 
 ---
 
@@ -252,13 +256,15 @@ These are indicative. For class or approval, use the vessel’s approved loading
 
 - **ERROR (status FAILED):**
   - **GM_effective < MIN_GM_M** (0.15 m).
-  - **|trim| > L × MAX_TRIM_FRACTION** (e.g. 2% LOA).
-  - **draft > design_draft × MAX_DRAFT_FRACTION** (e.g. 105% design draft).
+  - **|trim| > L × MAX_TRIM_FRACTION** (e.g. 2% LOA), **only if ship length is set** (L > small threshold).
+  - **draft > design_draft × MAX_DRAFT_FRACTION** (e.g. 105% design draft), **only if design draft is set** (> small threshold).
 - **WARNING:**
   - GM marginal (e.g. below 1.5 × MIN_GM_M).
   - Still-water BM over a fraction of “design” BM.
   - Zero displacement.
   - Volume given for unknown tank ID.
+
+If ship length or design draft are left at 0, the corresponding trim/draft checks are treated as **not applicable** instead of forcing the status to FAILED.
 
 So **“FAILED”** = one or more **validation errors** (limits exceeded); the underlying hydrostatic and stability **numbers are still calculated** and shown.
 
@@ -268,24 +274,25 @@ So **“FAILED”** = one or more **validation errors** (limits exceeded); the u
 
 **IMO (intact stability)**
 
-- **Minimum GM:** GM_effective ≥ **0.15 m** (IS Code).
-- **Trim limit:** |trim| ≤ **L × 2%** (configurable).
-- **Draft limit:** draft ≤ **design_draft × 105%** (configurable).
+- **Minimum GM:** GM_effective ≥ **0.15 m** (IS Code 3.1.2.4).
+- **Trim limit:** |trim| ≤ **L × 2%** (configurable). If ship length is not set, this criterion is marked **N/A**.
+- **Draft limit:** draft ≤ **design_draft × 105%** (configurable). If design draft is not set, this criterion is marked **N/A**.
 
 **Livestock (AMSA MO43 / IMO livestock)**
 
 - **Minimum GM (stricter):** GM_effective ≥ **0.20 m**.
-- **Roll period:** **T = 2π × K × B / √(g × GM)** (K ≈ 0.45); must be ≤ **MAX_ROLL_PERIOD_S** (e.g. 15 s) for animal welfare.
-- **Freeboard:** **freeboard = depth − draft − 0.5×|trim|** ≥ **MIN_FREEBORD_M** (e.g. 0.3 m).
+- **Roll period:** **T = 2π × K × B / √(g × GM_eff)** (K ≈ 0.45); must be ≤ **MAX_ROLL_PERIOD_S** (e.g. 15 s) for animal welfare.
+- **Freeboard:** **freeboard = depth − draft − 0.5×|trim|** ≥ **MIN_FREEBORD_M** (e.g. 0.3 m). If ship depth is not set, this criterion is marked **N/A**.
 
 **Ancillary**
 
-- GZ status (simplified GM/heel pass).
+- **GZ criteria status (simplified):**  
+  For the criteria line, GM_effective is compared to the IMO minimum (0.15 m); where validation is not available it falls back to a simple GM/heel check.
 - **Prop immersion** ≥ e.g. **60%**.
 - **Visibility** ≥ e.g. **1.0 m**.
 - **Air draft** ≥ e.g. **5.0 m**.
 
-All limits are in **`senashipping_app/config/limits.py`**. Results appear in the **Criteria** tab with pass/fail and margin per line.
+All numeric limits are in **`senashipping_app/config/limits.py`**. Results appear in the **Criteria** tab with pass/fail and margin per line.
 
 ---
 

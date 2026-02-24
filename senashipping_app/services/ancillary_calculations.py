@@ -122,8 +122,13 @@ def compute_ancillary(
     GZ criteria: simplified pass if GM >= 0.15 and heel within limits.
     Full GZ curve evaluation would require stability calculations.
     """
-    L = max(1e-6, ship.length_overall_m)
-    D = max(1e-6, ship.depth_m)
+    from ..config.stability_manual_ref import REF_LOA_M, REF_DEPTH_M
+
+    # Use ship dimensions from DB when available, else fall back to manual values.
+    L = getattr(ship, "length_overall_m", 0.0) or REF_LOA_M
+    D = getattr(ship, "depth_m", 0.0) or REF_DEPTH_M
+    L = max(1e-6, L)
+    D = max(1e-6, D)
 
     prop_pct = compute_prop_immersion_pct(draft_aft_m, L, D)
     visibility = compute_visibility_m(L, D, draft_fwd_m, trim_m)

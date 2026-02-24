@@ -47,6 +47,7 @@ from .voyage_planner_view import VoyagePlannerView
 from .condition_editor_view import ConditionEditorView
 from .results_view import ResultsView
 from .cargo_library_dialog import CargoLibraryDialog
+from .curves_view import CurvesView
 
 
 @dataclass
@@ -55,6 +56,7 @@ class _PageIndexes:
     voyage_planner: int
     condition_editor: int
     results: int
+    curves: int
 
 
 class MainWindow(QMainWindow):
@@ -96,25 +98,31 @@ class MainWindow(QMainWindow):
         self._voyage_planner = VoyagePlannerView(self)
         self._condition_editor = ConditionEditorView(self)
         self._results_view = ResultsView(self)
+        self._curves_view = CurvesView(self)
 
         ship_idx = self._stack.addWidget(self._ship_manager)
         voy_idx = self._stack.addWidget(self._voyage_planner)
         cond_idx = self._stack.addWidget(self._condition_editor)
         res_idx = self._stack.addWidget(self._results_view)
+        curves_idx = self._stack.addWidget(self._curves_view)
 
         # Default page
-        self._stack.setCurrentIndex(ship_idx)
+        self._stack.setCurrentIndex(cond_idx)
 
         pages = _PageIndexes(
             ship_manager=ship_idx,
             voyage_planner=voy_idx,
             condition_editor=cond_idx,
             results=res_idx,
+            curves=curves_idx,
         )
 
-        # Wire condition editor to results view
+        # Wire condition editor to results and curves views
         self._condition_editor.condition_computed.connect(
             self._results_view.update_results
+        )
+        self._condition_editor.condition_computed.connect(
+            self._curves_view.update_curve
         )
         # Save Condition button (no voyage): trigger File → Save / Save As
         self._condition_editor.save_condition_requested.connect(self._on_save)
@@ -590,9 +598,10 @@ class MainWindow(QMainWindow):
             nav_group.addAction(action)
             self._nav_actions[page_index] = action
 
-        # Single-ship app: Loading Condition, Results in main nav
+        # Single-ship app: Loading Condition, Results, Curves in main nav
         add_nav_action("Loading Condition", self._page_indexes.condition_editor, "Loading Condition", "F2")
         add_nav_action("Results", self._page_indexes.results, "Results", "F3")
+        add_nav_action("Curves", self._page_indexes.curves, "Curves")
 
         toolbar.addSeparator()
 
@@ -645,7 +654,7 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentIndex(index)
         self._status_bar.showMessage(status_message)
 
-        # Update toolbar checked state (only Loading Condition / Results have nav buttons)
+        # Update toolbar checked state (Loading Condition / Results / Curves have nav buttons)
         for idx, action in self._nav_actions.items():
             action.setChecked(idx == index)
 
@@ -1119,6 +1128,13 @@ class MainWindow(QMainWindow):
 
     def _on_compute(self) -> None:
         """Handle compute action from toolbar."""
+        # Reset GZ curve before each new computation so it never shows stale data
+        if hasattr(self, "_curves_view") and self._curves_view is not None:
+            try:
+                self._curves_view.clear_curve()
+            except Exception:
+                # Non-fatal: keep going with computation even if curve reset fails
+                pass
         # Switch to condition editor if not already there
         if self._stack.currentIndex() != self._page_indexes.condition_editor:
             self._switch_page(self._page_indexes.condition_editor, "Loading Condition")

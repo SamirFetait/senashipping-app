@@ -135,15 +135,22 @@ class TankPolygonItem(QGraphicsPathItem):
         self._update_style()
 
     def _update_style(self) -> None:
+        """
+        Style tank polygon so that in the normal state it matches the
+        underlying DXF: thin dark gray lines, no fill. On hover/selection,
+        highlight in blue so the chosen tank stands out.
+        """
         if self.isSelected():
             self.setPen(QPen(QColor(0, 100, 255), 2.5))
             self.setBrush(QBrush(QColor(100, 160, 255, 80)))
         elif self._hover:
             self.setPen(QPen(QColor(80, 140, 255), 1.5))
-            self.setBrush(QBrush(QColor(200, 220, 255, 100)))
+            self.setBrush(QBrush(QColor(200, 220, 255, 40)))
         else:
-            self.setPen(QPen(Qt.GlobalColor.darkGray, 1))
-            self.setBrush(QBrush(QColor(220, 220, 220, 60)))
+            # Match DXF look: cosmetic hairline dark gray, no fill
+            base_pen = QPen(Qt.GlobalColor.darkGray, 0)
+            self.setPen(base_pen)
+            self.setBrush(QBrush(Qt.BrushStyle.NoBrush))
         self.update()
 
     def hoverEnterEvent(self, event) -> None:
@@ -182,14 +189,20 @@ class PenMarkerItem(QGraphicsRectItem):
         self._update_style()
 
     def _update_style(self) -> None:
+        """
+        Style pen marker rectangles so that in the normal state they are thin
+        dark gray lines (similar to DXF), and only stand out in blue when
+        hovered or selected.
+        """
         if self.isSelected():
             self.setPen(QPen(QColor(0, 150, 255), 1.5))  # Thin blue outline when selected
-            self.setBrush(QBrush(Qt.BrushStyle.NoBrush))  # No fill, just outline
+            self.setBrush(QBrush(Qt.BrushStyle.NoBrush))
         elif self._hover:
             self.setPen(QPen(QColor(100, 180, 255), 1.2))  # Lighter blue on hover
             self.setBrush(QBrush(Qt.BrushStyle.NoBrush))
         else:
-            self.setPen(QPen(QColor(100, 100, 100), 0.8))  # Thin gray outline
+            # Match DXF tone: very thin dark gray, no fill
+            self.setPen(QPen(Qt.GlobalColor.darkGray, 0))
             self.setBrush(QBrush(Qt.BrushStyle.NoBrush))
         self.update()
 
@@ -228,10 +241,14 @@ class ProfileView(ShipGraphicsView):
         super().__init__(parent)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
-        
+
+        # Keep DXF profile static within its section (no scrollbars)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
         # Set white background
         self._scene.setBackgroundBrush(QBrush(Qt.GlobalColor.white))
-        
+
         # Enable interaction for pen selection with multi-selection
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)  # Enable rubber band selection
         self.setInteractive(True)  # Enable interaction for clickable pens
@@ -345,20 +362,20 @@ class ProfileView(ShipGraphicsView):
         for marker in list(self._pen_markers.values()):
             self._scene.removeItem(marker)
         self._pen_markers.clear()
-        
+
         if not self._current_pens or self._ship_length == 0:
             return
-        
+
         # Calculate scaling: assume pens are positioned relative to ship length
         # For profile view: x = LCG, y = VCG from keel (keel_y - vcg)
         for pen in self._current_pens:
             if not pen.id:
                 continue
-            
+
             # Position: LCG along ship, VCG from keel
             x_center = pen.lcg_m
             y_center = self._keel_y - pen.vcg_m  # VCG measured from keel upward
-            
+
             # Size rectangle based on area
             # Convert area (m²) to visual size: assume sqrt(area) gives a reasonable dimension
             # Scale it appropriately for the view
@@ -367,8 +384,8 @@ class ProfileView(ShipGraphicsView):
             # Height: fixed small height for profile view (pens are thin vertically)
             width = max(min(area_m2 ** 0.5 * 2.0, self._ship_length * 0.1), 5.0)  # Min 5, max 10% of ship length
             height = max(self._ship_depth * 0.05, 3.0)  # Small fixed height, min 3
-            
-            rect = QRectF(x_center - width/2, y_center - height/2, width, height)
+
+            rect = QRectF(x_center - width / 2, y_center - height / 2, width, height)
             marker = PenMarkerItem(pen.id, rect)
             marker.setZValue(100)  # Above hull fill, below waterline
             self._pen_markers[pen.id] = marker
@@ -397,48 +414,8 @@ class ProfileView(ShipGraphicsView):
         finally:
             self._syncing_selection = False
             
-    def update_waterline(
-        self,
-        draft_mid: float,
-        draft_aft: float | None = None,
-        draft_fwd: float | None = None,
-        ship_length: float | None = None,
-        ship_depth: float | None = None,
-        trim_m: float | None = None,
-    ) -> None:
-        """
-        Update waterline visualization based on draft values.
-        
-        Args:
-            draft_mid: Draft at midship (m)
-            draft_aft: Draft at aft (m), optional
-            draft_fwd: Draft at forward (m), optional
-            ship_length: Ship length (m), optional
-            ship_depth: Ship depth (m), optional - used for proper scaling
-            trim_m: Trim value (m, positive = stern down), optional - for display
-        """
-        if ship_length:
-            self._ship_length = ship_length
-        if ship_depth:
-            self._ship_depth = ship_depth
-            
-        if self._ship_length == 0:
-            return
-        
-        # Calculate proper scaling factor based on ship depth or use scene bounds
-        if self._ship_depth > 0:
-            # Use actual ship depth for scaling
-            scene_bounds = self._scene.itemsBoundingRect()
-            scene_depth = abs(scene_bounds.height())
-            if scene_depth > 0:
-                scale_y = scene_depth / self._ship_depth
-            else:
-                scale_y = self._ship_breadth / 10.0 if self._ship_breadth > 0 else 1.0
-        else:
-            # Fallback to estimated scaling
-            scale_y = self._ship_breadth / 10.0 if self._ship_breadth > 0 else 1.0
-        
-        # Remove old waterline elements
+    def _clear_waterline_items(self) -> None:
+        """Remove all waterline-related items from the scene."""
         if self._waterline_item:
             self._scene.removeItem(self._waterline_item)
             self._waterline_item = None
@@ -457,85 +434,30 @@ class ProfileView(ShipGraphicsView):
         if self._trim_text_item:
             self._scene.removeItem(self._trim_text_item)
             self._trim_text_item = None
-        
-        # Calculate waterline positions (measured from keel upward)
-        # In Qt scene coordinates, y increases downward, so we subtract from keel_y
-        if draft_aft is not None and draft_fwd is not None:
-            # Angled waterline showing trim
-            y_aft = self._keel_y - draft_aft * scale_y
-            y_fwd = self._keel_y - draft_fwd * scale_y
-            
-            # Draw waterline fill (semi-transparent blue polygon below waterline)
-            fill_path = QPainterPath()
-            fill_path.moveTo(0, y_aft)
-            fill_path.lineTo(self._ship_length, y_fwd)
-            fill_path.lineTo(self._ship_length, self._keel_y)
-            fill_path.lineTo(0, self._keel_y)
-            fill_path.closeSubpath()
-            
-            self._waterline_fill_item = self._scene.addPath(
-                fill_path,
-                QPen(Qt.PenStyle.NoPen),
-                QBrush(QColor(100, 150, 255, 60))  # Semi-transparent blue
-            )
-            self._waterline_fill_item.setZValue(50)
-            
-            # Draw waterline (blue, thick)
-            waterline_pen = QPen(QColor(0, 100, 200), 4)
-            self._waterline_item = self._scene.addLine(
-                0, y_aft, self._ship_length, y_fwd, waterline_pen
-            )
-            
-            # Add draft markers at aft, mid, and forward
-            self._add_draft_marker(0, y_aft, draft_aft, "Aft")
-            mid_x = self._ship_length / 2
-            y_mid = y_aft + (y_fwd - y_aft) * 0.5
-            self._add_draft_marker(mid_x, y_mid, draft_mid, "Mid")
-            self._add_draft_marker(self._ship_length, y_fwd, draft_fwd, "Fwd")
-            
-            # Display trim value
-            if trim_m is not None:
-                trim_str = f"Trim: {abs(trim_m):.3f}m {'A' if trim_m >= 0 else 'F'}"
-                trim_color = QColor(0, 150, 0) if abs(trim_m) < 1.0 else QColor(200, 150, 0) if abs(trim_m) < 2.0 else QColor(200, 0, 0)
-                self._trim_text_item = self._scene.addText(trim_str, QFont("Arial", 12, QFont.Weight.Bold))
-                self._trim_text_item.setDefaultTextColor(trim_color)
-                self._trim_text_item.setPos(mid_x - 50, y_mid - 30)
-                self._trim_text_item.setZValue(150)
-        else:
-            # Level waterline
-            y = self._keel_y - draft_mid * scale_y
-            
-            # Draw waterline fill
-            fill_path = QPainterPath()
-            fill_path.moveTo(0, y)
-            fill_path.lineTo(self._ship_length, y)
-            fill_path.lineTo(self._ship_length, self._keel_y)
-            fill_path.lineTo(0, self._keel_y)
-            fill_path.closeSubpath()
-            
-            self._waterline_fill_item = self._scene.addPath(
-                fill_path,
-                QPen(Qt.PenStyle.NoPen),
-                QBrush(QColor(100, 150, 255, 60))
-            )
-            self._waterline_fill_item.setZValue(50)
-            
-            # Draw waterline (blue, thick)
-            waterline_pen = QPen(QColor(0, 100, 200), 4)
-            self._waterline_item = self._scene.addLine(
-                0, y, self._ship_length, y, waterline_pen
-            )
-            
-            # Add draft marker at midship
-            mid_x = self._ship_length / 2
-            self._add_draft_marker(mid_x, y, draft_mid, "Mid")
-            
-        # Bring waterline to front
-        if self._waterline_item:
-            self._waterline_item.setZValue(100)
-        
-        # Auto-fit scene to view after updating waterline
+
+    def clear_waterline(self) -> None:
+        """Public helper to clear waterline and refit the profile view."""
+        self._clear_waterline_items()
         self._fit_scene_to_view()
+
+    def update_waterline(
+        self,
+        draft_mid: float,
+        draft_aft: float | None = None,
+        draft_fwd: float | None = None,
+        ship_length: float | None = None,
+        ship_depth: float | None = None,
+        trim_m: float | None = None,
+    ) -> None:
+        """
+        Update waterline visualization based on draft values.
+
+        Temporarily disabled so only the static DXF profile is shown (no
+        additional profile polylines or fills drawn by code).
+        """
+        # Always clear any previous waterline items so nothing dynamic remains
+        self._clear_waterline_items()
+        return
     
     def _add_draft_marker(self, x: float, y: float, draft_value: float, label: str) -> None:
         """Add a draft measurement marker with label at the specified position."""
@@ -582,10 +504,14 @@ class DeckView(ShipGraphicsView):
         super().__init__(parent)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
-        
+
+        # Keep DXF deck plan static within its section (no scrollbars)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
         # Set white background
         self._scene.setBackgroundBrush(QBrush(Qt.GlobalColor.white))
-        
+
         # Enable interaction for pen selection with multi-selection
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)  # Enable rubber band selection
         self.setInteractive(True)  # Enable interaction for clickable pens
@@ -677,6 +603,8 @@ class DeckView(ShipGraphicsView):
         _load_dxf_into_scene(dxf_path, self._scene)
 
         # Add tank polylines on top (same coordinate system as DXF so they match)
+        # Draw with the same thin dark gray line as the DXF so they look like
+        # part of the original drawing until a tank is hovered/selected.
         deck_tanks = []
         if tanks:
             for t in tanks:
@@ -713,10 +641,10 @@ class DeckView(ShipGraphicsView):
         for marker in list(self._pen_markers.values()):
             self._scene.removeItem(marker)
         self._pen_markers.clear()
-        
+
         if not self._current_pens or not self._deck_name:
             return
-        
+
         # Filter pens for this deck
         from .condition_table_widget import _deck_to_letter
         deck_letter = self._deck_name.upper()
@@ -724,29 +652,29 @@ class DeckView(ShipGraphicsView):
             p for p in self._current_pens
             if _deck_to_letter(p.deck or "") == deck_letter
         ]
-        
+
         if not deck_pens:
             return
-        
+
         # Get scene bounds to estimate ship dimensions
         bounds = self._scene.itemsBoundingRect()
         ship_length = max(bounds.width(), 100.0)
         ship_breadth = max(bounds.height(), 20.0)
-        
+
         for pen in deck_pens:
             if not pen.id:
                 continue
-            
+
             # Position: LCG along ship, TCG from centerline
             x_center = pen.lcg_m
             y_center = ship_breadth / 2 + pen.tcg_m  # TCG: positive = starboard, negative = port
-            
+
             # Size rectangle based on area
             area_m2 = pen.area_m2 or 10.0
             # For deck view: create square-ish rectangles based on area
             size = max(area_m2 ** 0.5 * 1.5, 3.0)  # Scale sqrt(area), min 3
-            
-            rect = QRectF(x_center - size/2, y_center - size/2, size, size)
+
+            rect = QRectF(x_center - size / 2, y_center - size / 2, size, size)
             marker = PenMarkerItem(pen.id, rect)
             marker.setZValue(50)  # Above DXF lines
             self._pen_markers[pen.id] = marker
@@ -1011,4 +939,8 @@ class DeckProfileWidget(QWidget):
         self._profile_view.update_waterline(
             draft_mid, draft_aft, draft_fwd, ship_length, ship_depth, trim_m
         )
+
+    def clear_waterline(self) -> None:
+        """Clear any existing waterline from the profile view."""
+        self._profile_view.clear_waterline()
 

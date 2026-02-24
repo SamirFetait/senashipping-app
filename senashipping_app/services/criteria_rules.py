@@ -77,7 +77,8 @@ def evaluate_imo_criteria(
 ) -> List[CriterionLine]:
     """Evaluate IMO intact stability criteria."""
     lines: List[CriterionLine] = []
-    L = max(EPS, ship.length_overall_m)
+    L = getattr(ship, "length_overall_m", 0.0) or 0.0
+    design_draft = getattr(ship, "design_draft_m", 0.0) or 0.0
     validation = getattr(results, "validation", None)
     gm_eff = getattr(validation, "gm_effective", None) if validation else None
     if gm_eff is None:
@@ -90,7 +91,7 @@ def evaluate_imo_criteria(
     lines.append(CriterionLine(
         code="IMO_GM",
         name="Minimum GM",
-        reference="IS Code Ch.2",
+        reference="IS Code 3.1.2.4",
         result=result,
         value=gm_eff,
         limit=MIN_GM_M,
@@ -98,36 +99,59 @@ def evaluate_imo_criteria(
         message=f"GM {gm_eff:.3f} m, min {MIN_GM_M} m" + (f", margin {margin:+.3f} m" if margin is not None else ""),
     ))
 
-    # 2. Trim limit
-    max_trim = L * MAX_TRIM_FRACTION
-    margin_trim = max_trim - abs(results.trim_m)
-    result_trim = CriterionResult.PASS if margin_trim >= 0 else CriterionResult.FAIL
-    lines.append(CriterionLine(
-        code="IMO_TRIM",
-        name="Trim limit",
-        reference="IS Code",
-        result=result_trim,
-        value=abs(results.trim_m),
-        limit=max_trim,
-        margin=margin_trim,
-        message=f"Trim {abs(results.trim_m):.2f} m, max {max_trim:.2f} m, margin {margin_trim:+.2f} m",
-    ))
+    # 2. Trim limit (N/A if ship length not set)
+    if L > 0.01:
+        max_trim = L * MAX_TRIM_FRACTION
+        margin_trim = max_trim - abs(results.trim_m)
+        result_trim = CriterionResult.PASS if margin_trim >= 0 else CriterionResult.FAIL
+        lines.append(CriterionLine(
+            code="IMO_TRIM",
+            name="Trim limit",
+            reference="IS Code",
+            result=result_trim,
+            value=abs(results.trim_m),
+            limit=max_trim,
+            margin=margin_trim,
+            message=f"Trim {abs(results.trim_m):.2f} m, max {max_trim:.2f} m, margin {margin_trim:+.2f} m",
+        ))
+    else:
+        lines.append(CriterionLine(
+            code="IMO_TRIM",
+            name="Trim limit",
+            reference="IS Code",
+            result=CriterionResult.N_A,
+            value=abs(results.trim_m),
+            limit=None,
+            margin=None,
+            message="N/A (ship length not set)",
+        ))
 
-    # 3. Draft limit
-    design_draft = max(EPS, ship.design_draft_m)
-    max_draft = design_draft * MAX_DRAFT_FRACTION
-    margin_draft = max_draft - results.draft_m
-    result_draft = CriterionResult.PASS if margin_draft >= 0 else CriterionResult.FAIL
-    lines.append(CriterionLine(
-        code="IMO_DRAFT",
-        name="Draft limit",
-        reference="Load Line",
-        result=result_draft,
-        value=results.draft_m,
-        limit=max_draft,
-        margin=margin_draft,
-        message=f"Draft {results.draft_m:.2f} m, max {max_draft:.2f} m, margin {margin_draft:+.2f} m",
-    ))
+    # 3. Draft limit (N/A if design draft not set)
+    if design_draft > 0.01:
+        max_draft = design_draft * MAX_DRAFT_FRACTION
+        margin_draft = max_draft - results.draft_m
+        result_draft = CriterionResult.PASS if margin_draft >= 0 else CriterionResult.FAIL
+        lines.append(CriterionLine(
+            code="IMO_DRAFT",
+            name="Draft limit",
+            reference="Load Line",
+            result=result_draft,
+            value=results.draft_m,
+            limit=max_draft,
+            margin=margin_draft,
+            message=f"Draft {results.draft_m:.2f} m, max {max_draft:.2f} m, margin {margin_draft:+.2f} m",
+        ))
+    else:
+        lines.append(CriterionLine(
+            code="IMO_DRAFT",
+            name="Draft limit",
+            reference="Load Line",
+            result=CriterionResult.N_A,
+            value=results.draft_m,
+            limit=None,
+            margin=None,
+            message="N/A (design draft not set)",
+        ))
 
     return lines
 
@@ -192,21 +216,33 @@ def evaluate_livestock_criteria(
             message="N/A (GM too low)",
         ))
 
-    # 3. Deck immersion / freeboard
-    depth = max(EPS, ship.depth_m)
-    freeboard = depth - results.draft_m - 0.5 * abs(results.trim_m)
-    margin_fb = freeboard - MIN_FREEBORD_M
-    result_fb = CriterionResult.PASS if margin_fb >= 0 else CriterionResult.FAIL
-    lines.append(CriterionLine(
-        code="LIV_FREEBORD",
-        name="Minimum freeboard (no deck immersion)",
-        reference="AMSA MO43",
-        result=result_fb,
-        value=freeboard,
-        limit=MIN_FREEBORD_M,
-        margin=margin_fb,
-        message=f"Freeboard {freeboard:.2f} m, min {MIN_FREEBORD_M} m, margin {margin_fb:+.2f} m",
-    ))
+    # 3. Deck immersion / freeboard (N/A if ship depth not set)
+    depth = getattr(ship, "depth_m", 0.0) or 0.0
+    if depth > 0.01:
+        freeboard = depth - results.draft_m - 0.5 * abs(results.trim_m)
+        margin_fb = freeboard - MIN_FREEBORD_M
+        result_fb = CriterionResult.PASS if margin_fb >= 0 else CriterionResult.FAIL
+        lines.append(CriterionLine(
+            code="LIV_FREEBORD",
+            name="Minimum freeboard (no deck immersion)",
+            reference="AMSA MO43",
+            result=result_fb,
+            value=freeboard,
+            limit=MIN_FREEBORD_M,
+            margin=margin_fb,
+            message=f"Freeboard {freeboard:.2f} m, min {MIN_FREEBORD_M} m, margin {margin_fb:+.2f} m",
+        ))
+    else:
+        lines.append(CriterionLine(
+            code="LIV_FREEBORD",
+            name="Minimum freeboard (no deck immersion)",
+            reference="AMSA MO43",
+            result=CriterionResult.N_A,
+            value=None,
+            limit=MIN_FREEBORD_M,
+            margin=None,
+            message="N/A (ship depth not set)",
+        ))
 
     return lines
 
@@ -221,12 +257,17 @@ def evaluate_gz_and_ancillary_criteria(
     if not ancillary:
         return lines
 
-    # GZ criteria (simplified)
-    gz_ok = getattr(ancillary, "gz_criteria_ok", False)
+    # GZ criteria (simplified): use effective GM when available so consistent with IMO_GM
+    validation = getattr(results, "validation", None)
+    gm_eff = getattr(validation, "gm_effective", None) if validation else None
+    if gm_eff is not None:
+        gz_ok = gm_eff >= MIN_GM_M
+    else:
+        gz_ok = getattr(ancillary, "gz_criteria_ok", False)
     lines.append(CriterionLine(
         code="GZ_STATUS",
         name="GZ Criteria Status",
-        reference="IS Code Ch.2",
+        reference="IS Code 3.1.2",
         result=CriterionResult.PASS if gz_ok else CriterionResult.FAIL,
         value=1.0 if gz_ok else 0.0,
         limit=1.0,

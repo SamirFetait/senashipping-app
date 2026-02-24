@@ -20,6 +20,8 @@ class ShipORM(Base):
     breadth_m: Mapped[float] = mapped_column(Float, default=0.0)
     depth_m: Mapped[float] = mapped_column(Float, default=0.0)
     design_draft_m: Mapped[float] = mapped_column(Float, default=0.0)
+    lightship_draft_m: Mapped[float] = mapped_column(Float, default=0.0)
+    lightship_displacement_t: Mapped[float] = mapped_column(Float, default=0.0)
 
 
 class ShipRepository:
@@ -37,6 +39,8 @@ class ShipRepository:
             breadth_m=ship.breadth_m,
             depth_m=ship.depth_m,
             design_draft_m=ship.design_draft_m,
+            lightship_draft_m=getattr(ship, "lightship_draft_m", 0.0),
+            lightship_displacement_t=getattr(ship, "lightship_displacement_t", 0.0),
         )
         self._db.add(obj)
         self._db.commit()
@@ -57,6 +61,8 @@ class ShipRepository:
             breadth_m=obj.breadth_m,
             depth_m=obj.depth_m,
             design_draft_m=obj.design_draft_m,
+            lightship_draft_m=getattr(obj, "lightship_draft_m", 0.0),
+            lightship_displacement_t=getattr(obj, "lightship_displacement_t", 0.0),
         )
 
     def list(self) -> List[Ship]:
@@ -72,6 +78,8 @@ class ShipRepository:
                     breadth_m=obj.breadth_m,
                     depth_m=obj.depth_m,
                     design_draft_m=obj.design_draft_m,
+                    lightship_draft_m=getattr(obj, "lightship_draft_m", 0.0),
+                    lightship_displacement_t=getattr(obj, "lightship_displacement_t", 0.0),
                 )
             )
         return ships
@@ -90,6 +98,8 @@ class ShipRepository:
         obj.breadth_m = ship.breadth_m
         obj.depth_m = ship.depth_m
         obj.design_draft_m = ship.design_draft_m
+        obj.lightship_draft_m = getattr(ship, "lightship_draft_m", 0.0)
+        obj.lightship_displacement_t = getattr(ship, "lightship_displacement_t", 0.0)
 
         self._db.commit()
         self._db.refresh(obj)

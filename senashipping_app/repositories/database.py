@@ -114,6 +114,17 @@ def init_database(db_path: Path) -> sessionmaker:
         except Exception:
             pass  # Column already exists
 
+    # Migration: ships lightship (empty-ship) data so draft is never 0
+    for col in ("lightship_draft_m", "lightship_displacement_t"):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    f"ALTER TABLE ships ADD COLUMN {col} REAL DEFAULT 0.0"
+                ))
+                conn.commit()
+        except Exception:
+            pass  # Column already exists
+
     # Migration: cargo_types calculation fields (Edit Cargo dialog)
     for col, typ in (
         ("method", "VARCHAR(64)"),

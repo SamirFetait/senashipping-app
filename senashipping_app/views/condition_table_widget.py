@@ -21,7 +21,10 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QLabel,
     QComboBox,
+    QStyledItemDelegate,
+    QLineEdit,
 )
+from PyQt6.QtGui import QDoubleValidator
 
 from ..models import Tank, LivestockPen
 from ..models.tank import TankType
@@ -45,6 +48,27 @@ TANK_CATEGORY_TYPES: Dict[str, List[TankType]] = {
     "Spaces": [TankType.CARGO],  # Spaces category for tanks
 }
 TANK_CATEGORY_NAMES: List[str] = list(TANK_CATEGORY_TYPES.keys())
+
+
+class _NumericItemDelegate(QStyledItemDelegate):
+    """
+    Delegate that restricts editing to numeric input only (floating-point).
+    Used for all tank and pen numeric columns so users cannot type text.
+    """
+
+    def __init__(self, allow_negative: bool = True, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._allow_negative = allow_negative
+
+    def createEditor(self, parent, option, index):
+        editor = QLineEdit(parent)
+        validator = QDoubleValidator(parent)
+        if not self._allow_negative:
+            validator.setBottom(0.0)
+        validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        validator.setDecimals(6)
+        editor.setValidator(validator)
+        return editor
 
 
 def _deck_to_letter(deck: str) -> Optional[str]:
@@ -182,6 +206,13 @@ class ConditionTableWidget(QWidget):
             "LS Moment m-MT",
         ])
         self._setup_common_table(table)
+
+        # Default: pens table cells are numeric-only, except Name and Cargo.
+        numeric_delegate = _NumericItemDelegate(allow_negative=False, parent=table)
+        table.setItemDelegate(numeric_delegate)
+        text_delegate = QStyledItemDelegate(table)
+        table.setItemDelegateForColumn(0, text_delegate)  # Name
+        table.setItemDelegateForColumn(1, text_delegate)  # Cargo
         return table
 
     def _create_all_table(self) -> QTableWidget:
@@ -274,6 +305,12 @@ class ConditionTableWidget(QWidget):
             "LS Moment m-MT",
         ])
         self._setup_common_table(table)
+
+        # Deck 8 table: all editable columns except Name are numeric-only.
+        numeric_delegate = _NumericItemDelegate(allow_negative=False, parent=table)
+        table.setItemDelegate(numeric_delegate)
+        text_delegate = QStyledItemDelegate(table)
+        table.setItemDelegateForColumn(0, text_delegate)  # Name
         return table
 
     # Tank table column indices (reference: green indicator, Name, Ull/Snd, UTrim, Capacity, %Full, Volume, Dens, Weight, VCG, LCG, TCG, FSopt, FSt)
@@ -317,6 +354,13 @@ class ConditionTableWidget(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setStretchLastSection(True)
         self._setup_common_table(table)
+
+        # Tank tables: all editable columns are numeric-only, except indicator and Name.
+        numeric_delegate = _NumericItemDelegate(allow_negative=True, parent=table)
+        table.setItemDelegate(numeric_delegate)
+        text_delegate = QStyledItemDelegate(table)
+        table.setItemDelegateForColumn(0, text_delegate)  # Indicator
+        table.setItemDelegateForColumn(1, text_delegate)  # Name
         return table
 
     def _setup_common_table(self, table: QTableWidget) -> None:

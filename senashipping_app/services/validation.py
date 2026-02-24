@@ -125,32 +125,37 @@ def validate_condition(
             )
         )
 
-    # 2. Extreme trim
-    L = max(EPS, ship.length_overall_m)
-    max_trim = L * MAX_TRIM_FRACTION
-    if abs(results.trim_m) > max_trim:
-        issues.append(
-            ValidationIssue(
-                code="TRIM_EXCESSIVE",
-                severity=ValidationSeverity.ERROR,
-                message=f"Trim {results.trim_m:.2f} m exceeds limit {max_trim:.2f} m ({MAX_TRIM_FRACTION*100:.1f}% LOA).",
-                value=abs(results.trim_m),
-                limit=max_trim,
-            )
-        )
+    # 2. Extreme trim (only when ship length is set; otherwise limit would be ~0 and always fail)
+    from ..config.stability_manual_ref import REF_LOA_M, REF_DESIGN_DRAFT_M
 
-    # 3. Draft over limit
-    design_draft = max(EPS, ship.design_draft_m)
-    if results.draft_m > design_draft * MAX_DRAFT_FRACTION:
-        issues.append(
-            ValidationIssue(
-                code="DRAFT_OVER",
-                severity=ValidationSeverity.ERROR,
-                message=f"Draft {results.draft_m:.2f} m exceeds {MAX_DRAFT_FRACTION*100:.0f}% of design draft {design_draft:.2f} m.",
-                value=results.draft_m,
-                limit=design_draft * MAX_DRAFT_FRACTION,
+    L = getattr(ship, "length_overall_m", 0.0) or REF_LOA_M
+    if L > 0.01:
+        max_trim = L * MAX_TRIM_FRACTION
+        if abs(results.trim_m) > max_trim:
+            issues.append(
+                ValidationIssue(
+                    code="TRIM_EXCESSIVE",
+                    severity=ValidationSeverity.ERROR,
+                    message=f"Trim {results.trim_m:.2f} m exceeds limit {max_trim:.2f} m ({MAX_TRIM_FRACTION*100:.1f}% LOA).",
+                    value=abs(results.trim_m),
+                    limit=max_trim,
+                )
             )
-        )
+
+    # 3. Draft over limit (only when design draft is set; otherwise limit would be ~0 and always fail)
+    design_draft = getattr(ship, "design_draft_m", 0.0) or REF_DESIGN_DRAFT_M
+    if design_draft > 0.01:
+        max_draft = design_draft * MAX_DRAFT_FRACTION
+        if results.draft_m > max_draft:
+            issues.append(
+                ValidationIssue(
+                    code="DRAFT_OVER",
+                    severity=ValidationSeverity.ERROR,
+                    message=f"Draft {results.draft_m:.2f} m exceeds {MAX_DRAFT_FRACTION*100:.0f}% of design draft {design_draft:.2f} m.",
+                    value=results.draft_m,
+                    limit=max_draft,
+                )
+            )
 
     # 4. Over-limit bending moment
     if hasattr(results, "strength") and results.strength:

@@ -36,8 +36,11 @@ def _safe_div(a: float, b: float, default: float = 0.0) -> float:
         return default
     return a / b
 
-# Typical block coefficient for cargo/tanker
-DEFAULT_CB = 0.78
+# Typical block coefficient for this vessel (OSAMA BEY).
+# From stability manual hydrostatics at design draft:
+#   Draft T = 7.60 m, Disp ≈ 10451 t, LBP = 110.04 m, B = 19.40 m, ρ = 1.025 t/m³
+#   Cb = Disp / (ρ * LBP * B * T) ≈ 0.63
+DEFAULT_CB = 0.63
 
 
 @dataclass(slots=True)

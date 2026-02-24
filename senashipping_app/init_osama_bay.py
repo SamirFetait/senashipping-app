@@ -38,7 +38,9 @@ def _get_or_create_osama_bay(ship_repo: ShipRepository) -> Ship:
         length_overall_m=0.0,
         breadth_m=0.0,
         depth_m=0.0,
-        design_draft_m=0.0,
+        design_draft_m=7.60,
+        lightship_draft_m=4.188,
+        lightship_displacement_t=5076.0,
     )
     return ship_repo.create(ship)
 

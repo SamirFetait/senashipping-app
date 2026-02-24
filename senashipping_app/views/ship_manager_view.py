@@ -33,6 +33,7 @@ from ..repositories.tank_repository import TankRepository
 from ..repositories.livestock_pen_repository import LivestockPenRepository
 from ..services.ship_service import ShipService, ShipValidationError
 from ..utils.sorting import get_pen_sort_key, get_tank_sort_key
+from ..config.stability_manual_ref import REF_LOA_M
 from .condition_table_widget import TANK_CATEGORY_NAMES, TANK_CATEGORY_TYPES
 
 
@@ -59,6 +60,14 @@ class ShipManagerView(QWidget):
         self._design_draft_spin = QDoubleSpinBox(self)
         self._design_draft_spin.setRange(0.0, 50.0)
         self._design_draft_spin.setDecimals(2)
+        self._lightship_draft_spin = QDoubleSpinBox(self)
+        self._lightship_draft_spin.setRange(0.0, 50.0)
+        self._lightship_draft_spin.setDecimals(3)
+        self._lightship_draft_spin.setSpecialValueText("Use manual ref")
+        self._lightship_displacement_spin = QDoubleSpinBox(self)
+        self._lightship_displacement_spin.setRange(0.0, 50000.0)
+        self._lightship_displacement_spin.setDecimals(1)
+        self._lightship_displacement_spin.setSpecialValueText("Use manual ref")
 
         self._ship_new_btn = QPushButton("New Ship", self)
         self._ship_save_btn = QPushButton("Save Ship", self)
@@ -145,6 +154,8 @@ class ShipManagerView(QWidget):
         ship_form.addRow("Breadth (m):", self._breadth_spin)
         ship_form.addRow("Depth (m):", self._depth_spin)
         ship_form.addRow("Design Draft (m):", self._design_draft_spin)
+        ship_form.addRow("Lightship Draft (m):", self._lightship_draft_spin)
+        ship_form.addRow("Lightship Displacement (t):", self._lightship_displacement_spin)
 
         ship_btns = QHBoxLayout()
         ship_btns.addWidget(self._ship_new_btn)
@@ -226,6 +237,8 @@ class ShipManagerView(QWidget):
             self._breadth_spin.setValue(ship.breadth_m)
             self._depth_spin.setValue(ship.depth_m)
             self._design_draft_spin.setValue(ship.design_draft_m)
+            self._lightship_draft_spin.setValue(getattr(ship, "lightship_draft_m", 0.0))
+            self._lightship_displacement_spin.setValue(getattr(ship, "lightship_displacement_t", 0.0))
 
             tanks = tank_repo.list_for_ship(ship.id)
             pens = LivestockPenRepository(db).list_for_ship(ship.id)
@@ -457,6 +470,8 @@ class ShipManagerView(QWidget):
             ship.breadth_m = float(self._breadth_spin.value())
             ship.depth_m = float(self._depth_spin.value())
             ship.design_draft_m = float(self._design_draft_spin.value())
+            ship.lightship_draft_m = float(self._lightship_draft_spin.value())
+            ship.lightship_displacement_t = float(self._lightship_displacement_spin.value())
 
             try:
                 ship = service.save_ship(ship)
@@ -713,7 +728,7 @@ class ShipManagerView(QWidget):
                     category=category,
                     capacity_m3=volume,
                     density_t_per_m3=density,
-                    longitudinal_pos=lcg / (self._current_ship.length_overall_m or 1.0) if self._current_ship.length_overall_m else 0.5,
+                    longitudinal_pos=lcg / max(self._current_ship.length_overall_m or 0.0, REF_LOA_M) if (self._current_ship.length_overall_m or 0.0) >= 1.0 else (lcg / REF_LOA_M if REF_LOA_M > 0 else 0.5),
                     kg_m=vcg,
                     lcg_m=lcg,
                     tcg_m=tcg,
@@ -846,5 +861,7 @@ class ShipManagerView(QWidget):
         self._breadth_spin.setValue(0.0)
         self._depth_spin.setValue(0.0)
         self._design_draft_spin.setValue(0.0)
+        self._lightship_draft_spin.setValue(0.0)
+        self._lightship_displacement_spin.setValue(0.0)
 
 

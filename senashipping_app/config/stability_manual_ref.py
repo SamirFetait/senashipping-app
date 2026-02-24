@@ -23,6 +23,13 @@ REF_BREADTH_M = 19.40
 REF_DEPTH_M = 9.45
 REF_DESIGN_DRAFT_M = 7.60
 
+# From stability.txt Load Case NO.01 – LIGHT WEIGHT: empty ship still has weight and floats
+REF_LIGHTSHIP_DRAFT_M = 4.188
+REF_LIGHTSHIP_DISPLACEMENT_T = 5076.0
+REF_LIGHTSHIP_KG_M = 7.79  # VCG (m) for lightship from manual
+REF_LIGHTSHIP_LCG_NORM = 47.72 / REF_LBP_M  # Long. arm 47.72 m → norm 0–1 (0=aft, 1=fwd)
+REF_LIGHTSHIP_TCG_M = 0.0  # Trans. arm 0.000 from manual
+
 # --- Fluid densities (PDF p.9) – used for sea water, conversions ---
 # Sea Water 1.025, Fresh Water 1.000, Diesel 0.840, Fuel oil 0.9443, Sewage 1.0, Slop 0.913
 FLUID_DENSITY_SEA = 1.025

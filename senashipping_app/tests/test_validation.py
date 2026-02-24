@@ -57,6 +57,27 @@ class TestValidation:
         v = validate_condition(ship, res, tanks, {})
         assert any(i.code == "ZERO_WEIGHT" for i in v.issues)
 
+    def test_draft_over_detection(self):
+        ship = Ship(length_overall_m=150.0, breadth_m=25.0, design_draft_m=10.0)
+        # Construct results with draft above 105% of design draft
+        res = ConditionResults(displacement_t=0.0, draft_m=11.0, trim_m=0.0, gm_m=0.5)
+        v = validate_condition(ship, res, [], {})
+        assert any(i.code == "DRAFT_OVER" for i in v.issues)
+
+    def test_trim_excessive_detection(self):
+        ship = Ship(length_overall_m=150.0, breadth_m=25.0, design_draft_m=10.0)
+        # 2% of 150 m = 3 m, so 4 m trim should be excessive
+        res = ConditionResults(displacement_t=0.0, draft_m=5.0, trim_m=4.0, gm_m=0.5)
+        v = validate_condition(ship, res, [], {})
+        assert any(i.code == "TRIM_EXCESSIVE" for i in v.issues)
+
+    def test_no_draft_trim_errors_when_dimensions_missing(self):
+        # When ship dimensions are not set (0), draft/trim checks should be skipped
+        ship = Ship(length_overall_m=0.0, breadth_m=25.0, design_draft_m=0.0)
+        res = ConditionResults(displacement_t=0.0, draft_m=8.0, trim_m=2.0, gm_m=0.5)
+        v = validate_condition(ship, res, [], {})
+        assert not any(i.code in {"DRAFT_OVER", "TRIM_EXCESSIVE"} for i in v.issues)
+
 
 class TestFreeSurface:
     def test_slack_tank_reduces_gm(self):

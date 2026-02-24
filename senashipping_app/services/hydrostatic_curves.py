@@ -85,10 +85,13 @@ def interpolate_draft_from_displacement(
     """
     if not curves.is_valid() or displacement_t <= 0:
         return 0.0
+    # Curve is (draft -> displacement). Find draft such that displacement(draft) = displacement_t.
+    # _interpolate_inverse(target_y, x_list, y_list) returns x where y(x)=target_y.
+    # So x_list = draft_m, y_list = displacement_t.
     return _interpolate_inverse(
         displacement_t,
-        curves.displacement_t,
         curves.draft_m,
+        curves.displacement_t,
     )
 
 

@@ -641,6 +641,9 @@ class ConditionEditorView(QWidget):
             )
             return
 
+        # Reset waterline before running a new computation so it never shows stale drafts
+        self._deck_profile_widget.clear_waterline()
+
         # Use condition name from field; fall back to cargo type when empty (saved on Compute and used in PDF/Excel)
         condition_name = self._condition_name_edit.text().strip() or self._cargo_type_combo.currentText().strip() or "Condition"
         if not self._condition_name_edit.text().strip():

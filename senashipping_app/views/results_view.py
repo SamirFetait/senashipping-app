@@ -245,9 +245,10 @@ class ResultsView(QWidget):
         manual_layout = QVBoxLayout()
         manual_layout.addWidget(self._manual_ref_text)
         self._manual_ref_group.setLayout(manual_layout)
-
+        
         self._export_pdf_btn = QPushButton("Export PDF", self)
         self._export_excel_btn = QPushButton("Export Excel", self)
+        self._export_text_btn = QPushButton("Export Text", self)
 
         self._last_results: ConditionResults | None = None
         self._last_ship: Any = None
@@ -323,11 +324,13 @@ class ResultsView(QWidget):
         export_row = QHBoxLayout()
         export_row.addWidget(self._export_pdf_btn)
         export_row.addWidget(self._export_excel_btn)
+        export_row.addWidget(self._export_text_btn)
         root.addLayout(export_row)
 
     def _connect_signals(self) -> None:
         self._export_pdf_btn.clicked.connect(self._on_export_pdf)
         self._export_excel_btn.clicked.connect(self._on_export_excel)
+        self._export_text_btn.clicked.connect(self._on_export_text)
 
     def _populate_alarms_table(
         self,
@@ -619,6 +622,31 @@ class ResultsView(QWidget):
                 self._last_condition,
                 self._last_results,
             )
+            QMessageBox.information(self, "Export", f"Saved to {path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", str(e))
+
+    def _on_export_text(self) -> None:
+        if not all([self._last_results, self._last_ship, self._last_condition, self._last_voyage]):
+            QMessageBox.information(
+                self,
+                "Export",
+                "Compute a condition first to export.",
+            )
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Text Report",
+            str(Path.home()),
+            "Text files (*.txt)",
+        )
+        if not path:
+            return
+        if not path.endswith(".txt"):
+            path += ".txt"
+        try:
+            text = self._report_view.toPlainText()
+            Path(path).write_text(text, encoding="utf-8")
             QMessageBox.information(self, "Export", f"Saved to {path}")
         except Exception as e:
             QMessageBox.critical(self, "Export Error", str(e))

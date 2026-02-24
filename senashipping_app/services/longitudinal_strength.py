@@ -35,6 +35,8 @@ def compute_strength(
     pen_loadings: Dict[int, int] | None = None,
     mass_per_head: float = 0.5,
     tank_cog_override: Optional[Dict[int, Tuple[float, float, float]]] = None,
+    lightship_mass_t: float = 0.0,
+    lightship_lcg_norm: float = 0.5,
 ) -> StrengthResult:
     """
     Simplified still-water bending moment and shear.
@@ -52,9 +54,9 @@ def compute_strength(
         )
 
     override = tank_cog_override or {}
-    # Total weight moment about amidships (stern positive = LCG aft)
-    total_mass = 0.0
-    moment_sum = 0.0
+    # Total weight moment about amidships (stern positive = LCG aft); include lightship
+    total_mass = lightship_mass_t
+    moment_sum = lightship_mass_t * (lightship_lcg_norm - 0.5) * length_m if lightship_mass_t > 0 else 0.0
     for tank in tanks:
         vol = tank_volumes.get(tank.id or -1, 0.0)
         mass = vol * cargo_density
