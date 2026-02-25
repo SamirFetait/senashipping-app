@@ -11,14 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List
 
-from ..config.limits import (
-    EPS,
-    FREE_SURFACE_FACTOR,
-    MAX_DRAFT_FRACTION,
-    MAX_SWBM_FRACTION,
-    MAX_TRIM_FRACTION,
-    MIN_GM_M,
-)
+from ..config.limits import EPS, MAX_DRAFT_FRACTION, MAX_SWBM_FRACTION, MAX_TRIM_FRACTION, MIN_GM_M
 from ..models import Ship, Tank
 from .stability_service import ConditionResults
 
@@ -65,25 +58,43 @@ def compute_free_surface_correction(
     volumes: Dict[int, float],
     displacement_t: float,
     cargo_density: float,
+    tank_fsm_mt: Dict[int, float] | None = None,
 ) -> float:
     """
-    Approximate free surface correction (m) for slack tanks.
-    Reduces effective GM.
+    Free surface correction (m) for slack tanks, based on FSM tables when available.
+
+    If `tank_fsm_mt` is provided, it should contain the free-surface moment (FSM) in
+    tonne·m for each tank at the current filling ratio. The correction is then:
+
+        GG' = sum(FSM) / Δ      (m)
+        GM_eff = GM - GG'
+
+    Only tanks with 5–95% fill are treated as slack. If no FSM data is given,
+    this function returns 0.0 (no correction).
     """
     if displacement_t < EPS:
         return 0.0
-    correction = 0.0
+    if not tank_fsm_mt:
+        # No FSM data – do not apply an approximate correction here.
+        return 0.0
+
+    total_fsm = 0.0
     for tank in tanks:
-        vol = volumes.get(tank.id or -1, 0.0)
+        tid = tank.id
+        if tid is None:
+            continue
+        vol = volumes.get(tid, 0.0)
         cap = max(EPS, tank.capacity_m3)
         fill_ratio = vol / cap
         # Slack: partially filled (e.g. 5–95%)
         if 0.05 < fill_ratio < 0.95:
-            # Simplified: i_t for rectangular tank ~ B³*L/12, mass = vol*density
-            # Reduction ≈ (rho * i_t) / disp. Use factor based on tank size.
-            mass = vol * cargo_density
-            correction += (mass / displacement_t) * FREE_SURFACE_FACTOR * (1 - fill_ratio)
-    return min(correction, 2.0)  # Cap total correction
+            fsm = tank_fsm_mt.get(tid)
+            if fsm is not None and fsm > 0.0:
+                total_fsm += fsm
+
+    if total_fsm <= 0.0:
+        return 0.0
+    return total_fsm / displacement_t
 
 
 def validate_condition(
@@ -92,6 +103,7 @@ def validate_condition(
     tanks: List[Tank],
     volumes: Dict[int, float],
     cargo_density: float = 1.0,
+    tank_fsm_mt: Dict[int, float] | None = None,
 ) -> ValidationResult:
     """
     Run all validation checks and compute effective GM after free surface.
@@ -99,8 +111,10 @@ def validate_condition(
     issues: List[ValidationIssue] = []
     gm_raw = results.gm_m
 
-    # Free surface correction
-    fsc = compute_free_surface_correction(tanks, volumes, results.displacement_t, cargo_density)
+    # Free surface correction from FSM tables when available
+    fsc = compute_free_surface_correction(
+        tanks, volumes, results.displacement_t, cargo_density, tank_fsm_mt
+    )
     gm_effective = max(0.0, gm_raw - fsc)
 
     # 1. Negative / low GM
@@ -125,10 +139,8 @@ def validate_condition(
             )
         )
 
-    # 2. Extreme trim (only when ship length is set; otherwise limit would be ~0 and always fail)
-    from ..config.stability_manual_ref import REF_LOA_M, REF_DESIGN_DRAFT_M
-
-    L = getattr(ship, "length_overall_m", 0.0) or REF_LOA_M
+    # 2. Extreme trim (only when ship length is set; otherwise skip)
+    L = getattr(ship, "length_overall_m", 0.0) or 0.0
     if L > 0.01:
         max_trim = L * MAX_TRIM_FRACTION
         if abs(results.trim_m) > max_trim:
@@ -142,8 +154,8 @@ def validate_condition(
                 )
             )
 
-    # 3. Draft over limit (only when design draft is set; otherwise limit would be ~0 and always fail)
-    design_draft = getattr(ship, "design_draft_m", 0.0) or REF_DESIGN_DRAFT_M
+    # 3. Draft over limit (only when design draft is set; otherwise skip)
+    design_draft = getattr(ship, "design_draft_m", 0.0) or 0.0
     if design_draft > 0.01:
         max_draft = design_draft * MAX_DRAFT_FRACTION
         if results.draft_m > max_draft:

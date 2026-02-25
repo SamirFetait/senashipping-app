@@ -678,3 +678,5 @@ vtkWin32OpenGLRenderWindow (0000026071B9FF10): wglMakeCurrent failed in Clean(),
 2026-02-24 15:35:16,664 [INFO] senashipping_app.config.settings - Logging initialized. DB at D:\New folder\Sena\Project\senashipping-app\senashipping_app_data\senashipping.db
 2026-02-24 15:36:07,548 [INFO] senashipping_app.config.settings - Logging initialized. DB at D:\New folder\Sena\Project\senashipping-app\senashipping_app_data\senashipping.db
 2026-02-24 15:38:55,928 [INFO] senashipping_app.config.settings - Logging initialized. DB at D:\New folder\Sena\Project\senashipping-app\senashipping_app_data\senashipping.db
+2026-02-25 10:09:29,839 [INFO] senashipping_app.config.settings - Logging initialized. DB at D:\New folder\Sena\Project\senashipping-app\senashipping_app_data\senashipping.db
+2026-02-25 10:16:51,626 [INFO] senashipping_app.config.settings - Logging initialized. DB at D:\New folder\Sena\Project\senashipping-app\senashipping_app_data\senashipping.db

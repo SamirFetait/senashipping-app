@@ -86,8 +86,10 @@ class TestFreeSurface:
         ]
         # 50% fill = slack
         volumes = {1: 50.0}
-        fsc = compute_free_surface_correction(tanks, volumes, 1000.0, 1.0)
-        assert fsc > 0
+        # Provide a simple FSM value so the new FSM-based correction is applied.
+        tank_fsm_mt = {1: 10.0}
+        fsc = compute_free_surface_correction(tanks, volumes, 1000.0, 1.0, tank_fsm_mt)
+        assert fsc == 10.0 / 1000.0
 
 
 class TestStressScenarios:

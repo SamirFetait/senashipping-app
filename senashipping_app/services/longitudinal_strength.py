@@ -89,21 +89,19 @@ def compute_strength(
     lcg_from_mid = moment_sum / total_mass
 
     # Uniform buoyancy => LCB at 0.5L. Difference creates moment.
-    # Approximate SWBM: 0.25 * disp * L * (1 - 2*|LCG-0.5|) for box
+    # We keep a very crude SWBM / shear estimate as a visual indicator only.
+    # It is NOT engineering-accurate and is no longer tied to any "allowable %" limits.
     lcg_norm = 0.5 + lcg_from_mid / length_m
     lcg_norm = max(0.0, min(1.0, lcg_norm))
     eccent = abs(lcg_norm - 0.5)
-    # Simplified: max BM ~ disp * L * eccent * factor
-    swbm = displacement_t * length_m * eccent * 0.25
+    swbm = displacement_t * length_m * eccent * 0.25  # illustrative only
+    sf_max = displacement_t * 0.1 * eccent * 2        # illustrative only
 
-    # Shear: max at ends, simplified
-    sf_max = displacement_t * 0.1 * eccent * 2
-
-    # Design limits (simplified: disp * L * factor)
-    design_bm = displacement_t * length_m * 0.12
-    design_sf = displacement_t * 0.15
-    bm_pct = (abs(swbm) / design_bm * 100.0) if design_bm > 0 else 0.0
-    sf_pct = (abs(sf_max) / design_sf * 100.0) if design_sf > 0 else 0.0
+    # Design limits and % utilisation are now disabled (set to zero) so UI can treat them as N/A.
+    design_bm = 0.0
+    design_sf = 0.0
+    bm_pct = 0.0
+    sf_pct = 0.0
 
     return StrengthResult(
         hogging_bm_tm=swbm if lcg_norm < 0.5 else -swbm,

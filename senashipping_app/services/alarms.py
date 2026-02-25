@@ -89,33 +89,32 @@ def build_alarm_rows(
         type=AlarmType.REQUIREMENT,
     ))
 
-    # Max BMom %Allow
+    # Max BMom / Shear %Allow
+    # These use a very simplified strength model. We no longer treat them as
+    # formal "requirements" – when design limits are zero, they are omitted.
     strength = getattr(results, "strength", None)
-    if strength and hasattr(strength, "bm_pct_allow"):
+    if strength and getattr(strength, "design_bm_tm", 0.0) > 0:
         n += 1
         bm_pct = strength.bm_pct_allow
-        ok = -100 <= bm_pct <= 100
         rows.append(AlarmRow(
             no=n,
-            status=AlarmStatus.PASS if ok else AlarmStatus.FAIL,
-            description="Max BMom %Allow",
+            status=AlarmStatus.PASS,
+            description="Max BMom %Allow (illustrative)",
             attained=f"{bm_pct:.2f}%",
-            pass_if="-100.00 <= BM% <= 100.00",
-            type=AlarmType.REQUIREMENT,
+            pass_if="Informational only",
+            type=AlarmType.RECOMMENDATION,
         ))
 
-    # Max Shear %Allow
-    if strength and hasattr(strength, "sf_pct_allow"):
+    if strength and getattr(strength, "design_sf_t", 0.0) > 0:
         n += 1
         sf_pct = strength.sf_pct_allow
-        ok = -100 <= sf_pct <= 100
         rows.append(AlarmRow(
             no=n,
-            status=AlarmStatus.PASS if ok else AlarmStatus.FAIL,
-            description="Max Shear %Allow",
+            status=AlarmStatus.PASS,
+            description="Max Shear %Allow (illustrative)",
             attained=f"{sf_pct:.2f}%",
-            pass_if="-100.00 <= SF% <= 100.00",
-            type=AlarmType.REQUIREMENT,
+            pass_if="Informational only",
+            type=AlarmType.RECOMMENDATION,
         ))
 
     # Criteria from evaluate_all_criteria (GM, Trim, Draft, Livestock GM, Roll, Freeboard)

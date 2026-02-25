@@ -248,24 +248,24 @@ class ResultsPanel(QWidget):
         margin_ok = gmt_margin >= 0.0
         self._gmt_margin_label.set_status(margin_str, margin_ok)
         
-        # Max BMom %Allow
+        # Max BMom / Shear %Allow – no longer treated as real limits.
+        # When design limits are zero, show N/A instead of a misleading percentage.
         strength = getattr(results, "strength", None)
-        if strength and hasattr(strength, "bm_pct_allow"):
+        if strength and getattr(strength, "design_bm_tm", 0.0) > 0:
             bm_pct = strength.bm_pct_allow
             bm_str = f"{bm_pct:.2f} %"
             bm_ok = -100 <= bm_pct <= 100
             self._max_bmom_label.set_status(bm_str, bm_ok)
         else:
-            self._max_bmom_label.setText("—")
+            self._max_bmom_label.set_status("N/A", True)
             
-        # Max Shear %Allow
-        if strength and hasattr(strength, "sf_pct_allow"):
+        if strength and getattr(strength, "design_sf_t", 0.0) > 0:
             sf_pct = strength.sf_pct_allow
             sf_str = f"{sf_pct:.2f} %"
             sf_ok = -100 <= sf_pct <= 100
             self._max_shear_label.set_status(sf_str, sf_ok)
         else:
-            self._max_shear_label.setText("—")
+            self._max_shear_label.set_status("N/A", True)
             
         # Air Draft
         if ancillary:

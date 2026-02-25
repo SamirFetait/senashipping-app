@@ -27,7 +27,10 @@ REF_DESIGN_DRAFT_M = 7.60
 REF_LIGHTSHIP_DRAFT_M = 4.188
 REF_LIGHTSHIP_DISPLACEMENT_T = 5076.0
 REF_LIGHTSHIP_KG_M = 7.79  # VCG (m) for lightship from manual
-REF_LIGHTSHIP_LCG_NORM = 47.72 / REF_LBP_M  # Long. arm 47.72 m → norm 0–1 (0=aft, 1=fwd)
+# Longitudinal arm 47.72 m from AP. For consistency with the rest of the code,
+# which uses LOA as the longitudinal reference length (e.g. tank.longitudinal_pos
+# and trim solver), we normalise this by REF_LOA_M, not LBP.
+REF_LIGHTSHIP_LCG_NORM = 47.72 / REF_LOA_M  # dimensionless 0–1 (0=aft, 1=fwd) based on LOA
 REF_LIGHTSHIP_TCG_M = 0.0  # Trans. arm 0.000 from manual
 
 # --- Fluid densities (PDF p.9) – used for sea water, conversions ---

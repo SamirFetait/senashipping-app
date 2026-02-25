@@ -191,39 +191,59 @@ A simple equilibrium heel from transverse shift of center of gravity:
 - **heel_deg = atan(TCG / GM)** (in degrees),  
   with **TCG** = total transverse moment / total mass.
 
-If **GM** is zero or negative, heel is set to 0. This is an approximate steady heel from TCG; no full GZ curve is used here.
+This is the **small-angle equilibrium approximation**  
+(\(\Delta \cdot TCG = \Delta \cdot GM \cdot \tan\theta\) ⇒ \(\theta = \arctan(TCG/GM)\)).  
+If **GM** is zero or negative, heel is set to 0.  
+It is intended as an indicative heel for **modest angles (a few degrees)** only; no full GZ curve is used here.
 
 ---
 
 ## 11. Free surface correction (effective GM)
 
-**Slack tanks** (partially filled) reduce effective stability. The app applies a **free surface correction (FSC)** in metres:
+**Slack tanks** (partially filled) reduce effective stability. With sounding tables that include **FSM (tonne·m)** for each tank, the app now uses the **same form as the Loading Manual**:
 
-- For each tank with fill ratio between about **5% and 95%**, a correction term is added based on tank mass, displacement, and a configurable **free surface factor** (`FREE_SURFACE_FACTOR` in `config/limits.py`).  
-  In code:  
-  FSC ≈ Σ over slack tanks of  
-  *(mass / Δ) × FREE_SURFACE_FACTOR × (1 − fill_ratio)*,  
-  capped at a maximum total correction.
-- **GM_effective = max(0, GM − FSC)**.
+- For each tank, the sounding table (or Ullage/FSM cache) provides **FSM(volume)** in tonne·m for the current volume.
+- For tanks with fill ratio between about **5% and 95%** (slack tanks), the total free surface moment is
 
-**Loading Manual:**  
-**GG' = Total FSM / Δ**, **GM = KM − KG − GG'**.  
-The app’s FSC is a simplified implementation of this idea. **Validation and IMO/livestock criteria always use GM_effective** when checking minimum GM.
+  \[
+  \textstyle \sum FSM_i
+  \]
+
+- The free-surface correction in metres is then
+
+  \[
+  GG' = \frac{\sum FSM_i}{\Delta}
+  \]
+
+- And the effective GM used everywhere in the app is
+
+  \[
+  GM_\text{eff} = GM - GG'
+  \]
+
+If no FSM data are available for a tank (no sounding table / Ullage‑FSM import), the app currently treats that tank as having **no free-surface correction** (i.e. GG' = 0 for that tank).
+
+**Loading Manual consistency:**  
+This matches the manual’s formulation **GG' = Total FSM / Δ**, **GM = KM − KG − GG'**.  
+**Validation and IMO/livestock criteria always use GM_effective** when checking minimum GM.
 
 ---
 
-## 12. Longitudinal strength (simplified)
+## 12. Longitudinal strength (very simplified / illustrative only)
 
-The app uses a **simplified** still-water model:
+The app uses a **purely illustrative** still-water model for bending moment and shear.  
+It is **not derived from the vessel’s hull girder properties** and is **not suitable for engineering design or class approval**.
 
 - **LCG** from weight distribution (tanks + pens).
 - **Eccentricity** from amidships: **ecc = |LCG_norm − 0.5|**.
-- **Still-water BM** approximated as **≈ Δ × L × ecc × 0.25** (simplified).
-- **Shear:** **max shear ≈ Δ × 0.1 × ecc × 2** (simplified).
-- **Design limits:** Placeholder **design_BM = Δ × L × 0.12**, **design_SF = Δ × 0.15**.
-- **Max BM % Allow** = **|SWBM| / design_BM × 100**; **Max Shear % Allow** = **max shear / design_SF × 100**.
+- **Still-water BM (SWBM)** is approximated with an arbitrary factor, e.g.  
+  **SWBM ≈ Δ × L × ecc × 0.25** (t·m). The factor **0.25 has no physical derivation** in this context; it is only to give a rough visual indication that BM grows with displacement, length and off‑centre loading.
+- **Shear:** similarly uses a crude proportional formula (shear ∝ Δ × ecc) with arbitrary coefficients.
+- **Design limits:** placeholder values such as **design_BM = Δ × L × 0.12**, **design_SF = Δ × 0.15** are used **only to express BM and shear as % “allowable”** for on‑screen colouring.
+- **Max BM % Allow** = **|SWBM| / design_BM × 100**;  
+  **Max Shear % Allow** = **max_shear / design_SF × 100**.
 
-These are indicative. For class or approval, use the vessel’s approved loading manual or dedicated strength software.
+These strength numbers are **for UI feedback only**. For any real strength assessment or class submission, you **must** use the vessel’s approved longitudinal strength curves / loading manual or dedicated strength software.
 
 ---
 

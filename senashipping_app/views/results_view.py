@@ -433,9 +433,19 @@ class ResultsView(QWidget):
             self._strength_sf_pct.setText("")
             self._strength_sf_max.setText("")
             return
+
+        # Show the approximate SWBM and shear, but mark %Allow as N/A when no real design limits exist.
         self._strength_swbm.setText(f"{getattr(strength, 'still_water_bm_approx_tm', 0):,.0f}")
-        self._strength_bm_pct.setText(f"{getattr(strength, 'bm_pct_allow', 0):.1f}%")
-        self._strength_sf_pct.setText(f"{getattr(strength, 'sf_pct_allow', 0):.1f}%")
+        if getattr(strength, "design_bm_tm", 0.0) > 0:
+            self._strength_bm_pct.setText(f"{getattr(strength, 'bm_pct_allow', 0):.1f}%")
+        else:
+            self._strength_bm_pct.setText("N/A")
+
+        if getattr(strength, "design_sf_t", 0.0) > 0:
+            self._strength_sf_pct.setText(f"{getattr(strength, 'sf_pct_allow', 0):.1f}%")
+        else:
+            self._strength_sf_pct.setText("N/A")
+
         self._strength_sf_max.setText(f"{getattr(strength, 'shear_force_max_t', 0):,.1f}")
 
     def _populate_cargo_tab(self, condition: Any, ship: Any) -> None:

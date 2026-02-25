@@ -720,11 +720,15 @@ class ConditionEditorView(QWidget):
             None,
         )
         tank_cog_override = self._build_tank_cog_override(tank_volumes)
+        tank_fsm_map = self._build_tank_fsm_map(tank_volumes)
         try:
             results: ConditionResults = cond_service.compute(
-                self._current_ship, condition, tank_volumes,
+                self._current_ship,
+                condition,
+                tank_volumes,
                 cargo_type=selected_cargo,
                 tank_cog_override=tank_cog_override if tank_cog_override else None,
+                tank_fsm_mt=tank_fsm_map if tank_fsm_map else None,
             )
         except ConditionValidationError as exc:
             QMessageBox.warning(self, "Validation", str(exc))
@@ -875,11 +879,15 @@ class ConditionEditorView(QWidget):
                 None,
             )
             tank_cog_override = self._build_tank_cog_override(tank_volumes)
+            tank_fsm_map = self._build_tank_fsm_map(tank_volumes)
             try:
                 results = cond_svc.compute(
-                    self._current_ship, condition, tank_volumes,
+                    self._current_ship,
+                    condition,
+                    tank_volumes,
                     cargo_type=selected_cargo,
                     tank_cog_override=tank_cog_override if tank_cog_override else None,
+                    tank_fsm_mt=tank_fsm_map if tank_fsm_map else None,
                 )
                 condition.displacement_t = results.displacement_t
                 condition.draft_m = results.draft_m
@@ -1112,6 +1120,28 @@ class ConditionEditorView(QWidget):
             except (TypeError, ValueError):
                 return 0.0
         return (_safe_float(vcg), _safe_float(lcg), _safe_float(tcg))
+
+    def _build_tank_fsm_map(self, tank_volumes: Dict[int, float]) -> Dict[int, float]:
+        """
+        Build tank_id -> FSM (tonne·m) for the current volumes using sounding tables
+        or cached Ullage/FSM data. Used to compute real free surface correction.
+        """
+        fsm_map: Dict[int, float] = {}
+        if not self._current_ship or not self._current_ship.id:
+            return fsm_map
+        for tank_id, vol in tank_volumes.items():
+            try:
+                ull, fsm = self._get_tank_ullage_fsm_for_display(tank_id, vol)
+            except Exception:
+                ull, fsm = (None, None)
+            if fsm is not None:
+                try:
+                    fsm_val = float(fsm)
+                except (TypeError, ValueError):
+                    fsm_val = 0.0
+                if fsm_val > 0.0:
+                    fsm_map[int(tank_id)] = fsm_val
+        return fsm_map
 
     def _build_tank_cog_override(self, tank_volumes: Dict[int, float]) -> Dict[int, tuple]:
         """Build tank_id -> (vcg_m, lcg_m, tcg_m) from sounding cache and tank_volumes."""

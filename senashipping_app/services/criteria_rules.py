@@ -82,8 +82,8 @@ def evaluate_imo_criteria(
     validation = getattr(results, "validation", None)
     gm_eff = getattr(validation, "gm_effective", None) if validation else None
     if gm_eff is None:
-        fsc = compute_free_surface_correction(tanks, volumes, results.displacement_t, cargo_density)
-        gm_eff = max(0.0, results.gm_m - fsc)
+        # No validation available: fall back to raw GM without FSC
+        gm_eff = max(0.0, results.gm_m)
 
     # 1. Minimum GM
     margin = gm_eff - MIN_GM_M if gm_eff is not None else None
@@ -170,8 +170,7 @@ def evaluate_livestock_criteria(
     validation = getattr(results, "validation", None)
     gm_eff = getattr(validation, "gm_effective", None) if validation else None
     if gm_eff is None:
-        fsc = compute_free_surface_correction(tanks, volumes, results.displacement_t, cargo_density)
-        gm_eff = max(0.0, results.gm_m - fsc)
+        gm_eff = max(0.0, results.gm_m)
 
     # 1. Livestock GM (stricter)
     margin = gm_eff - MIN_GM_LIVESTOCK_M

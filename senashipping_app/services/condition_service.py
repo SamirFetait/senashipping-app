@@ -51,6 +51,7 @@ class ConditionService:
         cargo_density_t_per_m3: float = 1.0,
         cargo_type: Optional[CargoType] = None,
         tank_cog_override: Optional[Dict[int, Tuple[float, float, float]]] = None,
+        tank_fsm_mt: Optional[Dict[int, float]] = None,
     ) -> ConditionResults:
         """
         Validate the condition and run the stability calculation.
@@ -86,7 +87,7 @@ class ConditionService:
 
         # Run validation (negative GM, extreme trim, over-limit BM, etc.)
         validation = validate_condition(
-            ship, results, tanks, tank_fill_volumes, cargo_density_t_per_m3
+            ship, results, tanks, tank_fill_volumes, cargo_density_t_per_m3, tank_fsm_mt
         )
         results.validation = validation
 
