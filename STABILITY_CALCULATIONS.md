@@ -141,6 +141,14 @@ Then: **trim_m = (LCG_m − LCB_m) × Δ / MTC** (with correct sign so stern goe
 
 So: **trim** is fully determined by **displacement**, **LCG**, **LCB**, and **MTC** at the solved draft.
 
+**Lightship alignment (to avoid baseline trim):**
+
+- For the **trim solver only**, the code aligns the lightship longitudinal CoG with the **hydrostatic LCB at the lightship draft**.  
+  This means:
+  - Lightship alone gives **≈ zero trim** (LCG ≈ LCB).
+  - Any trim you see comes from **cargo shifting the combined LCG away from LCB**, not from the empty-ship baseline.
+- For **reporting and longitudinal strength**, the real lightship LCG from the Loading Manual is still used.
+
 ---
 
 ## 8. Stability: KB, BM, KM, GM
@@ -165,7 +173,7 @@ So: **trim** is fully determined by **displacement**, **LCG**, **LCB**, and **MT
 **GM (m)** — transverse metacentric height (intact stability):
 
 - **GM = KM − KG**  
-  (clamped to ≥ 0 for display).
+  (can be negative for unstable conditions; validation then FAILs the GM criteria).
 
 **Effective GM (after free surface):**  
 **GM_eff = GM − FSC**, where **FSC** is the free surface correction (see below). Validation and criteria use **GM_eff**.
