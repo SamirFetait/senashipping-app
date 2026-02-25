@@ -248,7 +248,6 @@ class ResultsView(QWidget):
         
         self._export_pdf_btn = QPushButton("Export PDF", self)
         self._export_excel_btn = QPushButton("Export Excel", self)
-        self._export_text_btn = QPushButton("Export Text", self)
 
         self._last_results: ConditionResults | None = None
         self._last_ship: Any = None
@@ -324,14 +323,11 @@ class ResultsView(QWidget):
         export_row = QHBoxLayout()
         export_row.addWidget(self._export_pdf_btn)
         export_row.addWidget(self._export_excel_btn)
-        export_row.addWidget(self._export_text_btn)
         root.addLayout(export_row)
 
     def _connect_signals(self) -> None:
         self._export_pdf_btn.clicked.connect(self._on_export_pdf)
         self._export_excel_btn.clicked.connect(self._on_export_excel)
-        self._export_text_btn.clicked.connect(self._on_export_text)
-
     def _populate_alarms_table(
         self,
         results: ConditionResults,
