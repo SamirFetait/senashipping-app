@@ -4,4 +4,4 @@ temp_*.py
 db.sqlite3
 __pycache__
 .gitignore
-.senashipping.log
+*.log

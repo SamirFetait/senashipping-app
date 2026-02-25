@@ -108,12 +108,18 @@ def compute_condition(
     L = getattr(ship, "length_overall_m", 0.0) or REF_LOA_M
     L = max(1e-6, L)
 
-    # Lightship (empty ship) mass and CoG – always included so displacement/KG/LCG/heel are correct
-    lightship_mass_t = max(0.0, getattr(ship, "lightship_displacement_t", 0.0)) or REF_LIGHTSHIP_DISPLACEMENT_T
-    total_mass_t = lightship_mass_t
-    total_lcg_moment = lightship_mass_t * REF_LIGHTSHIP_LCG_NORM
-    total_vcg_moment = lightship_mass_t * REF_LIGHTSHIP_KG_M
-    total_tcg_moment = lightship_mass_t * REF_LIGHTSHIP_TCG_M
+    # Lightship (empty ship) mass and CoG – commented out for now; calculations use only tanks + pens.
+    # To re-enable, uncomment the block below and remove the zero-inits.
+    # lightship_mass_t = max(0.0, getattr(ship, "lightship_displacement_t", 0.0)) or REF_LIGHTSHIP_DISPLACEMENT_T
+    # total_mass_t = lightship_mass_t
+    # total_lcg_moment = lightship_mass_t * REF_LIGHTSHIP_LCG_NORM
+    # total_vcg_moment = lightship_mass_t * REF_LIGHTSHIP_KG_M
+    # total_tcg_moment = lightship_mass_t * REF_LIGHTSHIP_TCG_M
+    lightship_mass_t = 0.0
+    total_mass_t = 0.0
+    total_lcg_moment = 0.0
+    total_vcg_moment = 0.0
+    total_tcg_moment = 0.0
 
     override = tank_cog_override or {}
     for tank in tanks:
@@ -146,6 +152,26 @@ def compute_condition(
 
     # Total displacement = lightship + tanks + pens (already in total_mass_t)
     displacement_t = total_mass_t
+
+    # Avoid division by zero when no load (lightship off and no tanks/pens)
+    if total_mass_t <= 0.0:
+        return ConditionResults(
+            displacement_t=0.0,
+            draft_m=0.0,
+            trim_m=0.0,
+            gm_m=0.0,
+            kg_m=0.0,
+            km_m=0.0,
+            draft_aft_m=0.0,
+            draft_fwd_m=0.0,
+            heel_deg=0.0,
+            strength=compute_strength(
+                0.0, L, tanks, volumes, cargo_density_t_per_m3,
+                pens=pens_list, pen_loadings=loadings, mass_per_head=mass_per_head_t,
+                tank_cog_override=override, lightship_mass_t=0.0, lightship_lcg_norm=REF_LIGHTSHIP_LCG_NORM,
+            ),
+            ancillary=None,
+        )
 
     B = getattr(ship, "breadth_m", 0.0) or REF_BREADTH_M
     B = max(1e-6, B)
@@ -184,20 +210,10 @@ def compute_condition(
         lightship_lcg_norm=REF_LIGHTSHIP_LCG_NORM,
     )
 
-    # Draft at marks (trim +ve = stern down); clamp trim/drafts so they stay physical.
-    # Realistic trim for this size ship is a few metres at most; using a very small
-    # limit avoids extreme bow-down cases that were driving aft draft to 0.
-    max_trim_m = max(1.0, min(L * 0.03, design_draft * 0.5))
-    trim_m = max(-max_trim_m, min(max_trim_m, trim_m))
+    # Draft at marks (trim +ve = stern down). Use the raw solver trim/draft
+    # without capping, so forward and aft marks move freely with the condition.
     draft_aft_m = draft_m + trim_m / 2.0
     draft_fwd_m = draft_m - trim_m / 2.0
-    draft_min = 0.0
-    draft_max = max(design_draft * 1.10, design_draft + 1.0)
-    draft_aft_m = max(draft_min, min(draft_max, draft_aft_m))
-    draft_fwd_m = max(draft_min, min(draft_max, draft_fwd_m))
-    # Keep mean draft and trim consistent with clamped marks
-    draft_m = (draft_aft_m + draft_fwd_m) / 2.0
-    trim_m = draft_aft_m - draft_fwd_m
 
     # Heel from TCG (lightship + tanks + pens)
     tcg_m = total_tcg_moment / total_mass_t

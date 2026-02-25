@@ -180,7 +180,7 @@ def compute_kg_from_tanks(
 
 def compute_gm(km_m: float, kg_m: float) -> float:
     """GM = KM - KG."""
-    return max(0.0, km_m - kg_m)
+    return km_m - kg_m
 
 
 def solve_draft_from_displacement(

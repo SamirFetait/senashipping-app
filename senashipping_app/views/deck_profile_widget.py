@@ -270,6 +270,7 @@ class ProfileView(ShipGraphicsView):
         self._ship_breadth: float = 0.0
         self._ship_depth: float = 0.0
         self._keel_y: float = 0.0  # Y position of keel baseline in scene coordinates
+        self._hull_bounds: QRectF | None = None  # Fixed bounds of DXF hull/profile
         
         self._load_profile()
         self._scene.selectionChanged.connect(self._on_selection_changed)
@@ -298,10 +299,20 @@ class ProfileView(ShipGraphicsView):
         self._fit_scene_to_view()
     
     def _fit_scene_to_view(self) -> None:
-        """Fit all scene items (including waterline) to the viewport so the profile fills the section."""
+        """
+        Fit the fixed DXF hull/profile to the viewport so the profile fills
+        the section, without the waterline changing the zoom/position.
+        """
         if not self._scene:
             return
-        bounds = self._scene.itemsBoundingRect()
+
+        # Prefer the stored hull/profile bounds so waterline and markers do not
+        # affect the automatic fitting/zoom.
+        if self._hull_bounds is not None and self._hull_bounds.isValid() and not self._hull_bounds.isEmpty():
+            bounds = self._hull_bounds
+        else:
+            bounds = self._scene.itemsBoundingRect()
+
         if not bounds.isValid() or bounds.isEmpty():
             return
         margin = 0.04  # 4% padding
@@ -325,6 +336,7 @@ class ProfileView(ShipGraphicsView):
         self._draft_markers.clear()
         self._trim_text_item = None
         self._hull_fill_item = None
+        self._hull_bounds = None
         
         dxf_path = CAD_DIR / "profile.dxf"
         if not _load_dxf_into_scene(dxf_path, self._scene):
@@ -333,6 +345,8 @@ class ProfileView(ShipGraphicsView):
             self._ship_breadth = 20.0
             self._ship_depth = 20.0
             self._keel_y = 0.0
+            # Synthetic hull bounds so fit/zoom stays stable
+            self._hull_bounds = QRectF(0.0, -self._ship_depth, self._ship_length, self._ship_depth)
         else:
             # Estimate dimensions from scene bounds
             bounds = self._scene.itemsBoundingRect()
@@ -341,6 +355,8 @@ class ProfileView(ShipGraphicsView):
             self._ship_depth = self._ship_breadth
             # Assume keel is at the bottom of the bounding box
             self._keel_y = bounds.bottom()
+            # Freeze hull/profile bounds so waterline changes do not move the DXF
+            self._hull_bounds = bounds
             
             # Add gray hull fill behind DXF lines
             hull_fill_rect = QRectF(bounds.left(), bounds.top(), bounds.width(), bounds.height())
