@@ -21,12 +21,13 @@ from .hydrostatics import (
     get_bm_t_from_curves,
     get_bm_l_from_curves,
 )
-from .hydrostatic_curves import build_curves_from_formulas, HydrostaticCurves
+from .hydrostatic_curves import build_curves_from_formulas, get_lcb_norm, HydrostaticCurves
 from ..config.stability_manual_ref import (
     REF_LOA_M,
     REF_BREADTH_M,
     REF_DEPTH_M,
     REF_DESIGN_DRAFT_M,
+    REF_LIGHTSHIP_DRAFT_M,
     REF_LIGHTSHIP_DISPLACEMENT_T,
     REF_LIGHTSHIP_KG_M,
     REF_LIGHTSHIP_LCG_NORM,
@@ -108,18 +109,14 @@ def compute_condition(
     L = getattr(ship, "length_overall_m", 0.0) or REF_LOA_M
     L = max(1e-6, L)
 
-    # Lightship (empty ship) mass and CoG – commented out for now; calculations use only tanks + pens.
-    # To re-enable, uncomment the block below and remove the zero-inits.
-    # lightship_mass_t = max(0.0, getattr(ship, "lightship_displacement_t", 0.0)) or REF_LIGHTSHIP_DISPLACEMENT_T
-    # total_mass_t = lightship_mass_t
-    # total_lcg_moment = lightship_mass_t * REF_LIGHTSHIP_LCG_NORM
-    # total_vcg_moment = lightship_mass_t * REF_LIGHTSHIP_KG_M
-    # total_tcg_moment = lightship_mass_t * REF_LIGHTSHIP_TCG_M
-    lightship_mass_t = 0.0
-    total_mass_t = 0.0
-    total_lcg_moment = 0.0
-    total_vcg_moment = 0.0
-    total_tcg_moment = 0.0
+    # Lightship (empty ship) mass and CoG.
+    # If the ship has a stored lightship displacement, use that; otherwise
+    # fall back to the manual reference lightship from stability_manual_ref.
+    lightship_mass_t = max(0.0, getattr(ship, "lightship_displacement_t", 0.0)) or REF_LIGHTSHIP_DISPLACEMENT_T
+    total_mass_t = lightship_mass_t
+    total_lcg_moment = lightship_mass_t * REF_LIGHTSHIP_LCG_NORM
+    total_vcg_moment = lightship_mass_t * REF_LIGHTSHIP_KG_M
+    total_tcg_moment = lightship_mass_t * REF_LIGHTSHIP_TCG_M
 
     override = tank_cog_override or {}
     for tank in tanks:
@@ -182,9 +179,16 @@ def compute_condition(
         L, B, design_draft, cb=DEFAULT_CB, rho=RHO_SEA
     )
 
+    # Align lightship LCG with solver LCB at lightship draft so lightship alone gives ~zero trim;
+    # only cargo then causes trim. Use real LCG (REF_LIGHTSHIP_LCG_NORM) for strength/KG.
+    lightship_draft = max(0.0, getattr(ship, "lightship_draft_m", 0.0)) or REF_LIGHTSHIP_DRAFT_M
+    _lcb = get_lcb_norm(lightship_draft, curves) if curves and curves.is_valid() else None
+    lcb_norm_ls = _lcb if _lcb is not None else 0.5
+    total_lcg_moment_trim = total_lcg_moment + lightship_mass_t * (lcb_norm_ls - REF_LIGHTSHIP_LCG_NORM)
+
     # Draft and trim from iterative solver (lightship + tanks + pens).
     # We clamp LCG to [0,1] to avoid pathological inputs (e.g. tank positions saved in metres).
-    lcg_norm = total_lcg_moment / total_mass_t
+    lcg_norm = total_lcg_moment_trim / total_mass_t
     lcg_norm = max(0.001, min(0.999, float(lcg_norm)))
     draft_m, trim_m = solve_draft_from_displacement(
         displacement_t, L, B, lcg_norm, RHO_SEA, DEFAULT_CB, curves
