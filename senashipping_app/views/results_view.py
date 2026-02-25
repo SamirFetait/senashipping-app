@@ -636,30 +636,6 @@ class ResultsView(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Export Error", str(e))
 
-    def _on_export_text(self) -> None:
-        if not all([self._last_results, self._last_ship, self._last_condition, self._last_voyage]):
-            QMessageBox.information(
-                self,
-                "Export",
-                "Compute a condition first to export.",
-            )
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Text Report",
-            str(Path.home()),
-            "Text files (*.txt)",
-        )
-        if not path:
-            return
-        if not path.endswith(".txt"):
-            path += ".txt"
-        try:
-            text = self._report_view.toPlainText()
-            Path(path).write_text(text, encoding="utf-8")
-            QMessageBox.information(self, "Export", f"Saved to {path}")
-        except Exception as e:
-            QMessageBox.critical(self, "Export Error", str(e))
 
     def _on_export_excel(self) -> None:
         if not all([self._last_results, self._last_ship, self._last_condition, self._last_voyage]):
