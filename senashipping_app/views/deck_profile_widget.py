@@ -297,6 +297,28 @@ class ProfileView(ShipGraphicsView):
         """Auto-fit scene to viewport when window is resized."""
         super().resizeEvent(event)
         self._fit_scene_to_view()
+
+    def _metric_scale(self) -> float:
+        """
+        Scale factor for draft/trim graphics based on current viewport size.
+
+        Keeps labels and markers visually balanced on both small and large
+        screens instead of using hard-coded pixel sizes.
+        """
+        view = self.viewport()
+        if not view:
+            return 1.0
+        h = max(1, view.height())
+        # Around 320 px tall -> scale 1.0, clamp to a sensible range
+        scale = h / 320.0
+        return max(0.7, min(1.4, scale))
+
+    def _metric_font(self, base_px: int, weight: int = QFont.Weight.Medium) -> QFont:
+        """Return a font whose pixel size scales with the viewport."""
+        scale = self._metric_scale()
+        size = int(round(base_px * scale))
+        size = max(7, min(12, size))
+        return QFont("Arial", size, weight)
     
     def _fit_scene_to_view(self) -> None:
         """
@@ -533,13 +555,17 @@ class ProfileView(ShipGraphicsView):
             self._add_draft_marker(mid_x, y_mid, draft_mid, "Mid")
             self._add_draft_marker(self._ship_length, y_fwd, draft_fwd, "Fwd")
 
-            # Display trim value
+            # Display trim value with a compact, subtle label, scaled to view size
             if trim_m is not None:
-                trim_str = f"Trim: {abs(trim_m):.3f}m {'A' if trim_m >= 0 else 'F'}"
+                trim_str = f"Trim {abs(trim_m):.2f} m {'A' if trim_m >= 0 else 'F'}"
                 trim_color = QColor(0, 150, 0) if abs(trim_m) < 1.0 else QColor(200, 150, 0) if abs(trim_m) < 2.0 else QColor(200, 0, 0)
-                self._trim_text_item = self._scene.addText(trim_str, QFont("Arial", 12, QFont.Weight.Bold))
+                scale = self._metric_scale()
+                trim_font = self._metric_font(9)
+                self._trim_text_item = self._scene.addText(trim_str, trim_font)
                 self._trim_text_item.setDefaultTextColor(trim_color)
-                self._trim_text_item.setPos(mid_x - 50, y_mid - 30)
+                self._trim_text_item.setPos(mid_x - 40 * scale, y_mid - 22 * scale)
+                # Explicitly down-scale text so it never dominates the profile
+                self._trim_text_item.setScale(0.6 * scale)
                 self._trim_text_item.setZValue(150)
         else:
             # Level waterline
@@ -579,29 +605,34 @@ class ProfileView(ShipGraphicsView):
 
     def _add_draft_marker(self, x: float, y: float, draft_value: float, label: str) -> None:
         """Add a draft measurement marker with label at the specified position."""
-        # Draw vertical line marker
-        marker_pen = QPen(QColor(0, 100, 200), 2)
-        marker_length = 15
+        scale = self._metric_scale()
+
+        # Draw a compact vertical line marker scaled to view size
+        marker_pen = QPen(QColor(0, 100, 200), 1.0 * scale)
+        marker_length = 10 * scale
         marker_line = self._scene.addLine(
             x, y - marker_length / 2, x, y + marker_length / 2, marker_pen
         )
         marker_line.setZValue(110)
         self._draft_markers.append(marker_line)
         
-        # Add horizontal tick
-        tick_length = 8
+        # Add small horizontal tick
+        tick_length = 6 * scale
         tick_line = self._scene.addLine(
             x - tick_length / 2, y, x + tick_length / 2, y, marker_pen
         )
         tick_line.setZValue(110)
         self._draft_markers.append(tick_line)
         
-        # Add text label
-        label_text = f"{label}: {draft_value:.2f}m"
-        text_item = self._scene.addText(label_text, QFont("Arial", 10))
+        # Add compact text label with clearer number formatting
+        label_text = f"{label} {draft_value:.2f} m"
+        text_font = self._metric_font(9)
+        text_item = self._scene.addText(label_text, text_font)
         text_item.setDefaultTextColor(QColor(0, 100, 200))
-        # Position label above the marker
-        text_item.setPos(x - 30, y - 25)
+        # Position label just above the marker, scaled to view
+        text_item.setPos(x - 26 * scale, y - 20 * scale)
+        # Down-scale label relative to hull/profile so it stays subtle
+        text_item.setScale(0.6 * scale)
         text_item.setZValue(120)
         self._draft_markers.append(text_item)
 
