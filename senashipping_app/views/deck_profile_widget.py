@@ -886,38 +886,21 @@ class DeckTabWidget(QWidget):
         super().__init__(parent)
         self._deck_name = deck_name
 
-        layout = QHBoxLayout(self)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Left: deck plan drawing
-        self._deck_view = DeckView(self)
-        self._deck_view.load_deck(deck_name)
-        layout.addWidget(self._deck_view, 2)
-
-        # Right: deck table (title + table)
-        right = QVBoxLayout()
-        right.setContentsMargins(0, 0, 0, 0)
+        # Title above the deck DXF
         self._title_label = QLabel(self)
         self._title_label.setStyleSheet("font-weight: bold; font-size: 11px;")
-        right.addWidget(self._title_label)
+        layout.addWidget(self._title_label)
 
-        self._table = QTableWidget(self)
-        # self._table.setColumnCount(12)
-        # self._table.setHorizontalHeaderLabels([
-        #     "Pens no.",
-        #     "A", "B", "C", "D",  # Area
-        #     "LCG (m) from Fr. -6",
-        #     "VCG (m) from B.L.",
-        #     "A", "B", "C", "D",  # TCG (m) from C.L.
-        # ])
-        # self._table.horizontalHeader().setStretchLastSection(False)
-        # for i in range(12):
-        #     self._table.setColumnWidth(i, 72 if i > 0 else 56)
-        # right.addWidget(self._table, 1)
-        # layout.addLayout(right, 1)
+        # Deck plan drawing only (no side table)
+        self._deck_view = DeckView(self)
+        self._deck_view.load_deck(deck_name)
+        layout.addWidget(self._deck_view, 1)
 
     def update_table(self, pens: list, tanks: list) -> None:
-        """Update the table and deck view (tank polygons when outline_xy present)."""
+        """Update the deck view (tank polygons when outline_xy present) and title text."""
         self._deck_view.set_tanks(tanks)
         deck_pens = [
             p for p in pens
@@ -930,70 +913,13 @@ class DeckTabWidget(QWidget):
         net_area = 0.0
         sums = [0.0, 0.0, 0.0, 0.0]  # Area A, B, C, D
 
-        # self._table.setRowCount(0)
-        # for pen in deck_pens:
-        #     row = self._table.rowCount()
-        #     self._table.insertRow(row)
-        #     pen_no = getattr(pen, "pen_no", None)
-        #     self._table.setItem(
-        #         row, 0,
-        #         QTableWidgetItem(str(pen_no) if pen_no is not None else pen.name or "—")
-        #     )
-        #     area_a = getattr(pen, "area_a_m2", None)
-        #     area_b = getattr(pen, "area_b_m2", None)
-        #     area_c = getattr(pen, "area_c_m2", None)
-        #     area_d = getattr(pen, "area_d_m2", None)
-        #     if area_a is None and area_b is None and area_c is None and area_d is None:
-        #         area_a = getattr(pen, "area_m2", 0.0) or 0.0
-        #         if area_a:
-        #             sums[0] += area_a
-        #         net_area += area_a
-        #     else:
-        #         for i, v in enumerate([area_a, area_b, area_c, area_d]):
-        #             if v is not None:
-        #                 sums[i] += v
-        #                 net_area += v
-        #     self._table.setItem(row, 1, QTableWidgetItem(_fmt_val(area_a)))
-        #     self._table.setItem(row, 2, QTableWidgetItem(_fmt_val(area_b)))
-        #     self._table.setItem(row, 3, QTableWidgetItem(_fmt_val(area_c)))
-        #     self._table.setItem(row, 4, QTableWidgetItem(_fmt_val(area_d)))
-        #     self._table.setItem(
-        #         row, 5,
-        #         QTableWidgetItem(_fmt_val(getattr(pen, "lcg_m", None)))
-        #     )
-        #     self._table.setItem(
-        #         row, 6,
-        #         QTableWidgetItem(_fmt_val(getattr(pen, "vcg_m", None)))
-        #     )
-        #     tcg_a = getattr(pen, "tcg_a_m", None)
-        #     tcg_b = getattr(pen, "tcg_b_m", None)
-        #     tcg_c = getattr(pen, "tcg_c_m", None)
-        #     tcg_d = getattr(pen, "tcg_d_m", None)
-        #     if tcg_a is None and tcg_b is None and tcg_c is None and tcg_d is None:
-        #         tcg = getattr(pen, "tcg_m", 0.0)
-        #         tcg_a = tcg_b = tcg_c = tcg_d = tcg if tcg else None
-        #     self._table.setItem(row, 7, QTableWidgetItem(_fmt_val(tcg_a)))
-        #     self._table.setItem(row, 8, QTableWidgetItem(_fmt_val(tcg_b)))
-        #     self._table.setItem(row, 9, QTableWidgetItem(_fmt_val(tcg_c)))
-        #     self._table.setItem(row, 10, QTableWidgetItem(_fmt_val(tcg_d)))
-
-        # # TOTAL row
-        # self._table.insertRow(self._table.rowCount())
-        # total_row = self._table.rowCount() - 1
-        # self._table.setItem(total_row, 0, QTableWidgetItem("TOTAL:"))
-        # for c in range(1, 5):
-        #     self._table.setItem(
-        #         total_row, c,
-        #         QTableWidgetItem(f"{sums[c - 1]:.2f}" if sums[c - 1] else "")
-        #     )
-        # for c in range(5, 12):
-        #     self._table.setItem(total_row, c, QTableWidgetItem(""))
-
-        # if net_area == 0.0 and deck_pens:
-        #     net_area = sum(getattr(p, "area_m2", 0.0) or 0.0 for p in deck_pens)
-        # self._title_label.setText(
-        #     f"{self._deck_name} DECK (net area {net_area:.2f} sq.m.)"
-        # )
+        if net_area == 0.0 and deck_pens:
+            net_area = sum(
+                getattr(p, "area_m2", 0.0) or 0.0 for p in deck_pens
+            )
+        self._title_label.setText(
+            f"{self._deck_name} DECK (net area {net_area:.2f} sq.m.)"
+        )
 
 
 class DeckProfileWidget(QWidget):

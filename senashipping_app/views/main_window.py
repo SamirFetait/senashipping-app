@@ -225,91 +225,114 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        #edit actions
+        # Edit actions
         edit_item_action = QAction("&Edit item ...", self)
-        edit_item_action.triggered.connect(lambda: self._status_bar.showMessage("Edit Item"))
+        edit_item_action.triggered.connect(self._on_edit_item)
         edit_menu.addAction(edit_item_action)
 
         delete_item_action = QAction("&Delete item(s) ...", self)
-        delete_item_action.triggered.connect(lambda: self._status_bar.showMessage("Delete Item(s)"))
+        delete_item_action.triggered.connect(self._on_delete_items)
         edit_menu.addAction(delete_item_action)
 
         edit_menu.addSeparator()
 
         search_new_misc_weight_action = QAction("&Search item ...", self)
-        search_new_misc_weight_action.triggered.connect(lambda: self._status_bar.showMessage("Search Item"))
+        search_new_misc_weight_action.triggered.connect(self._on_search_item)
         edit_menu.addAction(search_new_misc_weight_action)
 
         edit_menu.addSeparator()
 
         add_new_item_action = QAction("&Add new item ...", self)
-        add_new_item_action.triggered.connect(lambda: self._status_bar.showMessage("Add New Item"))
+        add_new_item_action.triggered.connect(self._on_add_new_item)
         edit_menu.addAction(add_new_item_action)
 
         empty_space_action = QAction("&Empty space(s)...", self)
-        empty_space_action.triggered.connect(lambda: self._status_bar.showMessage("Empty Space(s)"))
+        empty_space_action.triggered.connect(self._on_empty_spaces)
         edit_menu.addAction(empty_space_action)
 
         fill_space_action = QAction("&Fill space(s)...", self)
-        fill_space_action.triggered.connect(lambda: self._status_bar.showMessage("Fill Space(s)"))
+        fill_space_action.triggered.connect(self._on_fill_spaces)
         edit_menu.addAction(fill_space_action)
 
         fill_spaces_action = QAction("&Fill spaces To..", self)
-        fill_spaces_action.triggered.connect(lambda: self._status_bar.showMessage("Fill Spaces To.."))
+        fill_spaces_action.triggered.connect(self._on_fill_spaces_to)
         edit_menu.addAction(fill_spaces_action)
 
         edit_menu.addSeparator()
 
         select_all_action = QAction("&Select all", self)
-        select_all_action.triggered.connect(lambda: self._status_bar.showMessage("Select All"))
+        select_all_action.triggered.connect(self._on_select_all)
         edit_menu.addAction(select_all_action)
 
         clear_selection_action = QAction("&Clear selection", self)
-        clear_selection_action.triggered.connect(lambda: self._status_bar.showMessage("Clear Selection"))
+        clear_selection_action.triggered.connect(self._on_clear_selection)
         edit_menu.addAction(clear_selection_action)
 
         # View actions
-        view_menu_action = QAction("&Default view model", self)
-        view_menu_action.triggered.connect(lambda: self._status_bar.showMessage("Default View Model"))
-        view_menu.addAction(view_menu_action)
+        default_view_action = QAction("&Default view model", self)
+        default_view_action.triggered.connect(self._on_default_view_model)
+        view_menu.addAction(default_view_action)
 
-        view_menu_action = QAction("&Change layout", self)
-        view_menu_action.triggered.connect(lambda: self._status_bar.showMessage("Change Layout"))
-        view_menu.addAction(view_menu_action)
+        change_layout_action = QAction("&Change layout", self)
+        change_layout_action.triggered.connect(self._on_change_layout)
+        view_menu.addAction(change_layout_action)
 
-        view_menu_action = QAction("&Maximize Active view...", self)
-        view_menu_action.triggered.connect(lambda: self._status_bar.showMessage("Maximize Active View"))
-        view_menu.addAction(view_menu_action)
+        maximize_view_action = QAction("&Maximize window", self)
+        maximize_view_action.triggered.connect(self.showMaximized)
+        view_menu.addAction(maximize_view_action)
 
-        view_menu_action = QAction("&Change Active view...", self)
-        view_menu_action.triggered.connect(lambda: self._status_bar.showMessage("Change Active View"))
-        view_menu.addAction(view_menu_action)
-
-        view_menu.addSeparator()
-
-        view_menu_action = QAction("&Show Results Bar", self)
-        view_menu_action.setCheckable(True)
-        view_menu_action.setChecked(True)
-        view_menu_action.triggered.connect(lambda: self._status_bar.showMessage("Show Results Bar"))
-        view_menu.addAction(view_menu_action)
+        change_active_view_action = QAction("&Change Active view...", self)
+        change_active_view_action.triggered.connect(self._on_change_active_view)
+        view_menu.addAction(change_active_view_action)
 
         view_menu.addSeparator()
 
-        view_menu_action = QAction("&Program Options", self)
-        view_menu_action.triggered.connect(lambda: self._status_bar.showMessage("Program Options"))
-        view_menu.addAction(view_menu_action)
+        # Toggle the right-side results panel in the Loading Condition view
+        self._show_results_bar_action = QAction("&Show Results Bar", self)
+        self._show_results_bar_action.setCheckable(True)
+        self._show_results_bar_action.setChecked(True)
+        self._show_results_bar_action.triggered.connect(self._on_toggle_results_bar)
+        view_menu.addAction(self._show_results_bar_action)
 
-        view_menu_action = QAction("&Display Options", self)
-        view_menu_action.triggered.connect(lambda: self._status_bar.showMessage("Display Options"))
-        view_menu.addAction(view_menu_action)
+        view_menu.addSeparator()
 
-        view_menu_action = QAction("&Restore Default Workspace settings...", self)
-        view_menu_action.triggered.connect(lambda: self._status_bar.showMessage("Restore Default Workspace Settings"))
-        view_menu.addAction(view_menu_action)
+        # Page navigation via View menu – mirrors toolbar tabs
+        loading_view_action = QAction("Loading Condition", self)
+        loading_view_action.setShortcut("F2")
+        loading_view_action.triggered.connect(
+            lambda: self._switch_page(self._page_indexes.condition_editor, "Loading Condition")
+        )
+        view_menu.addAction(loading_view_action)
 
-        view_menu_action = QAction("&Restore Default Units and Precision...", self)
-        view_menu_action.triggered.connect(lambda: self._status_bar.showMessage("Restore Default Units and Precision"))
-        view_menu.addAction(view_menu_action)
+        results_view_action = QAction("Results", self)
+        results_view_action.setShortcut("F3")
+        results_view_action.triggered.connect(
+            lambda: self._switch_page(self._page_indexes.results, "Results")
+        )
+        view_menu.addAction(results_view_action)
+
+        curves_view_action = QAction("Curves", self)
+        curves_view_action.triggered.connect(
+            lambda: self._switch_page(self._page_indexes.curves, "Curves")
+        )
+        view_menu.addAction(curves_view_action)
+        view_menu.addSeparator()
+
+        program_options_action = QAction("&Program Options", self)
+        program_options_action.triggered.connect(self._on_program_options)
+        view_menu.addAction(program_options_action)
+
+        display_options_action = QAction("&Display Options", self)
+        display_options_action.triggered.connect(self._on_display_options)
+        view_menu.addAction(display_options_action)
+
+        restore_workspace_action = QAction("&Restore Default Workspace settings...", self)
+        restore_workspace_action.triggered.connect(self._on_restore_workspace)
+        view_menu.addAction(restore_workspace_action)
+
+        restore_units_action = QAction("&Restore Default Units and Precision...", self)
+        restore_units_action.triggered.connect(self._on_restore_units)
+        view_menu.addAction(restore_units_action)
 
         # Tools actions – single-ship: Ship/data setup for one-time config
         ship_setup_action = QAction("Ship & data setup...", self)
@@ -612,6 +635,24 @@ class MainWindow(QMainWindow):
         compute_action.triggered.connect(self._on_compute)
         toolbar.addAction(compute_action)
 
+        toolbar.addSeparator()
+
+        # View/zoom actions for graphics in Loading Condition view
+        self._zoom_in_action = QAction("Zoom In", self)
+        self._zoom_in_action.setToolTip("Zoom in profile and deck views (Loading Condition)")
+        self._zoom_in_action.triggered.connect(self._on_zoom_in)
+        toolbar.addAction(self._zoom_in_action)
+
+        self._zoom_out_action = QAction("Zoom Out", self)
+        self._zoom_out_action.setToolTip("Zoom out profile and deck views (Loading Condition)")
+        self._zoom_out_action.triggered.connect(self._on_zoom_out)
+        toolbar.addAction(self._zoom_out_action)
+
+        self._fit_view_action = QAction("Fit View", self)
+        self._fit_view_action.setToolTip("Fit ship profile and deck drawings to view")
+        self._fit_view_action.triggered.connect(self._on_fit_to_view)
+        toolbar.addAction(self._fit_view_action)
+
     def _create_status_panel(self) -> None:
         """Create status panel with Alarms/Log/Offline buttons in top right."""
         # Create a widget for the status panel
@@ -658,6 +699,217 @@ class MainWindow(QMainWindow):
         for idx, action in self._nav_actions.items():
             action.setChecked(idx == index)
 
+        # Enable zoom actions only when the Loading Condition view is active
+        current_widget = self._stack.currentWidget()
+        is_condition_view = isinstance(current_widget, ConditionEditorView)
+        for attr in ("_zoom_in_action", "_zoom_out_action", "_fit_view_action"):
+            action = getattr(self, attr, None)
+            if action is not None:
+                action.setEnabled(is_condition_view)
+
+    # ------------------------------------------------------------------
+    # Edit menu helpers
+    # ------------------------------------------------------------------
+
+    def _get_condition_editor(self) -> ConditionEditorView | None:
+        """Return the Loading Condition editor when it is the active page."""
+        widget = self._stack.currentWidget()
+        return widget if isinstance(widget, ConditionEditorView) else None
+
+    def _on_edit_item(self) -> None:
+        editor = self._get_condition_editor()
+        if editor:
+            editor.edit_selected_item()
+        else:
+            self._status_bar.showMessage("Edit item is available in the Loading Condition view.", 4000)
+
+    def _on_delete_items(self) -> None:
+        editor = self._get_condition_editor()
+        if editor:
+            editor.delete_selected_items()
+        else:
+            self._status_bar.showMessage("Delete item(s) is available in the Loading Condition view.", 4000)
+
+    def _on_search_item(self) -> None:
+        editor = self._get_condition_editor()
+        if editor:
+            editor.search_item()
+        else:
+            self._status_bar.showMessage("Search item is available in the Loading Condition view.", 4000)
+
+    def _on_add_new_item(self) -> None:
+        editor = self._get_condition_editor()
+        if editor:
+            editor.add_new_item()
+        else:
+            # Fallback: open Ship & data setup so user can define new items
+            self._switch_page(self._page_indexes.ship_manager, "Ship & data setup – add tanks and pens")
+
+    def _on_empty_spaces(self) -> None:
+        editor = self._get_condition_editor()
+        if editor:
+            editor.empty_spaces()
+        else:
+            self._status_bar.showMessage("Empty space(s) is available in the Loading Condition view.", 4000)
+
+    def _on_fill_spaces(self) -> None:
+        editor = self._get_condition_editor()
+        if editor:
+            editor.fill_spaces()
+        else:
+            self._status_bar.showMessage("Fill space(s) is available in the Loading Condition view.", 4000)
+
+    def _on_fill_spaces_to(self) -> None:
+        editor = self._get_condition_editor()
+        if not editor:
+            self._status_bar.showMessage("Fill spaces To is available in the Loading Condition view.", 4000)
+            return
+        from PyQt6.QtWidgets import QInputDialog
+
+        value, ok = QInputDialog.getDouble(
+            self,
+            "Fill spaces to",
+            "Fill selected spaces/tanks to (% full):",
+            100.0,
+            0.0,
+            100.0,
+            1,
+        )
+        if not ok:
+            return
+        editor.fill_spaces_to(value)
+
+    def _on_select_all(self) -> None:
+        editor = self._get_condition_editor()
+        if editor:
+            editor.select_all_items()
+        else:
+            self._status_bar.showMessage("Select all is available in the Loading Condition view.", 4000)
+
+    def _on_clear_selection(self) -> None:
+        editor = self._get_condition_editor()
+        if editor:
+            editor.clear_selection()
+        else:
+            self._status_bar.showMessage("Clear selection is available in the Loading Condition view.", 4000)
+
+    def _on_toggle_results_bar(self, checked: bool) -> None:
+        """
+        Show or hide the right-side results panel in the Loading Condition view.
+
+        Connected to View → Show Results Bar.
+        """
+        cond_editor = self._stack.widget(self._page_indexes.condition_editor)
+        if isinstance(cond_editor, ConditionEditorView):
+            cond_editor.set_results_panel_visible(checked)
+
+    def _on_default_view_model(self) -> None:
+        """
+        Restore the main layout to a sensible default "Loading Condition" view.
+
+        View → Default view model calls this to get back to the standard layout.
+        """
+        # Show main toolbar and unhide key panels in the editor
+        for tb in self.findChildren(QToolBar):
+            tb.setVisible(True)
+        cond_editor = self._stack.widget(self._page_indexes.condition_editor)
+        if isinstance(cond_editor, ConditionEditorView):
+            cond_editor.set_default_view_layout()
+        # Ensure results bar toggle is in sync
+        self._show_results_bar_action.setChecked(True)
+        # Switch to Loading Condition page
+        self._switch_page(self._page_indexes.condition_editor, "Loading Condition")
+
+    def _on_change_layout(self) -> None:
+        """
+        Toggle between showing and hiding the bottom condition table.
+
+        This gives a simple "layout" change: more space for graphics/results vs.
+        full editor with the tabbed condition table visible.
+        """
+        cond_editor = self._stack.widget(self._page_indexes.condition_editor)
+        if not isinstance(cond_editor, ConditionEditorView):
+            self._status_bar.showMessage("Open Loading Condition view to change layout")
+            return
+        currently_visible = cond_editor._condition_table.isVisible()
+        cond_editor._condition_table.setVisible(not currently_visible)
+        if currently_visible:
+            self._status_bar.showMessage("Layout: graphics/results focus (condition table hidden)", 4000)
+        else:
+            self._status_bar.showMessage("Layout: full editor (condition table shown)", 4000)
+
+    def _on_change_active_view(self) -> None:
+        """
+        Cycle the active central view between Loading Condition → Results → Curves.
+
+        Called from View → Change Active view...
+        """
+        order = [
+            self._page_indexes.condition_editor,
+            self._page_indexes.results,
+            self._page_indexes.curves,
+        ]
+        current = self._stack.currentIndex()
+        try:
+            idx = order.index(current)
+        except ValueError:
+            idx = 0
+        next_index = order[(idx + 1) % len(order)]
+        label = "Loading Condition" if next_index == self._page_indexes.condition_editor else (
+            "Results" if next_index == self._page_indexes.results else "Curves"
+        )
+        self._switch_page(next_index, label)
+
+    def _on_program_options(self) -> None:
+        """
+        Placeholder Program Options dialog.
+
+        View → Program Options opens this until a full options system is implemented.
+        """
+        QMessageBox.information(
+            self,
+            "Program Options",
+            "Program-wide options are not configurable in this demo build.\n\n"
+            "Core behaviour (computation, results, and layout) is fixed for now."
+        )
+
+    def _on_display_options(self) -> None:
+        """
+        Placeholder Display Options dialog.
+
+        View → Display Options allows basic explanation instead of doing nothing.
+        """
+        QMessageBox.information(
+            self,
+            "Display Options",
+            "Display options (themes, fonts, colours) are not configurable in this build.\n\n"
+            "The current layout is optimised for clarity on typical shipboard laptops."
+        )
+
+    def _on_restore_workspace(self) -> None:
+        """
+        Restore default workspace-like layout.
+
+        For now this mirrors Default view model and also normalises the window size.
+        """
+        self.showNormal()
+        self.resize(1200, 800)
+        self._on_default_view_model()
+        self._status_bar.showMessage("Workspace layout restored to defaults", 4000)
+
+    def _on_restore_units(self) -> None:
+        """
+        Inform the user that units/precision are fixed in this build.
+
+        Keeps View → Restore Default Units and Precision from being a no-op.
+        """
+        QMessageBox.information(
+            self,
+            "Units and Precision",
+            "Units and precision are fixed to SI / metric values in this build.\n\n"
+            "Drafts: metres, Displacement: tonnes, GM: metres, Shear/BM: metric units."
+        )
+
     def _on_cargo_library(self) -> None:
         """Open Edit Cargo Library dialog; refresh condition editor combo and dropdowns when closed."""
         dlg = CargoLibraryDialog(self)
@@ -670,11 +922,19 @@ class MainWindow(QMainWindow):
                 cond_editor._condition_table.update_cargo_types(cond_editor._cargo_types)
 
     def _on_hydrostatic_calculator(self) -> None:
-        """Open Hydrostatic Calculator dialog; use current ship dimensions if available."""
-        cond_editor = self._stack.widget(self._page_indexes.condition_editor)
-        ship = getattr(cond_editor, "_current_ship", None) if isinstance(cond_editor, ConditionEditorView) else None
-        dlg = HydrostaticCalculatorDialog(self, ship=ship)
-        dlg.exec()
+        """
+        Open Hydrostatic Calculator.
+
+        The full calculator dialog is not implemented yet in this project;
+        for now, show a non-crashing placeholder message instead of raising
+        a NameError when the menu item is used.
+        """
+        QMessageBox.information(
+            self,
+            "Hydrostatic Calculator",
+            "Hydrostatic Calculator is not available in this build.\n\n"
+            "Use the main Results and Curves views for stability checks."
+        )
 
     def _on_import_tanks_from_stl(self) -> None:
         """Import STL mesh(es) as tank objects; volume and LCG, VCG, TCG from mesh."""
@@ -941,52 +1201,38 @@ class MainWindow(QMainWindow):
                 name=condition_name,
             )
 
-            # Extract tank volumes from table
-            tank_volumes: Dict[int, float] = {}
-            if condition_widget._current_ship and database.SessionLocal:
-                with database.SessionLocal() as db:
-                    from ..services.condition_service import ConditionService
-                    cond_service = ConditionService(db)
-                    tanks = cond_service.get_tanks_for_ship(condition_widget._current_ship.id)
-                    tank_by_id = {t.id: t for t in tanks}
+        # Keep condition name in sync with the form (e.g. user edited after Compute)
+        name_from_form = condition_widget._condition_name_edit.text().strip()
+        if name_from_form:
+            condition.name = name_from_form
 
-                    for row in range(condition_widget._tank_table.rowCount()):
-                        name_item = condition_widget._tank_table.item(row, 0)
-                        fill_item = condition_widget._tank_table.item(row, 2)
-                        if name_item and fill_item:
-                            tank_id = name_item.data(Qt.ItemDataRole.UserRole)
-                            if tank_id:
-                                try:
-                                    fill_pct = float(fill_item.text())
-                                    tank = tank_by_id.get(int(tank_id))
-                                    if tank:
-                                        vol = tank.capacity_m3 * (fill_pct / 100.0)
-                                        tank_volumes[int(tank_id)] = vol
-                                except (ValueError, TypeError):
-                                    pass
+        # Build tank volumes and pen loadings from current UI state.
+        # Use the condition table (new UI) as the source of truth, with the
+        # legacy simple tables as a fallback, so tank and pen loadings are
+        # always saved exactly as shown on screen.
+        tank_volumes: Dict[int, float] = {}
+        pen_loadings: Dict[int, int] = {}
 
-            # Extract pen loadings from table
-            pen_loadings: Dict[int, int] = {}
-            for row in range(condition_widget._pen_table.rowCount()):
-                name_item = condition_widget._pen_table.item(row, 0)
-                head_item = condition_widget._pen_table.item(row, 3)
-                if name_item and head_item:
-                    pen_id = name_item.data(Qt.ItemDataRole.UserRole)
-                    if pen_id:
-                        try:
-                            heads = int(float(head_item.text()))
-                            if heads > 0:
-                                pen_loadings[int(pen_id)] = heads
-                        except (ValueError, TypeError):
-                            pass
+        # Start with simple tank table (Fill % * capacity)
+        tank_volumes = condition_widget._tank_volumes_from_simple_table()
 
-            condition.tank_volumes_m3 = tank_volumes
-            condition.pen_loadings = pen_loadings
-        else:
-            # Keep condition name in sync with the form (e.g. user edited after Compute)
-            name_from_form = condition_widget._condition_name_edit.text().strip()
-            if name_from_form:
-                condition.name = name_from_form
+        # Overlay volumes from condition table so Volume/Weight-driven edits win
+        if hasattr(condition_widget, "_condition_table"):
+            ct_vols = condition_widget._condition_table.get_tank_volumes_from_tables()
+            for tid, vol in ct_vols.items():
+                tank_volumes[tid] = vol
+
+            # Pen loadings: prefer condition table (livestock decks)
+            ct_pen_loads = condition_widget._condition_table.get_pen_loadings_from_tables()
+            if ct_pen_loads:
+                pen_loadings = {pid: h for pid, h in ct_pen_loads.items() if h > 0}
+
+        # Fallback to legacy pen table if condition table has no loads
+        if not pen_loadings:
+            pen_loadings = condition_widget._pen_loadings_from_pen_table()
+
+        condition.tank_volumes_m3 = tank_volumes
+        condition.pen_loadings = pen_loadings
 
         try:
             save_condition_to_file(file_path, condition)
@@ -1128,54 +1374,55 @@ class MainWindow(QMainWindow):
 
     def _on_compute(self) -> None:
         """Handle compute action from toolbar."""
-        # Reset GZ curve before each new computation so it never shows stale data
-        if hasattr(self, "_curves_view") and self._curves_view is not None:
-            try:
-                self._curves_view.clear_curve()
-            except Exception:
-                # Non-fatal: keep going with computation even if curve reset fails
-                pass
-        # Switch to condition editor if not already there
-        if self._stack.currentIndex() != self._page_indexes.condition_editor:
+        # Remember which page the user was on to return appropriately after compute
+        previous_index = self._stack.currentIndex()
+        previous_was_curves = previous_index == self._page_indexes.curves
+
+        # Switch to condition editor if not already there to run the calculation
+        if previous_index != self._page_indexes.condition_editor:
             self._switch_page(self._page_indexes.condition_editor, "Loading Condition")
 
         current_widget = self._stack.currentWidget()
         if isinstance(current_widget, ConditionEditorView):
             if current_widget.compute_condition():
                 self._status_bar.showMessage("Computation completed", 3000)
-                # Auto-switch to results view
-                self._switch_page(self._page_indexes.results, "Results")
+                # If user started from Curves, return to Curves so the refreshed
+                # GZ plot is shown immediately; otherwise go to Results as before.
+                if previous_was_curves:
+                    self._switch_page(self._page_indexes.curves, "Curves")
+                else:
+                    self._switch_page(self._page_indexes.results, "Results")
             else:
                 self._status_bar.showMessage("Computation failed - check inputs", 3000)
         else:
             self._status_bar.showMessage("Switch to Loading Condition view first")
 
-    # def _on_zoom_in(self) -> None:
-    #     """Handle zoom in action from toolbar."""
-    #     current_widget = self._stack.currentWidget()
-    #     if isinstance(current_widget, ConditionEditorView):
-    #         current_widget.zoom_in_graphics()
-    #         self._status_bar.showMessage("Zoomed in", 1000)
-    #     else:
-    #         self._status_bar.showMessage("Zoom available in Loading Condition view")
+    def _on_zoom_in(self) -> None:
+        """Handle zoom in action from toolbar."""
+        current_widget = self._stack.currentWidget()
+        if isinstance(current_widget, ConditionEditorView):
+            current_widget.zoom_in_graphics()
+            self._status_bar.showMessage("Zoomed in", 1000)
+        else:
+            self._status_bar.showMessage("Zoom available in Loading Condition view")
 
-    # def _on_zoom_out(self) -> None:
-    #     """Handle zoom out action from toolbar."""
-    #     current_widget = self._stack.currentWidget()
-    #     if isinstance(current_widget, ConditionEditorView):
-    #         current_widget.zoom_out_graphics()
-    #         self._status_bar.showMessage("Zoomed out", 1000)
-    #     else:
-    #         self._status_bar.showMessage("Zoom available in Loading Condition view")
+    def _on_zoom_out(self) -> None:
+        """Handle zoom out action from toolbar."""
+        current_widget = self._stack.currentWidget()
+        if isinstance(current_widget, ConditionEditorView):
+            current_widget.zoom_out_graphics()
+            self._status_bar.showMessage("Zoomed out", 1000)
+        else:
+            self._status_bar.showMessage("Zoom available in Loading Condition view")
 
-    # def _on_fit_to_view(self) -> None:
-    #     """Handle fit to view action from toolbar."""
-    #     current_widget = self._stack.currentWidget()
-    #     if isinstance(current_widget, ConditionEditorView):
-    #         current_widget.reset_zoom_graphics()
-    #         self._status_bar.showMessage("Fitted to view", 1000)
-    #     else:
-    #         self._status_bar.showMessage("Fit to view available in Loading Condition view")
+    def _on_fit_to_view(self) -> None:
+        """Handle fit to view action from toolbar."""
+        current_widget = self._stack.currentWidget()
+        if isinstance(current_widget, ConditionEditorView):
+            current_widget.reset_zoom_graphics()
+            self._status_bar.showMessage("Fitted to view", 1000)
+        else:
+            self._status_bar.showMessage("Fit to view available in Loading Condition view")
 
     def _on_alarms_clicked(self) -> None:
         """Handle alarms button click."""

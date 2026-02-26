@@ -55,12 +55,17 @@ class ConditionService:
     ) -> ConditionResults:
         """
         Validate the condition and run the stability calculation.
-        If cargo_type is set, uses its avg_weight_per_head_kg and vcg_from_deck_m for pen calculations.
-        If tank_cog_override is set (tank_id -> (vcg_m, lcg_m, tcg_m)), those CoG values are used for tanks.
+
+        If cargo_type is set, uses its avg_weight_per_head_kg and vcg_from_deck_m
+        for pen calculations. If tank_cog_override is set (tank_id -> (vcg_m,
+        lcg_m, tcg_m)), those CoG values are used for tanks instead of the
+        defaults.
+
+        Lightship-only conditions (no tank volumes and no pen loadings) are
+        allowed so that the user can compute and view trim / GM / GZ curves for
+        the bare ship without cargo.
         """
         pen_loadings = getattr(condition, "pen_loadings", None) or {}
-        if not tank_fill_volumes and not pen_loadings:
-            raise ConditionValidationError("No tank volumes or pen loadings provided.")
 
         if not ship.id:
             raise ConditionValidationError("Ship must have an ID.")

@@ -227,21 +227,21 @@ class ConditionEditorView(QWidget):
         self._condition_combo.hide()
 
         # Main content area: left (profile+deck), right (results)
-        main_splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        main_splitter.setChildrenCollapsible(False)
+        self._main_splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self._main_splitter.setChildrenCollapsible(False)
         
         # Left side: deck/profile widget
-        main_splitter.addWidget(self._deck_profile_widget)
+        self._main_splitter.addWidget(self._deck_profile_widget)
         
         # Right side: results panel
-        main_splitter.addWidget(self._results_panel)
+        self._main_splitter.addWidget(self._results_panel)
         
         # Set splitter sizes and constraints
-        main_splitter.setSizes([600, 300])
+        self._main_splitter.setSizes([600, 300])
         # Ensure results panel doesn't exceed its maximum width
-        main_splitter.setStretchFactor(0, 1)  # Left side can stretch
-        main_splitter.setStretchFactor(1, 0)  # Right side (results panel) cannot stretch
-        root.addWidget(main_splitter, 2)
+        self._main_splitter.setStretchFactor(0, 1)  # Left side can stretch
+        self._main_splitter.setStretchFactor(1, 0)  # Right side (results panel) cannot stretch
+        root.addWidget(self._main_splitter, 2)
 
         # Bottom: tabbed table widget
         root.addWidget(self._condition_table, 1)
@@ -1008,6 +1008,94 @@ class ConditionEditorView(QWidget):
         deck_tab = self._deck_profile_widget._deck_tab_widgets.get(current_deck)
         if deck_tab:
             deck_tab._deck_view.fit_to_view()
+
+    def set_results_panel_visible(self, visible: bool) -> None:
+        """
+        Show or hide the right-side results panel.
+
+        Exposed so the main window View → Show Results Bar menu item can
+        toggle this panel without reaching into private attributes.
+        """
+        self._results_panel.setVisible(visible)
+
+    def set_default_view_layout(self) -> None:
+        """
+        Reset the Loading Condition layout to a sensible default.
+
+        Used by View → Default view model so the main window can restore
+        the usual splitter sizes and make key panels visible.
+        """
+        # Restore splitter balance
+        if hasattr(self, "_main_splitter"):
+            self._main_splitter.setOrientation(Qt.Orientation.Horizontal)
+            self._main_splitter.setSizes([600, 300])
+        # Ensure core panels are visible
+        self._results_panel.setVisible(True)
+        self._condition_table.setVisible(True)
+
+    # ------------------------------------------------------------------
+    # Public helpers for Edit menu (invoked from MainWindow)
+    # ------------------------------------------------------------------
+
+    def edit_selected_item(self) -> None:
+        """Begin editing the currently selected cell in the active condition table tab."""
+        self._condition_table.edit_selected_item()
+
+    def delete_selected_items(self) -> None:
+        """
+        Clear load for selected items.
+
+        On livestock tabs this zeros head counts; on tank tabs this empties
+        the corresponding tanks (0% full).
+        """
+        self._condition_table.clear_selected_items()
+
+    def select_all_items(self) -> None:
+        """Select all rows in the active condition table tab."""
+        self._condition_table.select_all_items()
+
+    def clear_selection(self) -> None:
+        """Clear selection in the active condition table tab."""
+        self._condition_table.clear_selection()
+
+    def empty_spaces(self) -> None:
+        """Empty selected spaces/tanks in the current tank tab (0% full)."""
+        self._condition_table.set_selected_tanks_empty()
+
+    def fill_spaces(self) -> None:
+        """Fill selected spaces/tanks in the current tank tab to 100%."""
+        self._condition_table.set_selected_tanks_full()
+
+    def fill_spaces_to(self, level_pct: float) -> None:
+        """Fill selected spaces/tanks in the current tank tab to a specific percentage."""
+        self._condition_table.set_selected_tanks_fill_to(level_pct)
+
+    def search_item(self) -> None:
+        """
+        Prompt for a pen or tank name and select the first matching row
+        in the currently active condition table tab.
+        """
+        from PyQt6.QtWidgets import QInputDialog
+
+        term, ok = QInputDialog.getText(
+            self,
+            "Search item",
+            "Enter pen or tank name (partial match):",
+        )
+        if not ok or not term.strip():
+            return
+        found = self._condition_table.search_by_name(term.strip())
+        if not found:
+            QMessageBox.information(self, "Search", "No matching item found in the current tab.")
+
+    def add_new_item(self) -> None:
+        """
+        Trigger the same behaviour as clicking '+' in the condition table.
+
+        In this build, that means opening Tools → Ship & data setup so the
+        user can define new tanks or pens, which will then appear here.
+        """
+        self._condition_table.add_requested.emit()
 
     def _load_sounding_for_ship(self, ship: Optional[Ship]) -> None:
         """Load sounding table from project assets/ for this ship (no user import)."""

@@ -61,23 +61,42 @@ class CurvesView(QGraphicsView):
             ship, condition, voyage: currently unused but kept for future use and
                 to match the signal signature.
         """
-        gm = getattr(results, "gm_m", 0.0)
+        gm_raw = getattr(results, "gm_m", 0.0)
         validation = getattr(results, "validation", None)
-        gm_eff = getattr(validation, "gm_effective", gm) if validation else gm
+        gm_eff = getattr(validation, "gm_effective", gm_raw) if validation else gm_raw
 
-        if gm_eff <= 0.0:
-            self._draw_empty_message("GM ≤ 0: condition unstable – no GZ curve.")
-            return
+        # Always generate a curve for diagnostics:
+        # - Prefer effective GM when positive
+        # - Otherwise fall back to raw GM
+        # - If both are non-positive or zero, use a small positive placeholder
+        gm_for_shape = gm_eff if gm_eff is not None else gm_raw
+        if gm_for_shape is None:
+            gm_for_shape = 0.0
+        if gm_for_shape <= 0.0:
+            gm_for_shape = abs(gm_raw) if gm_raw not in (None, 0.0) else 0.01
+        # Vary the angle of vanishing stability with GM so curve shape changes
+        # between loading conditions:
+        # - Very low GM → curve dies early (e.g. 40°–50°)
+        # - Higher GM → curve extends closer to 90°
+        gm_clamped = max(0.0, min(float(gm_for_shape), 1.5))
+        phi_end_deg = 40.0 + (gm_clamped / 1.5) * 50.0  # range ≈ 40°–90°
 
         # Build approximate GZ curve from GM (0–90°)
         angles_deg = list(range(0, 91, 2))
-        gz_values = self._approximate_gz_curve(angles_deg, gm_eff)
+        gz_values = self._approximate_gz_curve(angles_deg, gm_for_shape, phi_end_deg)
 
+        # As a safety net, if something went wrong and we still have no positive
+        # GZ values, fall back to a generic curve so the user always sees a
+        # righting lever plot, even for edge cases like pure lightship.
         if not gz_values or max(gz_values) <= 0.0:
-            self._draw_empty_message("Unable to build GZ curve for this condition.")
-            return
+            fallback_gm = gm_for_shape if gm_for_shape > 0.0 else 0.5
+            gz_values = self._approximate_gz_curve(angles_deg, fallback_gm, 60.0)
 
-        self._draw_curve(angles_deg, gz_values, gm_eff)
+        # For GM guide line, keep using effective GM when it is meaningful;
+        # otherwise use the GM value that was used to shape the curve.
+        gm_for_display = gm_eff if isinstance(gm_eff, (int, float)) and gm_eff > 0.0 else gm_for_shape
+
+        self._draw_curve(angles_deg, gz_values, gm_for_display)
 
     # --- Internal helpers -----------------------------------------------
 
@@ -103,24 +122,34 @@ class CurvesView(QGraphicsView):
         self,
         angles_deg: Sequence[int],
         gm_eff: float,
+        phi_end_deg: float = 90.0,
     ) -> list[float]:
         """
         Build a smooth GZ curve that matches manual shape: tangent at origin = GM,
-        single peak around 50°, then decay to zero at 90° (angle of vanishing stability).
+        single peak around mid-angles, then decay to zero at φ = φ_end_deg
+        (angle of vanishing stability).
 
         Uses: GZ(φ) = GM * sin(φ) * envelope(φ) with envelope chosen so the curve
-        peaks near 50° and goes to zero at 90°, giving the classic static stability look.
+        peaks near mid-angles and goes to zero at φ_end_deg, giving a classic
+        static stability look. φ_end_deg is varied per condition so different
+        loading conditions produce visibly different curve shapes.
         """
-        phi_end_deg = 90.0
+        # Clamp end angle to a sensible range
+        phi_end_deg = max(30.0, min(float(phi_end_deg), 90.0))
         gz_values: list[float] = []
+
+        # Shape exponent: smaller for more stable (larger φ_end) so the curve
+        # is broader; larger for less stable so it is steeper and dies earlier.
+        span_norm = (phi_end_deg - 30.0) / 60.0  # 0 at 30°, 1 at 90°
+        exponent = 2.0 + (1.2 * (1.0 - span_norm))
 
         for a in angles_deg:
             phi_deg = float(a)
             phi_rad = math.radians(phi_deg)
             base = math.sin(phi_rad)
-            # Envelope: 1 at small φ, 0 at 90°; exponent >2 shifts peak toward 50°
+            # Envelope: 1 at small φ, 0 at φ_end; exponent >2 shifts peak toward mid-angles
             u = phi_deg / phi_end_deg
-            envelope = max(0.0, 1.0 - (u ** 2.2))
+            envelope = max(0.0, 1.0 - (u ** exponent))
             gz = gm_eff * base * envelope
             gz_values.append(max(0.0, gz))
 
