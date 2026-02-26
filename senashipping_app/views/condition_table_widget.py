@@ -139,12 +139,12 @@ class ConditionTableWidget(QWidget):
         self._totals_label.setStyleSheet("color: #555; font-weight: bold;")
         bottom.addWidget(self._totals_label)
         bottom.addStretch()
-        self._add_btn = QPushButton("+", self)
-        self._add_btn.setFixedSize(32, 28)
-        self._add_btn.setToolTip("Add tank or pen ΓÇô define in Tools ΓåÆ Ship & data setup, then they appear here")
-        self._add_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-size: 16px; font-weight: bold; border: none; border-radius: 3px; } QPushButton:hover { background-color: #45a049; }")
-        self._add_btn.clicked.connect(self._on_add_clicked)
-        bottom.addWidget(self._add_btn)
+        # self._add_btn = QPushButton("+", self)
+        # self._add_btn.setFixedSize(32, 28)
+        # self._add_btn.setToolTip("Add tank or pen ΓÇô define in Tools ΓåÆ Ship & data setup, then they appear here")
+        # self._add_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-size: 16px; font-weight: bold; border: none; border-radius: 3px; } QPushButton:hover { background-color: #45a049; }")
+        # self._add_btn.clicked.connect(self._on_add_clicked)
+        # bottom.addWidget(self._add_btn)
         layout.addLayout(bottom)
         
     def _on_add_clicked(self) -> None:
