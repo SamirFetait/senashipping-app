@@ -65,6 +65,12 @@ def _style_body_table(ws, *, start_row: int = 2, first_col_bold: bool = True, st
                     vertical="center",
                     wrap_text=True,
                 )
+            else:
+                cell.alignment = Alignment(
+                    horizontal="right",
+                    vertical="center",
+                    wrap_text=True,
+                )
 
 
 def _deck_to_letter(deck: str) -> str | None:
@@ -257,12 +263,6 @@ def _build_weight_items_rows(ship, condition, results) -> list[dict] | None:
         )
 
     return rows if rows else None
-            else:
-                cell.alignment = Alignment(
-                    horizontal="right",
-                    vertical="center",
-                    wrap_text=True,
-                )
 
 
 def export_condition_to_excel(

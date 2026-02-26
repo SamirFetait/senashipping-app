@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QShortcut
 from PyQt6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -59,6 +59,7 @@ def _edit_cargo_type_dialog(
 
     d = QDialog(parent)
     d.setWindowTitle(title)
+    QShortcut(Qt.Key.Key_Escape, d, activated=d.reject)
     layout = QFormLayout(d)
 
     name_edit = QLineEdit(d)
@@ -194,6 +195,7 @@ class CargoLibraryDialog(QDialog):
         self.setWindowTitle("Edit Cargo Library")
         self.setMinimumSize(720, 400)
         self.resize(820, 450)
+        QShortcut(Qt.Key.Key_Escape, self, activated=self.reject)
 
         self._items: List[CargoType] = []
         self._table = QTableWidget(self)

@@ -192,6 +192,11 @@ Where an item is not fully implemented, the app shows a **non-crashing informati
 
 - **Always save before major edits**
   - Use `Ctrl+S` frequently to write the current condition to a `.senashipping` file.
+  - Use **Esc** to close most dialogs (for example, **Program Notes** and **Cargo Library**).
+  - Use familiar shortcuts such as:
+    - `Ctrl+Q` to **exit** the application.
+    - `Ctrl+A` to **select all** items in the Loading Condition tables.
+    - `Delete` to **delete** selected items via `Edit → Delete item(s)...`.
 
 - **One ship, many conditions**
   - Treat `Ship & data setup` as a **one-time configuration**.

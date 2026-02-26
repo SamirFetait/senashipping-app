@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict
 
 from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QAction, QIcon, QActionGroup
+from PyQt6.QtGui import QAction, QIcon, QActionGroup, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QMainWindow,
     QStackedWidget,
@@ -224,6 +224,7 @@ class MainWindow(QMainWindow):
         exit_action = QAction("E&xit", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+        exit_action.setShortcut("Ctrl+Q")
 
         # Edit actions
         edit_item_action = QAction("&Edit item ...", self)
@@ -233,6 +234,7 @@ class MainWindow(QMainWindow):
         delete_item_action = QAction("&Delete item(s) ...", self)
         delete_item_action.triggered.connect(self._on_delete_items)
         edit_menu.addAction(delete_item_action)
+        delete_item_action.setShortcut("Del")
 
         edit_menu.addSeparator()
 
@@ -263,10 +265,12 @@ class MainWindow(QMainWindow):
         select_all_action = QAction("&Select all", self)
         select_all_action.triggered.connect(self._on_select_all)
         edit_menu.addAction(select_all_action)
+        select_all_action.setShortcut("Ctrl+A")
 
         clear_selection_action = QAction("&Clear selection", self)
         clear_selection_action.triggered.connect(self._on_clear_selection)
         edit_menu.addAction(clear_selection_action)
+        clear_selection_action.setShortcut("Ctrl+Shift+A")
 
         # View actions
         default_view_action = QAction("&Default view model", self)
@@ -298,20 +302,27 @@ class MainWindow(QMainWindow):
 
         # Page navigation via View menu – mirrors toolbar tabs
         loading_view_action = QAction("Loading Condition", self)
-        loading_view_action.setShortcut("F2")
+        loading_view_action.setShortcuts(
+            [QKeySequence("F2"), QKeySequence("Ctrl+1")]
+        )
         loading_view_action.triggered.connect(
             lambda: self._switch_page(self._page_indexes.condition_editor, "Loading Condition")
         )
         view_menu.addAction(loading_view_action)
 
         results_view_action = QAction("Results", self)
-        results_view_action.setShortcut("F3")
+        results_view_action.setShortcuts(
+            [QKeySequence("F3"), QKeySequence("Ctrl+2")]
+        )
         results_view_action.triggered.connect(
             lambda: self._switch_page(self._page_indexes.results, "Results")
         )
         view_menu.addAction(results_view_action)
 
         curves_view_action = QAction("Curves", self)
+        curves_view_action.setShortcuts(
+            [QKeySequence("Ctrl+3")]
+        )
         curves_view_action.triggered.connect(
             lambda: self._switch_page(self._page_indexes.curves, "Curves")
         )
@@ -1335,6 +1346,7 @@ class MainWindow(QMainWindow):
         text = "\n".join(lines)
         dlg = QDialog(self)
         dlg.setWindowTitle("Program Notes – Stability Manual Reference")
+        QShortcut(Qt.Key.Key_Escape, dlg, activated=dlg.reject)
         layout = QVBoxLayout(dlg)
         te = QPlainTextEdit(dlg)
         te.setPlainText(text)
