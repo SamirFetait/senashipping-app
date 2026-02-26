@@ -139,6 +139,8 @@ class ConditionTableWidget(QWidget):
         self._totals_label.setStyleSheet("color: #555; font-weight: bold;")
         bottom.addWidget(self._totals_label)
         bottom.addStretch()
+
+        # TODO: Add button to add tank or pen
         # self._add_btn = QPushButton("+", self)
         # self._add_btn.setFixedSize(32, 28)
         # self._add_btn.setToolTip("Add tank or pen ΓÇô define in Tools ΓåÆ Ship & data setup, then they appear here")

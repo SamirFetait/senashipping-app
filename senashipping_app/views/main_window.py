@@ -135,6 +135,7 @@ class MainWindow(QMainWindow):
             self._on_condition_selected_from_voyage
         )
 
+        # TODO: Add button to add tank or pen
         # Wire condition table '+' button: switch to Ship & data setup to add tanks/pens
         # self._condition_editor._condition_table.add_requested.connect(
         #     lambda: self._switch_page(self._page_indexes.ship_manager, "Ship & data setup – add tanks and pens")
