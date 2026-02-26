@@ -44,23 +44,23 @@ from PyQt6.QtWidgets import (
     QSplitter,
 )
 
-from ..models import Ship, Voyage, LoadingCondition, Tank, CargoType
-from ..repositories import database
-from ..repositories.ship_repository import ShipRepository
-from ..repositories.cargo_type_repository import CargoTypeRepository
-from ..services.condition_service import (
+from senashipping_app.models import Ship, Voyage, LoadingCondition, Tank, CargoType
+from senashipping_app.repositories import database
+from senashipping_app.repositories.ship_repository import ShipRepository
+from senashipping_app.repositories.cargo_type_repository import CargoTypeRepository
+from senashipping_app.services.condition_service import (
     ConditionService,
     ConditionValidationError,
     ConditionResults,
 )
-from ..services.voyage_service import VoyageService, VoyageValidationError
-from ..services.sounding_import import parse_sounding_file_all_tanks
-from ..services.sounding import interpolate_cog_from_volume, interpolate_ullage_fsm_from_volume
-from ..utils.sorting import get_pen_sort_key, get_tank_sort_key
-from .deck_profile_widget import DeckProfileWidget
-from .results_panel import ResultsPanel
-from .condition_table_widget import ConditionTableWidget
-from .cargo_library_dialog import CargoLibraryDialog
+from senashipping_app.services.voyage_service import VoyageService, VoyageValidationError
+from senashipping_app.services.sounding_import import parse_sounding_file_all_tanks
+from senashipping_app.services.sounding import interpolate_cog_from_volume, interpolate_ullage_fsm_from_volume
+from senashipping_app.utils.sorting import get_pen_sort_key, get_tank_sort_key
+from senashipping_app.views.deck_profile_widget import DeckProfileWidget
+from senashipping_app.views.results_panel import ResultsPanel
+from senashipping_app.views.condition_table_widget import ConditionTableWidget
+from senashipping_app.views.cargo_library_dialog import CargoLibraryDialog
 
 
 class ConditionEditorView(QWidget):

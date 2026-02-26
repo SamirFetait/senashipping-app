@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any
 
-from ..models import LoadingCondition
+from senashipping_app.models import LoadingCondition
 
 
 def save_condition_to_file(filepath: Path, condition: LoadingCondition) -> None:

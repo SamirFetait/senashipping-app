@@ -11,9 +11,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List
 
-from ..config.limits import EPS, MAX_DRAFT_FRACTION, MAX_SWBM_FRACTION, MAX_TRIM_FRACTION, MIN_GM_M
-from ..models import Ship, Tank
-from .stability_service import ConditionResults
+from senashipping_app.config.limits import EPS, MAX_DRAFT_FRACTION, MAX_SWBM_FRACTION, MAX_TRIM_FRACTION, MIN_GM_M
+from senashipping_app.models import Ship, Tank
+from senashipping_app.services.stability_service import ConditionResults
 
 
 class ValidationSeverity(Enum):

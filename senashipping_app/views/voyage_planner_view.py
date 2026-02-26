@@ -24,10 +24,10 @@ from PyQt6.QtWidgets import (
     QMessageBox,
 )
 
-from ..models import Ship, Voyage, LoadingCondition
-from ..repositories import database
-from ..repositories.ship_repository import ShipRepository
-from ..services.voyage_service import VoyageService, VoyageValidationError
+from senashipping_app.models import Ship, Voyage, LoadingCondition
+from senashipping_app.repositories import database
+from senashipping_app.repositories.ship_repository import ShipRepository
+from senashipping_app.services.voyage_service import VoyageService, VoyageValidationError
 
 
 class VoyagePlannerView(QWidget):

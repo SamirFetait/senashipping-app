@@ -15,14 +15,14 @@ This will:
 
 from typing import List
 
-from .config.settings import Settings, init_logging
-from .repositories.database import SessionLocal, init_database
-from .repositories.ship_repository import ShipRepository
-from .repositories.tank_repository import TankRepository
-from .repositories.livestock_pen_repository import LivestockPenRepository
-from .models.ship import Ship
-from .models.tank import Tank, TankType
-from .models.livestock_pen import LivestockPen
+from senashipping_app.config.settings import Settings, init_logging
+from senashipping_app.repositories.database import SessionLocal, init_database
+from senashipping_app.repositories.ship_repository import ShipRepository
+from senashipping_app.repositories.tank_repository import TankRepository
+from senashipping_app.repositories.livestock_pen_repository import LivestockPenRepository
+from senashipping_app.models.ship import Ship
+from senashipping_app.models.tank import Tank, TankType
+from senashipping_app.models.livestock_pen import LivestockPen
 
 
 def _get_or_create_osama_bay(ship_repo: ShipRepository) -> Ship:

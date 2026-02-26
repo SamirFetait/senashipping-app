@@ -10,14 +10,14 @@ from typing import TYPE_CHECKING
 import pandas as pd
 from openpyxl.styles import Alignment, Font, PatternFill
 
-from ..config.limits import MASS_PER_HEAD_T
-from ..repositories import database
-from ..repositories.livestock_pen_repository import LivestockPenRepository
-from ..repositories.tank_repository import TankRepository
+from senashipping_app.config.limits import MASS_PER_HEAD_T
+from senashipping_app.repositories import database
+from senashipping_app.repositories.livestock_pen_repository import LivestockPenRepository
+from senashipping_app.repositories.tank_repository import TankRepository
 
 if TYPE_CHECKING:
-    from ..models import Ship, Voyage, LoadingCondition
-    from ..services.stability_service import ConditionResults
+    from senashipping_app.models import Ship, Voyage, LoadingCondition
+    from senashipping_app.services.stability_service import ConditionResults
 
 
 def _fmt(value: object, fmt: str) -> str:

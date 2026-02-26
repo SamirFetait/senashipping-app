@@ -8,7 +8,9 @@ from dataclasses import dataclass
 
 from pathlib import Path
 from typing import Dict
+import os
 
+from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QAction, QIcon, QActionGroup, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
@@ -31,23 +33,23 @@ from PyQt6.QtWidgets import (
 
 from typing import Dict
 
-from ..config.settings import Settings
-from ..config.stability_manual_ref import (
+from senashipping_app.config.settings import Settings
+from senashipping_app.config.stability_manual_ref import (
     MANUAL_VESSEL_NAME,
     MANUAL_IMO,
     MANUAL_REF,
     MANUAL_SOURCE,
     OPERATING_RESTRICTIONS,
 )
-from ..services.file_service import save_condition_to_file, load_condition_from_file
-from ..reports import export_condition_to_excel, export_condition_to_pdf
-from ..repositories import database
-from .ship_manager_view import ShipManagerView
-from .voyage_planner_view import VoyagePlannerView
-from .condition_editor_view import ConditionEditorView
-from .results_view import ResultsView
-from .cargo_library_dialog import CargoLibraryDialog
-from .curves_view import CurvesView
+from senashipping_app.services.file_service import save_condition_to_file, load_condition_from_file
+from senashipping_app.reports import export_condition_to_excel, export_condition_to_pdf
+from senashipping_app.repositories import database
+from senashipping_app.views.ship_manager_view import ShipManagerView
+from senashipping_app.views.voyage_planner_view import VoyagePlannerView
+from senashipping_app.views.condition_editor_view import ConditionEditorView
+from senashipping_app.views.results_view import ResultsView
+from senashipping_app.views.cargo_library_dialog import CargoLibraryDialog
+from senashipping_app.views.curves_view import CurvesView
 
 
 @dataclass
@@ -68,7 +70,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Sena Shipping for Livestock Carriers")
         self.setMinimumSize(1200, 800)
         self.showMaximized()
-        self.setWindowIcon(self.style().standardIcon(getattr(QStyle.StandardPixmap, "SP_ComputerIcon")))
+        app_icon_path = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icon.png")
+        self.setWindowIcon(QIcon(app_icon_path))
 
         self._stack = QStackedWidget(self)
         self.setCentralWidget(self._stack)
@@ -133,9 +136,9 @@ class MainWindow(QMainWindow):
         )
 
         # Wire condition table '+' button: switch to Ship & data setup to add tanks/pens
-        self._condition_editor._condition_table.add_requested.connect(
-            lambda: self._switch_page(self._page_indexes.ship_manager, "Ship & data setup – add tanks and pens")
-        )
+        # self._condition_editor._condition_table.add_requested.connect(
+        #     lambda: self._switch_page(self._page_indexes.ship_manager, "Ship & data setup – add tanks and pens")
+        # ) # 
 
         return pages
 
@@ -981,7 +984,7 @@ class MainWindow(QMainWindow):
         if not ok:
             return
         try:
-            from ..services.stl_mesh_service import create_tanks_from_stl, TRIMESH_AVAILABLE
+            from senashipping_app.services.stl_mesh_service import create_tanks_from_stl, TRIMESH_AVAILABLE
             if not TRIMESH_AVAILABLE:
                 QMessageBox.critical(
                     self,
@@ -989,8 +992,8 @@ class MainWindow(QMainWindow):
                     "trimesh is required. Install with: pip install trimesh",
                 )
                 return
-            from ..repositories import database
-            from ..repositories.tank_repository import TankRepository
+            from senashipping_app.repositories import database
+            from senashipping_app.repositories.tank_repository import TankRepository
             with database.SessionLocal() as db:
                 tank_repo = TankRepository(db)
                 created = create_tanks_from_stl(
@@ -1095,7 +1098,7 @@ class MainWindow(QMainWindow):
                     # Update tank table with loaded volumes
                     if condition.tank_volumes_m3 and database.SessionLocal:
                         with database.SessionLocal() as db:
-                            from ..services.condition_service import ConditionService
+                            from senashipping_app.services.condition_service import ConditionService
                             cond_service = ConditionService(db)
                             tanks = cond_service.get_tanks_for_ship(current_widget._current_ship.id)
                             tank_by_id = {t.id: t for t in tanks}
@@ -1119,7 +1122,7 @@ class MainWindow(QMainWindow):
                         pens = []
                         if database.SessionLocal:
                             with database.SessionLocal() as db:
-                                from ..services.condition_service import ConditionService
+                                from senashipping_app.services.condition_service import ConditionService
                                 cond_service = ConditionService(db)
                                 pens = cond_service.get_pens_for_ship(current_widget._current_ship.id)
 
@@ -1138,7 +1141,7 @@ class MainWindow(QMainWindow):
                     tanks = []
                     if database.SessionLocal:
                         with database.SessionLocal() as db:
-                            from ..services.condition_service import ConditionService
+                            from senashipping_app.services.condition_service import ConditionService
                             cond_service = ConditionService(db)
                             pens = cond_service.get_pens_for_ship(current_widget._current_ship.id)
                             tanks = cond_service.get_tanks_for_ship(current_widget._current_ship.id)
@@ -1205,7 +1208,7 @@ class MainWindow(QMainWindow):
 
         if not condition:
             # Create condition from current form state (condition name from field, else cargo type)
-            from ..models import LoadingCondition
+            from senashipping_app.models import LoadingCondition
             condition_name = condition_widget._condition_name_edit.text().strip() or condition_widget._cargo_type_combo.currentText().strip() or "Condition"
             condition = LoadingCondition(
                 voyage_id=condition_widget._current_voyage.id if condition_widget._current_voyage else None,

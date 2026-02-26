@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import List, Tuple
 
-from ..models import TankSoundingRow
+from senashipping_app.models import TankSoundingRow
 
 # Tolerance for treating volume step as zero (avoids div-by-zero in interpolation)
 _VOLUME_EPS = 1e-12

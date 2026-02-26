@@ -8,8 +8,8 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from ..models import Voyage, LoadingCondition, Ship
-from ..repositories.voyage_repository import VoyageRepository, ConditionRepository
+from senashipping_app.models import Voyage, LoadingCondition, Ship
+from senashipping_app.repositories.voyage_repository import VoyageRepository, ConditionRepository
 
 
 class VoyageValidationError(Exception):

@@ -4,7 +4,7 @@ Simple text-based report builder for a loading condition.
 
 from __future__ import annotations
 
-from ..models import Ship, Voyage, LoadingCondition
+from senashipping_app.models import Ship, Voyage, LoadingCondition
 
 
 def build_condition_summary_text(

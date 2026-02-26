@@ -9,9 +9,9 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
 
-from .views.main_window import MainWindow
-from .config.settings import Settings, init_logging
-from .repositories.database import init_database
+from senashipping_app.views.main_window import MainWindow  # type: ignore[import]
+from senashipping_app.config.settings import Settings, init_logging  # type: ignore[import]
+from senashipping_app.repositories.database import init_database  # type: ignore[import]
 
 
 def main() -> None:

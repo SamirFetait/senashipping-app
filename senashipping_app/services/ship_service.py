@@ -9,8 +9,8 @@ from typing import List
 
 from sqlalchemy.orm import Session
 
-from ..models import Ship
-from ..repositories.ship_repository import ShipRepository
+from senashipping_app.models import Ship
+from senashipping_app.repositories.ship_repository import ShipRepository
 
 
 @dataclass(slots=True)

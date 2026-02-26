@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from ..models import Tank, LivestockPen
+from senashipping_app.models import Tank, LivestockPen
 
 # Seawater density t/m³
 RHO_SEA = 1.025

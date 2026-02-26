@@ -9,9 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from ..models import Ship, Tank, LoadingCondition, LivestockPen
+from senashipping_app.models import Ship, Tank, LoadingCondition, LivestockPen
 
-from .hydrostatics import (
+from senashipping_app.services.hydrostatics import (
     RHO_SEA,
     DEFAULT_CB,
     compute_kg_from_tanks,
@@ -21,8 +21,12 @@ from .hydrostatics import (
     get_bm_t_from_curves,
     get_bm_l_from_curves,
 )
-from .hydrostatic_curves import build_curves_from_formulas, get_lcb_norm, HydrostaticCurves
-from ..config.stability_manual_ref import (
+from senashipping_app.services.hydrostatic_curves import (
+    build_curves_from_formulas,
+    get_lcb_norm,
+    HydrostaticCurves,
+)
+from senashipping_app.config.stability_manual_ref import (
     REF_LOA_M,
     REF_BREADTH_M,
     REF_DEPTH_M,
@@ -33,8 +37,8 @@ from ..config.stability_manual_ref import (
     REF_LIGHTSHIP_LCG_NORM,
     REF_LIGHTSHIP_TCG_M,
 )
-from .longitudinal_strength import compute_strength, StrengthResult
-from .ancillary_calculations import compute_ancillary, AncillaryResults
+from senashipping_app.services.longitudinal_strength import compute_strength, StrengthResult
+from senashipping_app.services.ancillary_calculations import compute_ancillary, AncillaryResults
 
 
 @dataclass(slots=True)

@@ -27,9 +27,9 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QDialogButtonBox,
 )
-from ..models.cargo_type import CargoType
-from ..repositories import database
-from ..repositories.cargo_type_repository import CargoTypeRepository
+from senashipping_app.models.cargo_type import CargoType
+from senashipping_app.repositories import database
+from senashipping_app.repositories.cargo_type_repository import CargoTypeRepository
 
 
 # Default palette for color picker

@@ -11,8 +11,8 @@ from typing import Dict, List, Optional
 from sqlalchemy import Integer, String, Float, Text, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, Session
 
-from .database import Base
-from ..models import Voyage, LoadingCondition
+from senashipping_app.repositories.database import Base
+from senashipping_app.models import Voyage, LoadingCondition
 
 
 def _utc_now() -> datetime:

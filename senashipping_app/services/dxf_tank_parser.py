@@ -11,8 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Tuple, Any
 
-from ..models import Tank
-from ..models.tank import TankType
+from senashipping_app.models import Tank
+from senashipping_app.models.tank import TankType
 
 
 def _polygon_area_and_centroid(points: List[Tuple[float, float]]) -> Tuple[float, float, float]:

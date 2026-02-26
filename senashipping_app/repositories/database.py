@@ -39,11 +39,11 @@ def init_database(db_path: Path) -> sessionmaker:
     This must be called once at application startup (done in main.py).
     """
     # Import ORM models so their metadata is registered on Base
-    from .ship_repository import ShipORM  # noqa: F401
-    from .tank_repository import TankORM  # noqa: F401
-    from .voyage_repository import VoyageORM, LoadingConditionORM  # noqa: F401
-    from .livestock_pen_repository import LivestockPenORM  # noqa: F401
-    from .cargo_type_repository import CargoTypeORM  # noqa: F401
+    from senashipping_app.repositories.ship_repository import ShipORM  # noqa: F401
+    from senashipping_app.repositories.tank_repository import TankORM  # noqa: F401
+    from senashipping_app.repositories.voyage_repository import VoyageORM, LoadingConditionORM  # noqa: F401
+    from senashipping_app.repositories.livestock_pen_repository import LivestockPenORM  # noqa: F401
+    from senashipping_app.repositories.cargo_type_repository import CargoTypeORM  # noqa: F401
 
     engine = create_engine(f"sqlite:///{db_path}", future=True, echo=False)
     Base.metadata.create_all(bind=engine)

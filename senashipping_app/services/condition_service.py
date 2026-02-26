@@ -9,15 +9,15 @@ from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from ..models import Ship, LoadingCondition, Tank
-from ..models.cargo_type import CargoType
-from ..repositories.tank_repository import TankRepository
-from ..repositories.livestock_pen_repository import LivestockPenRepository
-from ..config.limits import MASS_PER_HEAD_T
-from .stability_service import compute_condition, ConditionResults
-from .validation import validate_condition
-from .criteria_rules import evaluate_all_criteria
-from .traceability import create_snapshot
+from senashipping_app.models import Ship, LoadingCondition, Tank
+from senashipping_app.models.cargo_type import CargoType
+from senashipping_app.repositories.tank_repository import TankRepository
+from senashipping_app.repositories.livestock_pen_repository import LivestockPenRepository
+from senashipping_app.config.limits import MASS_PER_HEAD_T
+from senashipping_app.services.stability_service import compute_condition, ConditionResults
+from senashipping_app.services.validation import validate_condition
+from senashipping_app.services.criteria_rules import evaluate_all_criteria
+from senashipping_app.services.traceability import create_snapshot
 
 
 @dataclass(slots=True)

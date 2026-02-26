@@ -58,7 +58,7 @@ def create_snapshot(
 
     criteria_summary = ""
     if criteria and hasattr(criteria, "lines"):
-        from .criteria_rules import CriterionResult
+        from senashipping_app.services.criteria_rules import CriterionResult
         passed = sum(1 for ln in criteria.lines if ln.result == CriterionResult.PASS)
         failed = sum(1 for ln in criteria.lines if ln.result == CriterionResult.FAIL)
         criteria_summary = f"Criteria: {passed} passed, {failed} failed"

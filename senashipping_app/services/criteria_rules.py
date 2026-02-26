@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List
 
-from ..config.limits import (
+from senashipping_app.config.limits import (
     EPS,
     MAX_DRAFT_FRACTION,
     MAX_TRIM_FRACTION,
@@ -24,9 +24,9 @@ from ..config.limits import (
     MIN_VISIBILITY_M,
     MAX_ROLL_PERIOD_S,
 )
-from ..models import Ship, Tank
-from .stability_service import ConditionResults
-from .validation import compute_free_surface_correction
+from senashipping_app.models import Ship, Tank
+from senashipping_app.services.stability_service import ConditionResults
+from senashipping_app.services.validation import compute_free_surface_correction
 
 
 class CriterionResult(Enum):

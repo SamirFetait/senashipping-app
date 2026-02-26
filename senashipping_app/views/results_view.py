@@ -32,22 +32,26 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
-from ..models import Voyage
-from ..repositories import database
-from ..services.condition_service import ConditionService
-from ..config.stability_manual_ref import (
+from senashipping_app.models import Voyage
+from senashipping_app.repositories import database
+from senashipping_app.services.condition_service import ConditionService
+from senashipping_app.config.stability_manual_ref import (
     MANUAL_VESSEL_NAME,
     MANUAL_IMO,
     MANUAL_REF,
     MANUAL_SOURCE,
     OPERATING_RESTRICTIONS,
 )
-from ..reports import build_condition_summary_text, export_condition_to_pdf, export_condition_to_excel
-from ..services.stability_service import ConditionResults
-from ..services.validation import ValidationResult
-from ..services.criteria_rules import CriterionResult
-from ..services.alarms import build_alarm_rows, AlarmStatus
-from ..config.limits import MASS_PER_HEAD_T
+from senashipping_app.reports import (
+    build_condition_summary_text,
+    export_condition_to_pdf,
+    export_condition_to_excel,
+)
+from senashipping_app.services.stability_service import ConditionResults
+from senashipping_app.services.validation import ValidationResult
+from senashipping_app.services.criteria_rules import CriterionResult
+from senashipping_app.services.alarms import build_alarm_rows, AlarmStatus
+from senashipping_app.config.limits import MASS_PER_HEAD_T
 
 
 # Fixed height and style for Condition Results section headers (tabs and main sections)

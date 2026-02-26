@@ -19,8 +19,8 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
 )
 
-from ..config.limits import MIN_GM_LIVESTOCK_M
-from ..services.stability_service import ConditionResults
+from senashipping_app.config.limits import MIN_GM_LIVESTOCK_M
+from senashipping_app.services.stability_service import ConditionResults
 
 
 class StatusLabel(QLabel):

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from ..models import Ship
+from senashipping_app.models import Ship
 
 
 @dataclass(slots=True)

@@ -26,11 +26,11 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QDoubleValidator
 
-from ..models import Tank, LivestockPen
-from ..models.tank import TankType
-from ..utils.sorting import get_pen_sort_key, get_tank_sort_key
-from ..repositories import database
-from ..repositories.livestock_pen_repository import LivestockPenRepository
+from senashipping_app.models import Tank, LivestockPen
+from senashipping_app.models.tank import TankType
+from senashipping_app.utils.sorting import get_pen_sort_key, get_tank_sort_key
+from senashipping_app.repositories import database
+from senashipping_app.repositories.livestock_pen_repository import LivestockPenRepository
 
 
 MASS_PER_HEAD_T = 0.5  # Average mass per head in tonnes

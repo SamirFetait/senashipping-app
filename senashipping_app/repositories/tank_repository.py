@@ -6,8 +6,8 @@ from typing import List
 from sqlalchemy import Integer, String, Float, Text
 from sqlalchemy.orm import Mapped, mapped_column, Session
 
-from .database import Base
-from ..models import Tank, TankType
+from senashipping_app.repositories.database import Base
+from senashipping_app.models import Tank, TankType
 
 
 def _parse_outline(s: str | None) -> list[tuple[float, float]] | None:

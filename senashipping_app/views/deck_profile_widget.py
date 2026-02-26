@@ -23,8 +23,8 @@ from PyQt6.QtWidgets import (
     QGraphicsPolygonItem,
 )
 
-from .graphics_views import ShipGraphicsView
-from ..utils.sorting import get_pen_sort_key
+from senashipping_app.views.graphics_views import ShipGraphicsView
+from senashipping_app.utils.sorting import get_pen_sort_key
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # -> senashipping_app
@@ -799,7 +799,7 @@ class DeckView(ShipGraphicsView):
             return
 
         # Filter pens for this deck
-        from .condition_table_widget import _deck_to_letter
+        from senashipping_app.views.condition_table_widget import _deck_to_letter
         deck_letter = self._deck_name.upper()
         deck_pens = [
             p for p in self._current_pens

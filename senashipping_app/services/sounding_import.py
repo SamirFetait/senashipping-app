@@ -14,7 +14,7 @@ from typing import Dict, List, Tuple
 
 import pandas as pd
 
-from ..models import TankSoundingRow
+from senashipping_app.models import TankSoundingRow
 
 
 # Column name variants (lowercase, strip; \n in headers normalized to space)

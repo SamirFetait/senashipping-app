@@ -9,8 +9,8 @@ from typing import List, Optional
 from sqlalchemy import Integer, String, Float, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, Session
 
-from .database import Base
-from ..models.livestock_pen import LivestockPen
+from senashipping_app.repositories.database import Base
+from senashipping_app.models.livestock_pen import LivestockPen
 
 
 class LivestockPenORM(Base):

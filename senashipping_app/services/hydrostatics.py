@@ -13,9 +13,9 @@ import math
 from dataclasses import dataclass
 from typing import List
 
-from ..models import Ship, Tank
+from senashipping_app.models import Ship, Tank
 
-from .hydrostatic_curves import (
+from senashipping_app.services.hydrostatic_curves import (
     HydrostaticCurves,
     interpolate_draft_from_displacement as _curve_draft_from_disp,
     get_kb as _curve_kb,

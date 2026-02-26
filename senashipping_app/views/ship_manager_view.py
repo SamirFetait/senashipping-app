@@ -27,14 +27,14 @@ from PyQt6.QtWidgets import (
     QMessageBox,
 )
 
-from ..models import Ship, Tank, TankType, LivestockPen
-from ..repositories import database
-from ..repositories.tank_repository import TankRepository
-from ..repositories.livestock_pen_repository import LivestockPenRepository
-from ..services.ship_service import ShipService, ShipValidationError
-from ..utils.sorting import get_pen_sort_key, get_tank_sort_key
-from ..config.stability_manual_ref import REF_LOA_M
-from .condition_table_widget import TANK_CATEGORY_NAMES, TANK_CATEGORY_TYPES
+from senashipping_app.models import Ship, Tank, TankType, LivestockPen
+from senashipping_app.repositories import database
+from senashipping_app.repositories.tank_repository import TankRepository
+from senashipping_app.repositories.livestock_pen_repository import LivestockPenRepository
+from senashipping_app.services.ship_service import ShipService, ShipValidationError
+from senashipping_app.utils.sorting import get_pen_sort_key, get_tank_sort_key
+from senashipping_app.config.stability_manual_ref import REF_LOA_M
+from senashipping_app.views.condition_table_widget import TANK_CATEGORY_NAMES, TANK_CATEGORY_TYPES
 
 
 class ShipManagerView(QWidget):

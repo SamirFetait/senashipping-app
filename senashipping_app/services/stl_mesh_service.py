@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Tuple
 
 if TYPE_CHECKING:
-    from ..models import Tank
+    from senashipping_app.models import Tank
 
 try:
     import trimesh
@@ -102,7 +102,6 @@ def is_watertight(mesh: Any) -> bool:
 
 # --- Tank creation from STL (volume + LCG, VCG, TCG from mesh) ---
 
-def _tank_from_mesh(
     mesh: Any,
     name: str,
     ship_id: int,
@@ -110,8 +109,8 @@ def _tank_from_mesh(
     density_t_per_m3: float = 1.0,
 ) -> Tank:
     """Build one Tank from a single mesh: volume and centroid → LCG, VCG, TCG (x=LCG, y=TCG, z=VCG)."""
-    from ..models import Tank as TankModel
-    from ..models.tank import TankType
+    from senashipping_app.models import Tank as TankModel
+    from senashipping_app.models.tank import TankType
 
     vol = mesh_volume(mesh)
     cx, cy, cz = mesh_centroid(mesh)

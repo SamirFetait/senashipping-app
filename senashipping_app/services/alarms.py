@@ -10,9 +10,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List
 
-from .criteria_rules import CriterionResult, CriterionLine, CriteriaEvaluation
-from .stability_service import ConditionResults
-from .validation import ValidationResult, ValidationSeverity
+from senashipping_app.services.criteria_rules import CriterionResult, CriterionLine, CriteriaEvaluation
+from senashipping_app.services.stability_service import ConditionResults
+from senashipping_app.services.validation import ValidationResult, ValidationSeverity
 
 
 class AlarmStatus(Enum):
