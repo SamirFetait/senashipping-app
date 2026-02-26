@@ -2,39 +2,8 @@
 
 This document explains **how to install, start, and use** the senashipping desktop app for **loading condition and stability checks on livestock carriers**.
 
----
 
-## 1. Installation
-
-- **Requirements**
-  - **Python**: 3.11+ (recommended to match the project environment)
-  - **OS**: Windows 10+ (tested)  
-  - **Dependencies**: listed in `requirements.txt`
-
-- **Install dependencies**
-
-```bash
-pip install -r requirements.txt
-```
-
-> If you use a virtual environment, activate it first (e.g. `python -m venv .venv && .venv\Scripts\activate` on Windows).
-
----
-
-## 2. Starting the application
-
-From the project root (`senashipping-app`), run:
-
-```bash
-python -m senashipping_app
-```
-
-This will launch the **PyQt6 desktop application** with the main window titled  
-**“Sena Shipping for Livestock Carriers”**.
-
----
-
-## 3. Main window layout
+## 1. Main window layout
 
 The main window contains:
 
@@ -52,9 +21,9 @@ The app **opens directly on the “Loading Condition” page**, since this is us
 
 ---
 
-## 4. Typical workflow
+## 2. Typical workflow
 
-### 4.1 One-time setup – Ship & data
+### 2.1 One-time setup – Ship & data
 
 - **Open** `Tools → Ship & data setup...`
 - Define or review:
@@ -63,7 +32,7 @@ The app **opens directly on the “Loading Condition” page**, since this is us
   - **Livestock pens** (capacity, deck, LCG/VCG, etc.).
 - Save and close the setup view. This configuration is then used by the Loading Condition and Results views.
 
-### 4.2 Create or open a loading condition
+### 2.2 Create or open a loading condition
 
 - To **create a new condition**:
   - Use `File → New Loading condition...` or the **New** button on the toolbar.
@@ -79,7 +48,7 @@ The app **opens directly on the “Loading Condition” page**, since this is us
   - Use `File → Save Loading condition...` or `File → Save Loading condition As...`, or the **Save** toolbar button.
   - Files are normally saved with a `.senashipping` extension.
 
-### 4.3 Editing the Loading Condition
+### 2.3 Editing the Loading Condition
 
 In the **Loading Condition** page you can:
 
@@ -100,7 +69,7 @@ In the **Loading Condition** page you can:
   - `View → Change layout` toggles visibility of the bottom condition table (more space for graphics vs. full editor).
   - **Zoom In / Zoom Out / Fit View** toolbar buttons affect the ship profile / deck drawings.
 
-### 4.4 Computing results
+### 2.4 Computing results
 
 - Use **Tools → Update Calculations** or the **Compute** toolbar button (shortcut **F9**).
 - The app:
@@ -113,7 +82,7 @@ In the **Loading Condition** page you can:
 
 ---
 
-## 5. Results view
+## 3. Results view
 
 Open via:
 
@@ -156,7 +125,7 @@ The **Results** view shows:
 
 ---
 
-## 6. Curves view
+## 4. Curves view
 
 Open via:
 
@@ -170,9 +139,9 @@ The **Curves** page shows an approximate **GZ (righting lever) curve** for the c
 
 ---
 
-## 7. Exporting reports
+## 5. Exporting reports
 
-### 7.1 Export from the Results view
+### 5.1 Export from the Results view
 
 At the bottom of the **Results** view:
 
@@ -190,14 +159,14 @@ At the bottom of the **Results** view:
 
 > You must **compute a condition first** before exporting; otherwise you will be prompted to run a calculation.
 
-### 7.2 Export from the toolbar
+### 5.2 Export from the toolbar
 
 - Use the **Print/Export** toolbar button or `File → Print/Export...`.
 - When on the **Results** view this opens a small menu letting you pick **Export to PDF** or **Export to Excel**.
 
 ---
 
-## 8. Advanced / specialist tools
+## 6. Advanced / specialist tools
 
 Some menu items are present for future expansion or specialist workflows:
 
@@ -219,7 +188,7 @@ Where an item is not fully implemented, the app shows a **non-crashing informati
 
 ---
 
-## 9. Tips and best practices
+## 7. Tips and best practices
 
 - **Always save before major edits**
   - Use `Ctrl+S` frequently to write the current condition to a `.senashipping` file.
