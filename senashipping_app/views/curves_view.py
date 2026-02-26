@@ -7,6 +7,8 @@ from PyQt6.QtCore import Qt, QPointF
 from PyQt6.QtGui import QBrush, QColor, QPen, QPainterPath, QFont
 from PyQt6.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsTextItem
 
+from senashipping_app.services.kn_curves import build_gz_curve_from_kn
+
 
 class CurvesView(QGraphicsView):
     """
@@ -62,6 +64,8 @@ class CurvesView(QGraphicsView):
                 to match the signal signature.
         """
         gm_raw = getattr(results, "gm_m", 0.0)
+        kg_m = getattr(results, "kg_m", 0.0)
+        displacement_t = getattr(results, "displacement_t", 0.0)
         validation = getattr(results, "validation", None)
         gm_eff = getattr(validation, "gm_effective", gm_raw) if validation else gm_raw
 
@@ -74,29 +78,40 @@ class CurvesView(QGraphicsView):
             gm_for_shape = 0.0
         if gm_for_shape <= 0.0:
             gm_for_shape = abs(gm_raw) if gm_raw not in (None, 0.0) else 0.01
-        # Vary the angle of vanishing stability with GM so curve shape changes
-        # between loading conditions:
-        # - Very low GM → curve dies early (e.g. 40°–50°)
-        # - Higher GM → curve extends closer to 90°
-        gm_clamped = max(0.0, min(float(gm_for_shape), 1.5))
-        phi_end_deg = 40.0 + (gm_clamped / 1.5) * 50.0  # range ≈ 40°–90°
 
-        # Build approximate GZ curve from GM (0–90°)
-        angles_deg = list(range(0, 91, 2))
-        gz_values = self._approximate_gz_curve(angles_deg, gm_for_shape, phi_end_deg)
+        # Try to build a real GZ curve from KN data when available.
+        angles_deg: list[int]
+        gz_values: list[float]
+        kn_curve = build_gz_curve_from_kn(displacement_t, kg_m)
+        if kn_curve is not None:
+            angles_deg, gz_values = kn_curve
+        else:
+            # Fall back to the original GM-based approximate curve.
+            gm_clamped = max(0.0, min(float(gm_for_shape), 1.5))
+            phi_end_deg = 40.0 + (gm_clamped / 1.5) * 50.0  # range ≈ 40°–90°
 
-        # As a safety net, if something went wrong and we still have no positive
-        # GZ values, fall back to a generic curve so the user always sees a
-        # righting lever plot, even for edge cases like pure lightship.
-        if not gz_values or max(gz_values) <= 0.0:
-            fallback_gm = gm_for_shape if gm_for_shape > 0.0 else 0.5
-            gz_values = self._approximate_gz_curve(angles_deg, fallback_gm, 60.0)
+            angles_deg = list(range(0, 91, 2))
+            gz_values = self._approximate_gz_curve(angles_deg, gm_for_shape, phi_end_deg)
+
+            # As a safety net, if something went wrong and we still have no positive
+            # GZ values, fall back to a generic curve so the user always sees a
+            # righting lever plot, even for edge cases like pure lightship.
+            if not gz_values or max(gz_values) <= 0.0:
+                fallback_gm = gm_for_shape if gm_for_shape > 0.0 else 0.5
+                gz_values = self._approximate_gz_curve(angles_deg, fallback_gm, 60.0)
 
         # For GM guide line, keep using effective GM when it is meaningful;
         # otherwise use the GM value that was used to shape the curve.
         gm_for_display = gm_eff if isinstance(gm_eff, (int, float)) and gm_eff > 0.0 else gm_for_shape
 
-        self._draw_curve(angles_deg, gz_values, gm_for_display)
+        # Current equilibrium heel from results (deg); used to draw a marker on the curve
+        heel_deg = getattr(results, "heel_deg", None)
+        try:
+            heel_deg_val = float(heel_deg) if heel_deg is not None else 0.0
+        except (TypeError, ValueError):
+            heel_deg_val = 0.0
+
+        self._draw_curve(angles_deg, gz_values, gm_for_display, heel_deg_val)
 
     # --- Internal helpers -----------------------------------------------
 
@@ -160,6 +175,7 @@ class CurvesView(QGraphicsView):
         angles_deg: Sequence[int],
         gz_values: Sequence[float],
         gm_eff: float,
+        heel_deg: float | None = None,
     ) -> None:
         """Draw axes, GM / GZmax guides, and the GZ curve."""
         self._scene.clear()
@@ -231,7 +247,7 @@ class CurvesView(QGraphicsView):
         )
         self._scene.addItem(x_title)
 
-        y_title = QGraphicsTextItem("Righting lever, GZ (m)")
+        y_title = QGraphicsTextItem("Righting lever, GZ (TEST)")
         y_title.setFont(label_font)
         y_title.setDefaultTextColor(QColor("#333333"))
         y_title.setRotation(-90)
@@ -297,6 +313,42 @@ class CurvesView(QGraphicsView):
             top,
         )
         self._scene.addItem(amax_label)
+
+        # Equilibrium heel marker (from latest condition), if within plot range
+        if isinstance(heel_deg, (int, float)):
+            heel_abs = float(heel_deg)
+            if 0.0 < heel_abs <= 90.0:
+                # Interpolate GZ at this heel angle
+                gz_at_heel = 0.0
+                last_angle = float(angles_deg[0])
+                last_gz = float(gz_values[0])
+                for a, g in zip(angles_deg[1:], gz_values[1:]):
+                    a_f = float(a)
+                    g_f = float(g)
+                    if a_f >= heel_abs:
+                        span = a_f - last_angle
+                        t = 0.0 if span == 0.0 else (heel_abs - last_angle) / span
+                        gz_at_heel = last_gz + t * (g_f - last_gz)
+                        break
+                    last_angle, last_gz = a_f, g_f
+
+                x_heel = left + (heel_abs / 90.0) * plot_width
+                y_heel = bottom - (gz_at_heel / value_max) * plot_height
+
+                heel_pen = QPen(QColor("#c0392b"))
+                heel_pen.setStyle(Qt.PenStyle.DashLine)
+                heel_pen.setWidth(1)
+                self._scene.addLine(x_heel, bottom, x_heel, y_heel, heel_pen)
+
+                heel_label = QGraphicsTextItem(f"heel ≈ {heel_abs:.1f}°")
+                heel_label.setFont(label_font)
+                heel_label.setDefaultTextColor(QColor("#c0392b"))
+                heel_rect = heel_label.boundingRect()
+                heel_label.setPos(
+                    x_heel - heel_rect.width() / 2,
+                    max(top, y_heel - heel_rect.height() - 4),
+                )
+                self._scene.addItem(heel_label)
 
         # Angle of vanishing stability (point C) at 90°
         x_90 = left + plot_width

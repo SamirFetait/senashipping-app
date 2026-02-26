@@ -349,14 +349,6 @@ class MainWindow(QMainWindow):
         restore_units_action.triggered.connect(self._on_restore_units)
         view_menu.addAction(restore_units_action)
 
-        # Tools actions – single-ship: Ship/data setup for one-time config
-        ship_setup_action = QAction("Ship & data setup...", self)
-        ship_setup_action.setToolTip("Configure ship particulars, tanks and pens (one-time setup)")
-        ship_setup_action.triggered.connect(
-            lambda: self._switch_page(self._page_indexes.ship_manager, "Ship & data setup")
-        )
-        tools_menu.addAction(ship_setup_action)
-
         # Tools for Selected Deadweight Items...
         tools_action = QAction("Tools for Selected Deadweight Items...", self)
         tools_action.setShortcut("Ctrl+T")

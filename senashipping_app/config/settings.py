@@ -5,8 +5,25 @@ Basic settings and logging configuration for the senashipping desktop app.
 from __future__ import annotations
 
 import logging
+import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def _get_resource_root() -> Path:
+
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parents[2]
+
+
+def _get_user_data_dir(resource_root: Path) -> Path:
+
+    if getattr(sys, "frozen", False):
+        exe_path = Path(getattr(sys, "executable", resource_root))
+        return exe_path.parent / "senashipping_app_data"
+    return resource_root / "senashipping_app_data"
 
 
 @dataclass(slots=True)
@@ -19,12 +36,23 @@ class Settings:
 
     @classmethod
     def default(cls) -> "Settings":
-        """Create default settings based on the current file location."""
-        project_root = Path(__file__).resolve().parents[2]
-        data_dir = project_root / "senashipping_app_data"
+        resource_root = _get_resource_root()
+        data_dir = _get_user_data_dir(resource_root)
         data_dir.mkdir(exist_ok=True)
+
         db_path = data_dir / "senashipping.db"
-        return cls(project_root=project_root, data_dir=data_dir, db_path=db_path)
+
+        # On first run, seed the writable DB from a bundled default if present.
+        if not db_path.exists():
+            bundled_db = resource_root / "senashipping_app_data" / "senashipping.db"
+            if bundled_db.exists():
+                try:
+                    shutil.copy2(bundled_db, db_path)
+                except OSError:
+                    # If copy fails, we fall back to an empty DB at db_path.
+                    pass
+
+        return cls(project_root=resource_root, data_dir=data_dir, db_path=db_path)
 
 
 def init_logging(settings: Settings) -> None:
