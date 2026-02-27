@@ -101,7 +101,7 @@ class MainWindow(QMainWindow):
         self._voyage_planner = VoyagePlannerView(self)
         self._condition_editor = ConditionEditorView(self)
         self._results_view = ResultsView(self)
-        self._curves_view = CurvesView(self)
+        self._curves_view = CurvesView(self)  # GZ curve from KN table (matplotlib)
 
         ship_idx = self._stack.addWidget(self._ship_manager)
         voy_idx = self._stack.addWidget(self._voyage_planner)

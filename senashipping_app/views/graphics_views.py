@@ -37,6 +37,6 @@ class ShipGraphicsView(QGraphicsView):
         
     def fit_to_view(self) -> None:
         """Fit all items in the scene to the view."""
-        if self.scene():
+        if self.scene() and self.width() > 0 and self.height() > 0:
             self.fitInView(self.scene().itemsBoundingRect(), Qt.AspectRatioMode.KeepAspectRatio)
 

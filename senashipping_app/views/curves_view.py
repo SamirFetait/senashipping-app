@@ -1,52 +1,89 @@
+"""
+GZ curve view: matplotlib canvas embedded in PyQt.
+Uses KN table from Excel (gz_curve_plot), bilinear KN, no smoothing; stats, grid, shaded area.
+Refreshes when loading condition updates (condition_computed).
+Shows hydrostatics: KG, GM, and full KN table for debugging.
+"""
 from __future__ import annotations
 
-import math
-from typing import Any, Sequence
+import logging
+from typing import Any
 
-from PyQt6.QtCore import Qt, QPointF
-from PyQt6.QtGui import QBrush, QColor, QPen, QPainterPath, QFont
-from PyQt6.QtWidgets import QGraphicsScene, QGraphicsView, QGraphicsTextItem
+from PyQt6.QtWidgets import QLabel, QPlainTextEdit, QSizePolicy, QVBoxLayout, QWidget
 
-from senashipping_app.services.kn_curves import build_gz_curve_from_kn
+from senashipping_app.services.gz_curve_plot import (
+    compute_gz_curve_stats,
+    get_kn_at_angle,
+    get_kn_table_dict,
+    plot_gz_curve,
+)
+
+_LOG = logging.getLogger(__name__)
 
 
-class CurvesView(QGraphicsView):
+def _matplotlib_canvas():
+    """Lazy import to avoid pulling matplotlib at import time."""
+    import matplotlib
+    matplotlib.use("QtAgg")
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.figure import Figure
+    return FigureCanvasQTAgg, Figure
+
+
+class CurvesView(QWidget):
     """
-    Simple righting lever (GZ) curve view.
-
-    The curve is updated from the latest computed loading condition and uses
-    a GM-based approximation to generate a GZ vs heel angle plot similar to
-    a classical static stability curve.
+    GZ curve view: matplotlib canvas embedded in PyQt.
+    Uses KN tables from Excel (assets/KN tables.xlsx, or legacy KZ tables.xlsx); sheet = trim.
+    Shows max GZ, angle at max GZ, area under curve, range of positive stability,
+    max marker, shaded positive area. Refreshes when condition_computed.
     """
 
-    def __init__(self, parent: QGraphicsView | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._scene = QGraphicsScene(self)
-        self.setScene(self._scene)
+        FigureCanvasQTAgg, Figure = _matplotlib_canvas()
+        self._figure = Figure(figsize=(8, 4), dpi=100)
+        self._ax = self._figure.add_subplot(111)
+        self._canvas = FigureCanvasQTAgg(self._figure)
+        self._canvas.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._hydro_label = QLabel("Hydrostatics (KG, GM, KN table)")
+        self._hydro_text = QPlainTextEdit(self)
+        self._hydro_text.setReadOnly(True)
+        self._hydro_text.setMinimumHeight(120)
+        self._hydro_text.setMaximumHeight(280)
+        self._hydro_text.setPlaceholderText("Compute a condition to see KG, GM, and KN table.")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._canvas)
+        layout.addWidget(self._hydro_label)
+        layout.addWidget(self._hydro_text)
+        self._draw_placeholder()
 
-        # Set white background
-        self._scene.setBackgroundBrush(QBrush(Qt.GlobalColor.white))
+    def _draw_placeholder(self) -> None:
+        self._ax.clear()
+        self._ax.set_xlabel("Heel Angle (deg)")
+        self._ax.set_ylabel("GZ (m)")
+        self._ax.set_title("GZ curve")
+        self._ax.text(0.5, 0.5, "Compute a condition to see the GZ curve.",
+                      transform=self._ax.transAxes, ha="center", va="center", fontsize=12)
+        self._ax.set_xlim(0, 90)
+        self._ax.set_ylim(0, 1)
+        self._canvas.draw_idle()
+        self._hydro_text.clear()
 
-        # Enable interaction with rubber-band selection
-        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
-        self.setInteractive(True)
-
-        # Default scene rectangle (will auto-scale content inside)
-        self._margin_left = 60
-        self._margin_right = 20
-        self._margin_top = 20
-        self._margin_bottom = 40
-        self._width = 800
-        self._height = 400
-        self._scene.setSceneRect(0, 0, self._width, self._height)
-
-        self._draw_empty_message("Compute a condition to see the GZ curve.")
-
-    # --- Public API -----------------------------------------------------
+    @staticmethod
+    def _format_hydrostatics(kg_m: float, gm_m: float, kn_table: dict[float, float]) -> str:
+        lines = [
+            "KG = {:.4f} m".format(kg_m),
+            "GM = {:.4f} m".format(gm_m),
+            "",
+            "KN table (heel angle deg → KN m):",
+        ]
+        for angle_deg in sorted(kn_table.keys()):
+            lines.append("  {:6.1f} deg  →  KN = {:8.4f} m".format(angle_deg, kn_table[angle_deg]))
+        return "\n".join(lines)
 
     def clear_curve(self) -> None:
-        """Clear any existing curve and show the default placeholder message."""
-        self._draw_empty_message("Compute a condition to see the GZ curve.")
+        self._draw_placeholder()
 
     def update_curve(
         self,
@@ -55,331 +92,51 @@ class CurvesView(QGraphicsView):
         condition: Any | None = None,
         voyage: Any | None = None,
     ) -> None:
-        """
-        Slot connected to `ConditionEditorView.condition_computed`.
-
-        Args:
-            results: `ConditionResults` from stability_service / condition_service.
-            ship, condition, voyage: currently unused but kept for future use and
-                to match the signal signature.
-        """
-        gm_raw = getattr(results, "gm_m", 0.0)
+        """Refresh plot when loading condition updates (condition_computed)."""
         kg_m = getattr(results, "kg_m", 0.0)
         displacement_t = getattr(results, "displacement_t", 0.0)
-        validation = getattr(results, "validation", None)
-        gm_eff = getattr(validation, "gm_effective", gm_raw) if validation else gm_raw
+        trim_m = getattr(results, "trim_m", 0.0)
 
-        # Always generate a curve for diagnostics:
-        # - Prefer effective GM when positive
-        # - Otherwise fall back to raw GM
-        # - If both are non-positive or zero, use a small positive placeholder
-        gm_for_shape = gm_eff if gm_eff is not None else gm_raw
-        if gm_for_shape is None:
-            gm_for_shape = 0.0
-        if gm_for_shape <= 0.0:
-            gm_for_shape = abs(gm_raw) if gm_raw not in (None, 0.0) else 0.01
-
-        # Try to build a real GZ curve from KN data when available.
-        angles_deg: list[int]
-        gz_values: list[float]
-        kn_curve = build_gz_curve_from_kn(displacement_t, kg_m)
-        if kn_curve is not None:
-            angles_deg, gz_values = kn_curve
-        else:
-            # Fall back to the original GM-based approximate curve.
-            gm_clamped = max(0.0, min(float(gm_for_shape), 1.5))
-            phi_end_deg = 40.0 + (gm_clamped / 1.5) * 50.0  # range ≈ 40°–90°
-
-            angles_deg = list(range(0, 91, 2))
-            gz_values = self._approximate_gz_curve(angles_deg, gm_for_shape, phi_end_deg)
-
-            # As a safety net, if something went wrong and we still have no positive
-            # GZ values, fall back to a generic curve so the user always sees a
-            # righting lever plot, even for edge cases like pure lightship.
-            if not gz_values or max(gz_values) <= 0.0:
-                fallback_gm = gm_for_shape if gm_for_shape > 0.0 else 0.5
-                gz_values = self._approximate_gz_curve(angles_deg, fallback_gm, 60.0)
-
-        # For GM guide line, keep using effective GM when it is meaningful;
-        # otherwise use the GM value that was used to shape the curve.
-        gm_for_display = gm_eff if isinstance(gm_eff, (int, float)) and gm_eff > 0.0 else gm_for_shape
-
-        # Current equilibrium heel from results (deg); used to draw a marker on the curve
-        heel_deg = getattr(results, "heel_deg", None)
-        try:
-            heel_deg_val = float(heel_deg) if heel_deg is not None else 0.0
-        except (TypeError, ValueError):
-            heel_deg_val = 0.0
-
-        self._draw_curve(angles_deg, gz_values, gm_for_display, heel_deg_val)
-
-    # --- Internal helpers -----------------------------------------------
-
-    def _draw_empty_message(self, text: str) -> None:
-        """Clear scene and show a centered informational message."""
-        self._scene.clear()
-        self._scene.setSceneRect(0, 0, self._width, self._height)
-
-        item = QGraphicsTextItem(text)
-        font = QFont()
-        font.setPointSize(10)
-        item.setFont(font)
-        item.setDefaultTextColor(QColor("#555555"))
-
-        # Center the text in the view
-        text_rect = item.boundingRect()
-        x = (self._width - text_rect.width()) / 2
-        y = (self._height - text_rect.height()) / 2
-        item.setPos(x, y)
-        self._scene.addItem(item)
-
-    def _approximate_gz_curve(
-        self,
-        angles_deg: Sequence[int],
-        gm_eff: float,
-        phi_end_deg: float = 90.0,
-    ) -> list[float]:
-        """
-        Build a smooth GZ curve that matches manual shape: tangent at origin = GM,
-        single peak around mid-angles, then decay to zero at φ = φ_end_deg
-        (angle of vanishing stability).
-
-        Uses: GZ(φ) = GM * sin(φ) * envelope(φ) with envelope chosen so the curve
-        peaks near mid-angles and goes to zero at φ_end_deg, giving a classic
-        static stability look. φ_end_deg is varied per condition so different
-        loading conditions produce visibly different curve shapes.
-        """
-        # Clamp end angle to a sensible range
-        phi_end_deg = max(30.0, min(float(phi_end_deg), 90.0))
-        gz_values: list[float] = []
-
-        # Shape exponent: smaller for more stable (larger φ_end) so the curve
-        # is broader; larger for less stable so it is steeper and dies earlier.
-        span_norm = (phi_end_deg - 30.0) / 60.0  # 0 at 30°, 1 at 90°
-        exponent = 2.0 + (1.2 * (1.0 - span_norm))
-
-        for a in angles_deg:
-            phi_deg = float(a)
-            phi_rad = math.radians(phi_deg)
-            base = math.sin(phi_rad)
-            # Envelope: 1 at small φ, 0 at φ_end; exponent >2 shifts peak toward mid-angles
-            u = phi_deg / phi_end_deg
-            envelope = max(0.0, 1.0 - (u ** exponent))
-            gz = gm_eff * base * envelope
-            gz_values.append(max(0.0, gz))
-
-        return gz_values
-
-    def _draw_curve(
-        self,
-        angles_deg: Sequence[int],
-        gz_values: Sequence[float],
-        gm_eff: float,
-        heel_deg: float | None = None,
-    ) -> None:
-        """Draw axes, GM / GZmax guides, and the GZ curve."""
-        self._scene.clear()
-        self._scene.setSceneRect(0, 0, self._width, self._height)
-
-        left = self._margin_left
-        right = self._width - self._margin_right
-        top = self._margin_top
-        bottom = self._height - self._margin_bottom
-
-        plot_width = right - left
-        plot_height = bottom - top
-
-        max_gz = max(gz_values) if gz_values else gm_eff
-        if max_gz <= 0.0:
-            self._draw_empty_message("No positive GZ values to plot.")
+        if kg_m <= 0 or displacement_t <= 0:
+            self._draw_placeholder()
             return
 
-        # Add some headroom so GM and GZmax lines fit
-        value_max = max(max_gz, gm_eff) * 1.2
+        kn_table = get_kn_table_dict(displacement_t, trim_m)
+        if not kn_table:
+            self._ax.clear()
+            self._ax.set_xlabel("Heel Angle (deg)")
+            self._ax.set_ylabel("GZ (m)")
+            self._ax.set_title("GZ curve")
+            self._ax.text(0.5, 0.5,
+                          "No KN table for this trim/displacement.\nPut KN tables.xlsx in assets.",
+                          transform=self._ax.transAxes, ha="center", va="center", fontsize=10)
+            self._canvas.draw_idle()
+            self._hydro_text.clear()
+            return
 
-        def map_point(angle_deg: float, gz: float) -> QPointF:
-            x = left + (angle_deg / 90.0) * plot_width
-            y = bottom - (gz / value_max) * plot_height
-            return QPointF(x, y)
+        gm_m = getattr(results, "gm_m", 0.0)
+        hydro_str = self._format_hydrostatics(kg_m, gm_m, kn_table)
+        self._hydro_text.setPlainText(hydro_str)
 
-        axis_pen = QPen(QColor("#333333"))
-        axis_pen.setWidth(1)
-
-        # Axes
-        self._scene.addLine(left, bottom, right, bottom, axis_pen)  # X axis
-        self._scene.addLine(left, bottom, left, top, axis_pen)  # Y axis
-
-        label_font = QFont()
-        label_font.setPointSize(9)
-
-        # X-axis ticks and labels (angle of heel)
-        for angle in (0, 10, 20, 30, 40, 50, 60, 75, 90):
-            x = left + (angle / 90.0) * plot_width
-            self._scene.addLine(x, bottom, x, bottom + 4, axis_pen)
-            label = QGraphicsTextItem(str(angle))
-            label.setFont(label_font)
-            label.setDefaultTextColor(QColor("#333333"))
-            label_rect = label.boundingRect()
-            label.setPos(x - label_rect.width() / 2, bottom + 6)
-            self._scene.addItem(label)
-
-        # Y-axis ticks (GZ)
-        num_y_ticks = 4
-        for i in range(1, num_y_ticks + 1):
-            val = value_max * i / num_y_ticks
-            y = bottom - (val / value_max) * plot_height
-            self._scene.addLine(left - 4, y, left, y, axis_pen)
-            label = QGraphicsTextItem(f"{val:.2f}")
-            label.setFont(label_font)
-            label.setDefaultTextColor(QColor("#333333"))
-            label_rect = label.boundingRect()
-            label.setPos(left - label_rect.width() - 6, y - label_rect.height() / 2)
-            self._scene.addItem(label)
-
-        # Axis titles (manual-style: angle φ, righting lever GZ)
-        x_title = QGraphicsTextItem("Angle of heel (degrees) φ")
-        x_title.setFont(label_font)
-        x_title.setDefaultTextColor(QColor("#333333"))
-        x_title_rect = x_title.boundingRect()
-        x_title.setPos(
-            left + (plot_width - x_title_rect.width()) / 2,
-            self._height - x_title_rect.height(),
+        angles, gz_values, max_gz, angle_at_max, area_m_rad, range_positive = compute_gz_curve_stats(
+            kg_m, kn_table
         )
-        self._scene.addItem(x_title)
-
-        y_title = QGraphicsTextItem("Righting lever, GZ (TEST)")
-        y_title.setFont(label_font)
-        y_title.setDefaultTextColor(QColor("#333333"))
-        y_title.setRotation(-90)
-        y_title_rect = y_title.boundingRect()
-        y_title.setPos(
-            10,
-            top + (plot_height + y_title_rect.width()) / 2,
+        self._ax.clear()
+        plot_gz_curve(
+            angles,
+            gz_values,
+            ax=self._ax,
+            xlabel="Heel Angle (deg)",
+            ylabel="GZ (m)",
+            title="GZ curve",
+            show_grid=True,
+            show_zero_line=False,
+            show_max_marker=True,
+            show_area_shade=True,
+            max_gz=max_gz,
+            angle_at_max_gz=angle_at_max,
+            range_positive_deg=range_positive,
+            area_m_rad=area_m_rad,
+            show_stats=True,
         )
-        self._scene.addItem(y_title)
-
-        # GM horizontal guide
-        gm_y = bottom - (gm_eff / value_max) * plot_height
-        gm_pen = QPen(QColor("#808080"))
-        gm_pen.setStyle(Qt.PenStyle.DashLine)
-        gm_pen.setWidth(1)
-        self._scene.addLine(left, gm_y, right, gm_y, gm_pen)
-        gm_label = QGraphicsTextItem("GM")
-        gm_label.setFont(label_font)
-        gm_label.setDefaultTextColor(QColor("#555555"))
-        gm_label.setPos(right - gm_label.boundingRect().width() - 4, gm_y - 16)
-        self._scene.addItem(gm_label)
-
-        # Tangent at origin: GZ = GM * φ (rad), so at φ = 1 rad (57.3°) height = GM
-        one_rad_deg = 57.2958
-        x_one_rad = left + (one_rad_deg / 90.0) * plot_width
-        tangent_pen = QPen(QColor("#a0a0a0"))
-        tangent_pen.setStyle(Qt.PenStyle.DashLine)
-        tangent_pen.setWidth(1)
-        self._scene.addLine(left, bottom, x_one_rad, gm_y, tangent_pen)
-        tan_label = QGraphicsTextItem("φ = 1 rad")
-        tan_label.setFont(label_font)
-        tan_label.setDefaultTextColor(QColor("#666666"))
-        tan_rect = tan_label.boundingRect()
-        tan_label.setPos(x_one_rad - tan_rect.width() / 2, bottom + 2)
-        self._scene.addItem(tan_label)
-
-        # GZmax horizontal guide and vertical line at max
-        max_index = max(range(len(gz_values)), key=lambda i: gz_values[i])
-        gz_max = gz_values[max_index]
-        angle_at_max = angles_deg[max_index]
-
-        gzmax_y = bottom - (gz_max / value_max) * plot_height
-        gzmax_pen = QPen(QColor("#999999"))
-        gzmax_pen.setStyle(Qt.PenStyle.DashLine)
-        gzmax_pen.setWidth(1)
-        self._scene.addLine(left, gzmax_y, right, gzmax_y, gzmax_pen)
-        gzmax_label = QGraphicsTextItem("GZmax")
-        gzmax_label.setFont(label_font)
-        gzmax_label.setDefaultTextColor(QColor("#555555"))
-        gzmax_label.setPos(left + 4, gzmax_y - 16)
-        self._scene.addItem(gzmax_label)
-
-        x_max = left + (angle_at_max / 90.0) * plot_width
-        self._scene.addLine(x_max, bottom, x_max, top, gzmax_pen)
-
-        # Angle at max label near bottom
-        amax_label = QGraphicsTextItem(f"{angle_at_max}° at GZmax")
-        amax_label.setFont(label_font)
-        amax_label.setDefaultTextColor(QColor("#555555"))
-        amax_rect = amax_label.boundingRect()
-        amax_label.setPos(
-            x_max - amax_rect.width() / 2,
-            top,
-        )
-        self._scene.addItem(amax_label)
-
-        # Equilibrium heel marker (from latest condition), if within plot range
-        if isinstance(heel_deg, (int, float)):
-            heel_abs = float(heel_deg)
-            if 0.0 < heel_abs <= 90.0:
-                # Interpolate GZ at this heel angle
-                gz_at_heel = 0.0
-                last_angle = float(angles_deg[0])
-                last_gz = float(gz_values[0])
-                for a, g in zip(angles_deg[1:], gz_values[1:]):
-                    a_f = float(a)
-                    g_f = float(g)
-                    if a_f >= heel_abs:
-                        span = a_f - last_angle
-                        t = 0.0 if span == 0.0 else (heel_abs - last_angle) / span
-                        gz_at_heel = last_gz + t * (g_f - last_gz)
-                        break
-                    last_angle, last_gz = a_f, g_f
-
-                x_heel = left + (heel_abs / 90.0) * plot_width
-                y_heel = bottom - (gz_at_heel / value_max) * plot_height
-
-                heel_pen = QPen(QColor("#c0392b"))
-                heel_pen.setStyle(Qt.PenStyle.DashLine)
-                heel_pen.setWidth(1)
-                self._scene.addLine(x_heel, bottom, x_heel, y_heel, heel_pen)
-
-                heel_label = QGraphicsTextItem(f"heel ≈ {heel_abs:.1f}°")
-                heel_label.setFont(label_font)
-                heel_label.setDefaultTextColor(QColor("#c0392b"))
-                heel_rect = heel_label.boundingRect()
-                heel_label.setPos(
-                    x_heel - heel_rect.width() / 2,
-                    max(top, y_heel - heel_rect.height() - 4),
-                )
-                self._scene.addItem(heel_label)
-
-        # Angle of vanishing stability (point C) at 90°
-        x_90 = left + plot_width
-        c_label = QGraphicsTextItem("C")
-        c_label.setFont(label_font)
-        c_label.setDefaultTextColor(QColor("#555555"))
-        c_rect = c_label.boundingRect()
-        c_label.setPos(x_90 - c_rect.width() / 2, bottom - c_rect.height() - 2)
-        self._scene.addItem(c_label)
-        vanish_label = QGraphicsTextItem("Angle of vanishing stability")
-        vanish_label.setFont(label_font)
-        vanish_label.setDefaultTextColor(QColor("#666666"))
-        v_rect = vanish_label.boundingRect()
-        vanish_label.setPos(x_90 - v_rect.width() / 2, bottom + 8)
-        self._scene.addItem(vanish_label)
-
-        # Main GZ curve
-        curve_pen = QPen(QColor("#2c3e50"))
-        curve_pen.setWidth(2)
-
-        path = QPainterPath()
-        first_point = True
-        for angle_deg, gz in zip(angles_deg, gz_values):
-            p = map_point(float(angle_deg), float(gz))
-            if first_point:
-                path.moveTo(p)
-                first_point = False
-            else:
-                path.lineTo(p)
-
-        self._scene.addPath(path, curve_pen)
-
-        # Fit view to the scene rectangle without changing aspect ratio too abruptly
-        self.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self._canvas.draw_idle()

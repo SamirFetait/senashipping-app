@@ -9,16 +9,30 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import (
+    BaseDocTemplate,
+    Frame,
+    NextPageTemplate,
+    PageBreak,
+    PageTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+)
 from reportlab.graphics.shapes import Drawing, Line, String, PolyLine
 
 from senashipping_app.config.limits import MASS_PER_HEAD_T
 from senashipping_app.repositories import database
 from senashipping_app.repositories.tank_repository import TankRepository
 from senashipping_app.repositories.livestock_pen_repository import LivestockPenRepository
+from senashipping_app.services.gz_curve_plot import (
+    compute_gz_curve_stats,
+    get_kn_table_dict,
+)
 
 if TYPE_CHECKING:
     from senashipping_app.models import Ship, Voyage, LoadingCondition
@@ -239,54 +253,32 @@ def _build_items_table(ship, condition, results) -> list[list[str]] | None:
     return rows if len(rows) > 1 else None
 
 
-def _compute_gz_curve(results) -> tuple[list[int], list[float], float]:
-    """Replicate the in-app GZ curve approximation using GM and validation."""
-    gm_raw = float(getattr(results, "gm_m", 0.0) or 0.0)
-    validation = getattr(results, "validation", None)
-    gm_eff = getattr(validation, "gm_effective", gm_raw) if validation else gm_raw
+def _compute_gz_curve_from_kn(
+    results,
+) -> tuple[list[float], list[float], float, float, float, float]:
+    """
+    Compute GZ curve from KN tables, matching the Curves view.
 
-    gm_for_shape = gm_eff if gm_eff is not None else gm_raw
-    if gm_for_shape is None:
-        gm_for_shape = 0.0
-    if gm_for_shape <= 0.0:
-        gm_for_shape = abs(gm_raw) if gm_raw not in (None, 0.0) else 0.01
+    Returns (angles_deg, gz_values, max_gz, angle_at_max, area_m_rad, range_positive_deg).
+    When data is missing or invalid, returns empty curves and zeros.
+    """
+    kg_m = float(getattr(results, "kg_m", 0.0) or 0.0)
+    displacement_t = float(getattr(results, "displacement_t", 0.0) or 0.0)
+    trim_m = float(getattr(results, "trim_m", 0.0) or 0.0)
 
-    gm_clamped = max(0.0, min(float(gm_for_shape), 1.5))
-    phi_end_deg = 40.0 + (gm_clamped / 1.5) * 50.0  # range ≈ 40°–90°
+    if kg_m <= 0.0 or displacement_t <= 0.0:
+        return [], [], 0.0, 0.0, 0.0, 0.0
 
-    angles_deg = list(range(0, 91, 2))
+    kn_table = get_kn_table_dict(displacement_t, trim_m)
+    if not kn_table:
+        return [], [], 0.0, 0.0, 0.0, 0.0
 
-    def _approximate_gz_curve(angles: list[int], gm: float, phi_end: float) -> list[float]:
-        phi_end = max(30.0, min(float(phi_end), 90.0))
-        gz_vals: list[float] = []
-        span_norm = (phi_end - 30.0) / 60.0
-        exponent = 2.0 + (1.2 * (1.0 - span_norm))
-        for a in angles:
-            phi_deg = float(a)
-            phi_rad = math.radians(phi_deg)
-            base = math.sin(phi_rad)
-            u = phi_deg / phi_end
-            envelope = max(0.0, 1.0 - (u ** exponent))
-            gz = gm * base * envelope
-            gz_vals.append(max(0.0, gz))
-        return gz_vals
-
-    gz_values = _approximate_gz_curve(angles_deg, gm_for_shape, phi_end_deg)
-    if not gz_values or max(gz_values) <= 0.0:
-        fallback_gm = gm_for_shape if gm_for_shape > 0.0 else 0.5
-        gz_values = _approximate_gz_curve(angles_deg, fallback_gm, 60.0)
-
-    gm_for_display = (
-        gm_eff
-        if isinstance(gm_eff, (int, float)) and gm_eff is not None and gm_eff > 0.0
-        else gm_for_shape
-    )
-    return angles_deg, gz_values, float(gm_for_display)
+    return compute_gz_curve_stats(kg_m, kn_table)
 
 
 def _build_gz_curve_drawing(results, width: float = 16 * cm, height: float = 9 * cm) -> Drawing:
-    """Create a ReportLab drawing of the GZ curve similar to the Curves view."""
-    angles_deg, gz_values, gm_eff = _compute_gz_curve(results)
+    """Create a ReportLab drawing of the GZ curve from KN tables (same as Curves view)."""
+    angles_deg, gz_values, max_gz, angle_at_max, area_m_rad, range_positive = _compute_gz_curve_from_kn(results)
 
     d = Drawing(width, height)
 
@@ -299,8 +291,7 @@ def _build_gz_curve_drawing(results, width: float = 16 * cm, height: float = 9 *
     plot_width = right - left
     plot_height = top - bottom
 
-    max_gz = max(gz_values) if gz_values else gm_eff
-    if max_gz <= 0.0:
+    if not gz_values or max(gz_values) <= 0.0:
         d.add(
             String(
                 width / 2,
@@ -313,10 +304,48 @@ def _build_gz_curve_drawing(results, width: float = 16 * cm, height: float = 9 *
         )
         return d
 
-    value_max = max(max_gz, gm_eff) * 1.2
+    gm_eff = float(getattr(results, "gm_m", 0.0) or 0.0)
+    # Match Curves view: scale Y based on max GZ, not GM
+    max_gz = max(gz_values)
+    value_max = max_gz * 1.2 if max_gz > 0.0 else 1.0
+
+    # Match Curves view: X axis and curve stop at last positive GZ (range of positive stability)
+    # Build plotting arrays truncated at the last positive GZ, including an interpolated zero-crossing.
+    if range_positive > 0.0:
+        x_max = range_positive
+    else:
+        x_max = max(angles_deg) if angles_deg else 90.0
+
+    plot_angles: list[float] = []
+    plot_gz: list[float] = []
+    for i, (a, g) in enumerate(zip(angles_deg, gz_values)):
+        a_f = float(a)
+        g_f = float(g)
+        if a_f < x_max:
+            plot_angles.append(a_f)
+            plot_gz.append(g_f)
+            continue
+        if a_f == x_max:
+            plot_angles.append(a_f)
+            plot_gz.append(max(0.0, g_f))
+            break
+        # a_f > x_max: interpolate between previous point and this one to get GZ at x_max
+        if not plot_angles:
+            break
+        a0 = plot_angles[-1]
+        g0 = plot_gz[-1]
+        span = a_f - a0
+        t = 0.0 if span == 0.0 else (x_max - a0) / span
+        g_x = g0 + t * (g_f - g0)
+        plot_angles.append(x_max)
+        plot_gz.append(max(0.0, g_x))
+        break
+    if not plot_angles:
+        plot_angles = [float(a) for a in angles_deg]
+        plot_gz = [float(g) for g in gz_values]
 
     def map_point(angle_deg: float, gz: float) -> tuple[float, float]:
-        x = left + (angle_deg / 90.0) * plot_width
+        x = left + (angle_deg / x_max) * plot_width
         y = bottom + (gz / value_max) * plot_height
         return x, y
 
@@ -327,7 +356,9 @@ def _build_gz_curve_drawing(results, width: float = 16 * cm, height: float = 9 *
 
     # X-axis ticks and labels (angle of heel)
     for angle in (0, 10, 20, 30, 40, 50, 60, 75, 90):
-        x = left + (angle / 90.0) * plot_width
+        if angle > x_max:
+            continue
+        x = left + (angle / x_max) * plot_width
         d.add(Line(x, bottom, x, bottom - 4, strokeColor=axis_color, strokeWidth=0.8))
         d.add(
             String(
@@ -380,8 +411,9 @@ def _build_gz_curve_drawing(results, width: float = 16 * cm, height: float = 9 *
         )
     )
 
-    # GM horizontal guide
-    gm_y = bottom + (gm_eff / value_max) * plot_height
+    # GM horizontal guide (clamped into plot area)
+    gm_clamped = max(0.0, min(gm_eff, value_max))
+    gm_y = bottom + (gm_clamped / value_max) * plot_height
     gm_color = colors.HexColor("#808080")
     d.add(
         Line(
@@ -408,7 +440,9 @@ def _build_gz_curve_drawing(results, width: float = 16 * cm, height: float = 9 *
     # GZmax guides
     max_index = max(range(len(gz_values)), key=lambda i: gz_values[i])
     gz_max = gz_values[max_index]
-    angle_at_max = angles_deg[max_index]
+    # angle_at_max from stats is more precise than from index alone, but keep both aligned
+    angle_at_max_stat = angle_at_max
+    angle_at_max = angle_at_max_stat if angle_at_max_stat else angles_deg[max_index]
 
     gzmax_y = bottom + (gz_max / value_max) * plot_height
     guide_color = colors.HexColor("#999999")
@@ -423,12 +457,12 @@ def _build_gz_curve_drawing(results, width: float = 16 * cm, height: float = 9 *
             strokeDashArray=[3, 2],
         )
     )
-    x_max = left + (angle_at_max / 90.0) * plot_width
+    x_max_pos = left + (angle_at_max / x_max) * plot_width
     d.add(
         Line(
-            x_max,
+            x_max_pos,
             bottom,
-            x_max,
+            x_max_pos,
             top,
             strokeColor=guide_color,
             strokeWidth=0.8,
@@ -448,7 +482,7 @@ def _build_gz_curve_drawing(results, width: float = 16 * cm, height: float = 9 *
     )
     d.add(
         String(
-            x_max,
+            x_max_pos,
             top + 4,
             f"{angle_at_max}° at GZmax",
             textAnchor="middle",
@@ -470,9 +504,9 @@ def _build_gz_curve_drawing(results, width: float = 16 * cm, height: float = 9 *
         )
     )
 
-    # Main GZ curve
+    # Main GZ curve (truncated at last positive GZ)
     points = []
-    for angle_deg, gz in zip(angles_deg, gz_values):
+    for angle_deg, gz in zip(plot_angles, plot_gz):
         x, y = map_point(float(angle_deg), float(gz))
         points.append((x, y))
 
@@ -506,7 +540,7 @@ def export_condition_to_pdf(
     - Equilibrium / hydrostatic-style data
     - IMO / ancillary criteria with pass/fail indicator
     """
-    doc = SimpleDocTemplate(
+    doc = BaseDocTemplate(
         str(filepath),
         pagesize=A4,
         rightMargin=2.2 * cm,
@@ -529,20 +563,60 @@ def export_condition_to_pdf(
     styles["Heading3"].spaceAfter = 2
     styles["Normal"].spaceAfter = 2
 
+    def _draw_page_frame(canvas, _doc) -> None:
+        # Apply document title metadata and draw a border frame on every page.
+        canvas.setTitle("OSAMA BAY")
+        # Use the actual canvas page size so the frame matches
+        # both portrait and landscape templates correctly.
+        width, height = canvas._pagesize
+        margin = 0.7 * cm
+        canvas.saveState()
+        canvas.setStrokeColor(colors.HexColor("#000000"))
+        canvas.setLineWidth(0.7)
+        canvas.rect(margin, margin, width - 2 * margin, height - 2 * margin, stroke=1, fill=0)
+        canvas.restoreState()
+
+    # Page templates: portrait for the main summary/content, landscape for criteria
+    # and GZ-curve pages.
+    portrait_frame = Frame(
+        doc.leftMargin,
+        doc.bottomMargin,
+        doc.width,
+        doc.height,
+        id="portrait_frame",
+    )
+    portrait_template = PageTemplate(
+        id="Portrait",
+        frames=[portrait_frame],
+        onPage=_draw_page_frame,
+        pagesize=A4,
+    )
+
+    landscape_size = landscape(A4)
+    landscape_frame = Frame(
+        doc.leftMargin,
+        doc.bottomMargin,
+        landscape_size[0] - doc.leftMargin - doc.rightMargin,
+        landscape_size[1] - doc.topMargin - doc.bottomMargin,
+        id="landscape_frame",
+    )
+    landscape_template = PageTemplate(
+        id="Landscape",
+        frames=[landscape_frame],
+        onPage=_draw_page_frame,
+        pagesize=landscape_size,
+    )
+
+    doc.addPageTemplates([portrait_template, landscape_template])
+
     story = []
     story.append(Paragraph("senashipping - Loading Condition Report", title_style))
     story.append(Spacer(1, 0.3 * cm))
 
-    # Header info (ship / voyage / condition)
+    # Header info (ship / condition)
     story.append(
         Paragraph(
             f"Ship: {ship.name} (IMO: {getattr(ship, 'imo_number', '') or ''})",
-            styles["Normal"],
-        )
-    )
-    story.append(
-        Paragraph(
-            f"Voyage: {voyage.name} - {voyage.departure_port} to {voyage.arrival_port}",
             styles["Normal"],
         )
     )
@@ -675,9 +749,40 @@ def export_condition_to_pdf(
     if items_rows:
         story.append(_section_title("Weight Items and Free Surface Summary", styles))
         story.append(Spacer(1, 0.2 * cm))
+
+        # Wrap cell contents so long text stays within column width.
+        items_header_style = ParagraphStyle(
+            "ItemsHeader",
+            parent=styles["Heading4"],
+            fontSize=8,
+            leading=9,
+            alignment=1,  # center
+            spaceBefore=0,
+            spaceAfter=0,
+        )
+        items_cell_style = ParagraphStyle(
+            "ItemsCell",
+            parent=styles["Normal"],
+            fontSize=7,
+            leading=8,
+            spaceBefore=0,
+            spaceAfter=0,
+        )
+
+        wrapped_items_rows: list[list[object]] = []
+        for r, row in enumerate(items_rows):
+            wrapped_row: list[object] = []
+            for cell in row:
+                text = "" if cell is None else str(cell)
+                if r == 0:
+                    wrapped_row.append(Paragraph(text, items_header_style))
+                else:
+                    wrapped_row.append(Paragraph(text, items_cell_style))
+            wrapped_items_rows.append(wrapped_row)
+
         # Column widths tuned to span the printable width nicely
         items_table = Table(
-            items_rows,
+            wrapped_items_rows,
             colWidths=[3.5 * cm, 1.7 * cm, 1.7 * cm, 1.9 * cm, 1.9 * cm, 1.9 * cm, 1.9 * cm, 1.9 * cm],
             repeatRows=1,
         )
@@ -698,6 +803,7 @@ def export_condition_to_pdf(
                     ("RIGHTPADDING", (0, 0), (-1, -1), 4),
                     ("TOPPADDING", (0, 0), (-1, -1), 2),
                     ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                    ("WORDWRAP", (0, 0), (-1, -1), "CJK"),
                 ]
             )
         )
@@ -706,7 +812,13 @@ def export_condition_to_pdf(
 
     # --- Section 4: IMO / ancillary criteria table (if available) ---
     criteria = getattr(results, "criteria", None)
-    if criteria is not None and getattr(criteria, "lines", None):
+    has_criteria = bool(criteria is not None and getattr(criteria, "lines", None))
+
+    if has_criteria:
+        # Move to a dedicated landscape page for the criteria table.
+        story.append(NextPageTemplate("Landscape"))
+        story.append(PageBreak())
+
         story.append(_section_title("IMO / Livestock / Ancillary Criteria", styles))
         story.append(Spacer(1, 0.2 * cm))
 
@@ -744,11 +856,47 @@ def export_condition_to_pdf(
                 ]
             )
 
-        # Column widths tuned so the table fits the page neatly
+        # Wrap all cell contents into Paragraphs so long text
+        # breaks onto multiple lines instead of overflowing columns.
+        crit_header_style = ParagraphStyle(
+            "CriteriaHeader",
+            parent=styles["Heading4"],
+            fontSize=8,
+            leading=9,
+            alignment=1,  # center
+            spaceBefore=0,
+            spaceAfter=0,
+        )
+        crit_cell_style = ParagraphStyle(
+            "CriteriaCell",
+            parent=styles["Normal"],
+            fontSize=7,
+            leading=8,
+            spaceBefore=0,
+            spaceAfter=0,
+        )
+
+        crit_rows_wrapped: list[list[object]] = []
+        for r, row in enumerate(crit_rows):
+            wrapped_row: list[object] = []
+            for cell in row:
+                text = "" if cell is None else str(cell)
+                if r == 0:
+                    wrapped_row.append(Paragraph(text, crit_header_style))
+                else:
+                    wrapped_row.append(Paragraph(text, crit_cell_style))
+            crit_rows_wrapped.append(wrapped_row)
+
+        # Column widths tuned to use the full landscape text width.
+        available_width = landscape_size[0] - doc.leftMargin - doc.rightMargin
+        width_fractions = [0.09, 0.09, 0.28, 0.15, 0.11, 0.09, 0.09, 0.10]
+        col_widths = [f * available_width for f in width_fractions]
+
         crit_table = Table(
-            crit_rows,
-            colWidths=[1.3 * cm, 1.5 * cm, 3.7 * cm, 2.0 * cm, 1.6 * cm, 1.8 * cm, 1.8 * cm, 1.7 * cm],
+            crit_rows_wrapped,
+            colWidths=col_widths,
             repeatRows=1,
+            hAlign="LEFT",
         )
         # Header and grid
         base_style = [
@@ -757,16 +905,15 @@ def export_condition_to_pdf(
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, 0), 8),
             ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-            ("VALIGN", (0, 0), (-1, 0), "BOTTOM"),
-            # Rotate header labels vertically so long words fit
-            ("ROTATE", (0, 0), (-1, 0), 90),
-            ("TOPPADDING", (0, 0), (-1, 0), 2),
-            ("BOTTOMPADDING", (0, 0), (-1, 0), 2),
+            ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, 0), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 3),
             ("BACKGROUND", (0, 1), (-1, -1), "#FFFFFF"),
             ("GRID", (0, 0), (-1, -1), 0.4, "#BBBBBB"),
             ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("FONTSIZE", (0, 0), (-1, -1), 7),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("WORDWRAP", (0, 0), (-1, -1), "CJK"),
         ]
 
         # Add per-row colouring for Result column (similar to Excel).
@@ -789,14 +936,17 @@ def export_condition_to_pdf(
         crit_table.setStyle(TableStyle(base_style))
         story.append(crit_table)
 
-    # --- Final section: GZ curve plot (approximate, from GM) ---
-    story.append(Spacer(1, 0.8 * cm))
+        # Prepare the next full landscape page for the GZ curve.
+        story.append(NextPageTemplate("Landscape"))
+        story.append(PageBreak())
+    else:
+        # No criteria table; still allocate a dedicated landscape page for the GZ curve.
+        story.append(NextPageTemplate("Landscape"))
+        story.append(PageBreak())
+
+    # --- Final section: GZ curve plot (from KN tables, same as Curves view) ---
     story.append(_section_title("Righting Lever (GZ) Curve", styles))
     story.append(Spacer(1, 0.3 * cm))
-    story.append(_build_gz_curve_drawing(results))
+    story.append(_build_gz_curve_drawing(results, width=24 * cm, height=13 * cm))
 
-    def _on_first_page(canvas, _doc) -> None:
-        # PDF Info dictionary title read by most viewers
-        canvas.setTitle("OSAMA BAY")
-
-    doc.build(story, onFirstPage=_on_first_page, onLaterPages=_on_first_page)
+    doc.build(story)

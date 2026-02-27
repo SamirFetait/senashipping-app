@@ -342,7 +342,8 @@ class ProfileView(ShipGraphicsView):
         if w > 0 and h > 0:
             bounds = bounds.adjusted(-w * margin, -h * margin, w * margin, h * margin)
         self._scene.setSceneRect(bounds)
-        self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
+        if self.width() > 0 and self.height() > 0:
+            self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
 
     def fit_to_view(self) -> None:
         """Fit profile drawing to view (same as resize/load)."""
@@ -704,7 +705,8 @@ class DeckView(ShipGraphicsView):
         if w > 0 and h > 0:
             bounds = bounds.adjusted(-w * margin, -h * margin, w * margin, h * margin)
         self._scene.setSceneRect(bounds)
-        self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
+        if self.width() > 0 and self.height() > 0:
+            self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
 
     def fit_to_view(self) -> None:
         """Fit deck drawing to view (same as resize/load)."""

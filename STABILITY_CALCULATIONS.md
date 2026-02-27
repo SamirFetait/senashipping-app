@@ -104,7 +104,7 @@ The app can use:
 - For a range of drafts, **displacement** at each draft: **Δ = L × B × T × Cb × ρ**.
 - **KB:** Typical ship form **KB/T ≈ 0.535 − 0.055×Cb** → **KB = (KB/T) × draft**.
 - **LCB:** Taken **0.5** (amidships) for the simplified form.
-- **Waterplane inertias** (rectangular waterplane):  
+- **Waterplane inertias** (rectangular waterplane):
   **I_T = L×B³/12**, **I_L = B×L³/12** (same at all drafts in this simplified model).
 
 These curves are used to get **draft from displacement** (via inverse interpolation) and **KB, I_T, I_L** at that draft for trim and GM.
@@ -116,8 +116,8 @@ These curves are used to get **draft from displacement** (via inverse interpolat
 **Goal:** Find mean draft **T** such that **Displacement(T) = total weight (Δ)**.
 
 - **With hydrostatic curves:** Draft is found by **inverse interpolation** on the curve **draft ↔ displacement** so that displacement at that draft equals Δ.
-- **Without curves:** **Box approximation**  
-  **Δ = L × B × T × Cb × ρ**  
+- **Without curves:** **Box approximation**
+  **Δ = L × B × T × Cb × ρ**
   ⇒ **T = Δ / (L × B × Cb × ρ)**.
 
 Result: **mean draft** (m) at the LCF (simplified as amidships). Aft and forward drafts come from this mean draft and trim (below).
@@ -128,13 +128,13 @@ Result: **mean draft** (m) at the LCF (simplified as amidships). Aft and forward
 
 Trim (m) is **positive = stern down**. It is found from longitudinal equilibrium: **LCG** vs **LCB**.
 
-**Loading Manual formula:**  
+**Loading Manual formula:**
 **t = Δ × (LCB − LCG) / MTC** (with sign convention so that trim direction matches LCG/LCB).
 
 - **LCG** (m from AP) = **LCG_norm × L** (from weight moments).
 - **LCB** (m from AP) = from curves at current draft, or **0.5×L** if not available.
-- **Moment to Change Trim 1 m (MTC)** in tonne·m/m:  
-  **BM_L = I_L / V**, **MTC = Δ × BM_L / (L × 100)** (with appropriate factor for 1 m trim).  
+- **Moment to Change Trim 1 m (MTC)** in tonne·m/m:
+  **BM_L = I_L / V**, **MTC = Δ × BM_L / (L × 100)** (with appropriate factor for 1 m trim).
   **I_L** = longitudinal waterplane inertia (from curves or **B×L³/12**), **V** = Δ/ρ.
 
 Then: **trim_m = (LCG_m − LCB_m) × Δ / MTC** (with correct sign so stern goes down when LCG is aft of LCB).
@@ -143,7 +143,7 @@ So: **trim** is fully determined by **displacement**, **LCG**, **LCB**, and **MT
 
 **Lightship alignment (to avoid baseline trim):**
 
-- For the **trim solver only**, the code aligns the lightship longitudinal CoG with the **hydrostatic LCB at the lightship draft**.  
+- For the **trim solver only**, the code aligns the lightship longitudinal CoG with the **hydrostatic LCB at the lightship draft**.
   This means:
   - Lightship alone gives **≈ zero trim** (LCG ≈ LCB).
   - Any trim you see comes from **cargo shifting the combined LCG away from LCB**, not from the empty-ship baseline.
@@ -155,7 +155,7 @@ So: **trim** is fully determined by **displacement**, **LCG**, **LCB**, and **MT
 
 **KB (m)** — center of buoyancy above baseline:
 
-- From curves at the solved draft, or  
+- From curves at the solved draft, or
 - **KB ≈ 0.53 × draft** (typical ship form).
 
 **BM_T (m)** — transverse metacentric radius:
@@ -172,10 +172,10 @@ So: **trim** is fully determined by **displacement**, **LCG**, **LCB**, and **MT
 
 **GM (m)** — transverse metacentric height (intact stability):
 
-- **GM = KM − KG**  
+- **GM = KM − KG**
   (can be negative for unstable conditions; validation then FAILs the GM criteria).
 
-**Effective GM (after free surface):**  
+**Effective GM (after free surface):**
 **GM_eff = GM − FSC**, where **FSC** is the free surface correction (see below). Validation and criteria use **GM_eff**.
 
 ---
@@ -196,12 +196,12 @@ The app shows **Draft at Marks - Aft / Mid / Fwd** in the results panel.
 
 A simple equilibrium heel from transverse shift of center of gravity:
 
-- **heel_deg = atan(TCG / GM)** (in degrees),  
+- **heel_deg = atan(TCG / GM)** (in degrees),
   with **TCG** = total transverse moment / total mass.
 
-This is the **small-angle equilibrium approximation**  
-(\(\Delta \cdot TCG = \Delta \cdot GM \cdot \tan\theta\) ⇒ \(\theta = \arctan(TCG/GM)\)).  
-If **GM** is zero or negative, heel is set to 0.  
+This is the **small-angle equilibrium approximation**
+(\(\Delta \cdot TCG = \Delta \cdot GM \cdot \tan\theta\) ⇒ \(\theta = \arctan(TCG/GM)\)).
+If **GM** is zero or negative, heel is set to 0.
 It is intended as an indicative heel for **modest angles (a few degrees)** only; no full GZ curve is used here.
 
 ---
@@ -231,24 +231,24 @@ It is intended as an indicative heel for **modest angles (a few degrees)** only;
 
 If no FSM data are available for a tank (no sounding table / Ullage‑FSM import), the app currently treats that tank as having **no free-surface correction** (i.e. GG' = 0 for that tank).
 
-**Loading Manual consistency:**  
-This matches the manual’s formulation **GG' = Total FSM / Δ**, **GM = KM − KG − GG'**.  
+**Loading Manual consistency:**
+This matches the manual’s formulation **GG' = Total FSM / Δ**, **GM = KM − KG − GG'**.
 **Validation and IMO/livestock criteria always use GM_effective** when checking minimum GM.
 
 ---
 
 ## 12. Longitudinal strength (very simplified / illustrative only)
 
-The app uses a **purely illustrative** still-water model for bending moment and shear.  
+The app uses a **purely illustrative** still-water model for bending moment and shear.
 It is **not derived from the vessel’s hull girder properties** and is **not suitable for engineering design or class approval**.
 
 - **LCG** from weight distribution (tanks + pens).
 - **Eccentricity** from amidships: **ecc = |LCG_norm − 0.5|**.
-- **Still-water BM (SWBM)** is approximated with an arbitrary factor, e.g.  
+- **Still-water BM (SWBM)** is approximated with an arbitrary factor, e.g.
   **SWBM ≈ Δ × L × ecc × 0.25** (t·m). The factor **0.25 has no physical derivation** in this context; it is only to give a rough visual indication that BM grows with displacement, length and off‑centre loading.
 - **Shear:** similarly uses a crude proportional formula (shear ∝ Δ × ecc) with arbitrary coefficients.
 - **Design limits:** placeholder values such as **design_BM = Δ × L × 0.12**, **design_SF = Δ × 0.15** are used **only to express BM and shear as % “allowable”** for on‑screen colouring.
-- **Max BM % Allow** = **|SWBM| / design_BM × 100**;  
+- **Max BM % Allow** = **|SWBM| / design_BM × 100**;
   **Max Shear % Allow** = **max_shear / design_SF × 100**.
 
 These strength numbers are **for UI feedback only**. For any real strength assessment or class submission, you **must** use the vessel’s approved longitudinal strength curves / loading manual or dedicated strength software.
@@ -314,7 +314,7 @@ So **“FAILED”** = one or more **validation errors** (limits exceeded); the u
 
 **Ancillary**
 
-- **GZ criteria status (simplified):**  
+- **GZ criteria status (simplified):**
   For the criteria line, GM_effective is compared to the IMO minimum (0.15 m); where validation is not available it falls back to a simple GM/heel check.
 - **Prop immersion** ≥ e.g. **60%**.
 - **Visibility** ≥ e.g. **1.0 m**.

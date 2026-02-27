@@ -198,6 +198,12 @@ def compute_condition(
         displacement_t, L, B, lcg_norm, RHO_SEA, DEFAULT_CB, curves
     )
 
+    # When condition is lightship (displacement ≈ lightship only), use manual lightship draft
+    # so the displayed draft is 4.188 m per Loading Manual, not the solver result from curves.
+    if abs(displacement_t - lightship_mass_t) < 0.01 * max(lightship_mass_t, 1.0):
+        draft_m = lightship_draft
+        trim_m = 0.0
+
     # KG = total VCG moment / total mass (lightship + tanks + pens)
     kg_m = total_vcg_moment / total_mass_t
 

@@ -29,7 +29,10 @@ def _get_or_create_osama_bay(ship_repo: ShipRepository) -> Ship:
     ships: List[Ship] = ship_repo.list()
     ship = next((s for s in ships if s.name.upper() == "OSAMA BAY"), None)
     if ship is not None:
-        return ship
+        # Ensure reference vessel always has correct lightship values from Loading Manual
+        ship.lightship_draft_m = 4.188
+        ship.lightship_displacement_t = 5076.0
+        return ship_repo.update(ship)
 
     ship = Ship(
         name="OSAMA BAY",

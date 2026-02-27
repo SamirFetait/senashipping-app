@@ -8,12 +8,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas as pd
+from openpyxl.chart import LineChart, Reference
 from openpyxl.styles import Alignment, Font, PatternFill
 
 from senashipping_app.config.limits import MASS_PER_HEAD_T
 from senashipping_app.repositories import database
 from senashipping_app.repositories.livestock_pen_repository import LivestockPenRepository
 from senashipping_app.repositories.tank_repository import TankRepository
+from senashipping_app.services.gz_curve_plot import (
+    compute_gz_curve_stats,
+    get_kn_table_dict,
+)
 
 if TYPE_CHECKING:
     from senashipping_app.models import Ship, Voyage, LoadingCondition
@@ -263,6 +268,32 @@ def _build_weight_items_rows(ship, condition, results) -> list[dict] | None:
         )
 
     return rows if rows else None
+
+
+def _compute_gz_curve_from_kn(
+    results: "ConditionResults",
+) -> tuple[list[float], list[float], float, float, float, float]:
+    """
+    Compute GZ curve from KN tables, matching the Curves view / PDF report.
+
+    Returns (angles_deg, gz_values, max_gz, angle_at_max, area_m_rad, range_positive_deg).
+    When data is missing or invalid, returns empty curves and zeros.
+    """
+    try:
+        kg_m = float(getattr(results, "kg_m", 0.0) or 0.0)
+        displacement_t = float(getattr(results, "displacement_t", 0.0) or 0.0)
+        trim_m = float(getattr(results, "trim_m", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return [], [], 0.0, 0.0, 0.0, 0.0
+
+    if kg_m <= 0.0 or displacement_t <= 0.0:
+        return [], [], 0.0, 0.0, 0.0, 0.0
+
+    kn_table = get_kn_table_dict(displacement_t, trim_m)
+    if not kn_table:
+        return [], [], 0.0, 0.0, 0.0, 0.0
+
+    return compute_gz_curve_stats(kg_m, kn_table)
 
 
 def export_condition_to_excel(
@@ -525,11 +556,58 @@ def export_condition_to_excel(
                         wrap_text=True,
                     )
 
-            # Rotate header labels vertically so long words fit in narrower columns
+            # Ensure header labels are horizontal (no rotation)
             for cell in ws_crit[1]:
                 cell.alignment = Alignment(
                     horizontal="center",
-                    vertical="bottom",
-                    text_rotation=90,
+                    vertical="center",
                     wrap_text=True,
                 )
+
+        # Sheet 5 – GZ curve (numeric points from KN tables, same data as Curves/PDF)
+        angles_deg, gz_values, max_gz, angle_at_max, area_m_rad, range_positive = _compute_gz_curve_from_kn(
+            results
+        )
+        if angles_deg and gz_values:
+            df_curve = pd.DataFrame(
+                {
+                    "Angle (deg)": [float(a) for a in angles_deg],
+                    "GZ (m)": [float(g) for g in gz_values],
+                }
+            )
+            df_curve.to_excel(writer, sheet_name="GZ Curve", index=False)
+            ws_curve = writer.sheets["GZ Curve"]
+            ws_curve.column_dimensions["A"].width = 16
+            ws_curve.column_dimensions["B"].width = 16
+            _style_header(ws_curve)
+            _style_body_table(ws_curve, start_row=2, first_col_bold=False, stripe=True)
+            ws_curve.freeze_panes = "A2"
+
+            # Add a line chart (actual curve) from the table data
+            n_rows = len(angles_deg) + 1  # +1 for header
+            chart = LineChart()
+            chart.title = "GZ curve"
+            chart.y_axis.title = "GZ (m)"
+            chart.x_axis.title = "Heel angle (deg)"
+            chart.width = 14
+            chart.height = 10
+            data = Reference(ws_curve, min_col=2, min_row=1, max_row=n_rows)
+            cats = Reference(ws_curve, min_col=1, min_row=2, max_row=n_rows)
+            chart.add_data(data, titles_from_data=True)
+            chart.set_categories(cats)
+            ws_curve.add_chart(chart, "D2")
+        else:
+            # Still add a sheet so users know why the curve is missing.
+            df_msg = pd.DataFrame(
+                {
+                    "Message": [
+                        "No GZ curve available for this condition "
+                        "(missing KN tables.xlsx in assets, or invalid data)."
+                    ]
+                }
+            )
+            df_msg.to_excel(writer, sheet_name="GZ Curve", index=False)
+            ws_curve = writer.sheets["GZ Curve"]
+            ws_curve.column_dimensions["A"].width = 80
+            _style_header(ws_curve)
+            _style_body_table(ws_curve, start_row=2, first_col_bold=False, stripe=False)
