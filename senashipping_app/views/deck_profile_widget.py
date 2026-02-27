@@ -507,15 +507,21 @@ class ProfileView(ShipGraphicsView):
         if self._ship_length == 0:
             return
 
-        # Calculate proper scaling factor based on ship depth or use scene bounds
+        # Calculate proper scaling factor so draft (in metres) scales with the
+        # actual ship depth. Prefer the frozen hull/profile bounds so visual
+        # scaling is tied to the hull height, not transient items.
         if self._ship_depth > 0:
-            scene_bounds = self._scene.itemsBoundingRect()
-            scene_depth = abs(scene_bounds.height())
+            if self._hull_bounds is not None and self._hull_bounds.isValid():
+                scene_depth = abs(self._hull_bounds.height())
+            else:
+                scene_bounds = self._scene.itemsBoundingRect()
+                scene_depth = abs(scene_bounds.height())
             if scene_depth > 0:
                 scale_y = scene_depth / self._ship_depth
             else:
                 scale_y = self._ship_breadth / 10.0 if self._ship_breadth > 0 else 1.0
         else:
+            # Fallback when we don't know ship depth: approximate using breadth
             scale_y = self._ship_breadth / 10.0 if self._ship_breadth > 0 else 1.0
 
         # Remove old waterline elements before drawing the new one
@@ -545,15 +551,17 @@ class ProfileView(ShipGraphicsView):
             fill_path.lineTo(x_left, self._keel_y)
             fill_path.closeSubpath()
 
+            # Subtle, professional fill under the waterline (light blue, low opacity)
             self._waterline_fill_item = self._scene.addPath(
                 fill_path,
                 QPen(Qt.PenStyle.NoPen),
-                QBrush(QColor(80, 140, 230, 70))  # Slightly softer blue fill
+                QBrush(QColor(80, 140, 230, 40))
             )
             self._waterline_fill_item.setZValue(50)
 
-            # Draw waterline (enhanced style: slightly thinner, deeper blue)
-            waterline_pen = QPen(QColor(0, 80, 190), 3)
+            # Draw a finer, less dominant waterline
+            waterline_pen = QPen(QColor(0, 80, 160), 1.5)
+            waterline_pen.setCosmetic(True)  # Hairline width independent of zoom
             self._waterline_item = self._scene.addLine(
                 x_left, y_aft, x_right, y_fwd, waterline_pen
             )
@@ -588,15 +596,17 @@ class ProfileView(ShipGraphicsView):
             fill_path.lineTo(x_left, self._keel_y)
             fill_path.closeSubpath()
 
+            # Subtle, professional fill under the waterline (light blue, low opacity)
             self._waterline_fill_item = self._scene.addPath(
                 fill_path,
                 QPen(Qt.PenStyle.NoPen),
-                QBrush(QColor(80, 140, 230, 70))
+                QBrush(QColor(80, 140, 230, 40))
             )
             self._waterline_fill_item.setZValue(50)
 
-            # Draw waterline (enhanced style)
-            waterline_pen = QPen(QColor(0, 80, 190), 3)
+            # Draw a finer, less dominant waterline
+            waterline_pen = QPen(QColor(0, 80, 160), 1.5)
+            waterline_pen.setCosmetic(True)
             self._waterline_item = self._scene.addLine(
                 x_left, y, x_right, y, waterline_pen
             )
@@ -610,23 +620,16 @@ class ProfileView(ShipGraphicsView):
             self._waterline_item.setZValue(100)
 
     def _add_draft_marker(self, x: float, y: float, draft_value: float, label: str) -> None:
-        """Add a draft measurement marker with label at the specified position."""
-        # Draw a compact vertical line marker
-        marker_pen = QPen(QColor(0, 100, 200), 1.0)
-        marker_length = 10.0
+        """Add a subtle draft measurement marker with label at the specified position."""
+        # Draw a fine, cosmetic vertical line marker (no cross) so it does not dominate the profile
+        marker_pen = QPen(QColor(0, 100, 200), 0)
+        marker_pen.setCosmetic(True)
+        marker_length = 6.0
         marker_line = self._scene.addLine(
             x, y - marker_length / 2, x, y + marker_length / 2, marker_pen
         )
         marker_line.setZValue(110)
         self._draft_markers.append(marker_line)
-        
-        # Add small horizontal tick
-        tick_length = 6.0
-        tick_line = self._scene.addLine(
-            x - tick_length / 2, y, x + tick_length / 2, y, marker_pen
-        )
-        tick_line.setZValue(110)
-        self._draft_markers.append(tick_line)
         
         # Add compact text label with clearer number formatting
         label_text = f"{label} {draft_value:.2f} m"
@@ -635,8 +638,8 @@ class ProfileView(ShipGraphicsView):
         text_item.setDefaultTextColor(QColor(0, 100, 200))
         # Keep label size constant even if the view is rescaled
         text_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
-        # Position label just above the marker
-        text_item.setPos(x - 26, y - 20)
+        # Position label just above and slightly to the left of the marker
+        text_item.setPos(x - 24, y - 18)
         text_item.setZValue(120)
         self._draft_markers.append(text_item)
 
