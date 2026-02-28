@@ -5,7 +5,7 @@ db.sqlite3
 __pycache__
 .gitignore
 *.log
-main.spec
+*.spec
 dist/
 build/
 SenaShipping.spec

@@ -27,10 +27,10 @@ from senashipping_app.views.graphics_views import ShipGraphicsView
 from senashipping_app.utils.sorting import get_pen_sort_key
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent  # -> senashipping_app
-# cads folder is at project root (parent of senashipping_app)
-PROJECT_ROOT = BASE_DIR.parent
-CAD_DIR = PROJECT_ROOT / "cads"
+def _get_cad_dir() -> Path:
+    """CAD folder path; works in dev and when frozen (PyInstaller)."""
+    from senashipping_app.config.settings import Settings
+    return Settings.default().project_root / "cads"
 
 
 def _load_dxf_into_scene(dxf_path: Path, scene: QGraphicsScene) -> bool:
@@ -361,7 +361,7 @@ class ProfileView(ShipGraphicsView):
         self._hull_fill_item = None
         self._hull_bounds = None
         
-        dxf_path = CAD_DIR / "profile.dxf"
+        dxf_path = _get_cad_dir() / "profile.dxf"
         if not _load_dxf_into_scene(dxf_path, self._scene):
             # No placeholder: use defaults so waterline/pen logic still works
             self._ship_length = 100.0
@@ -756,7 +756,7 @@ class DeckView(ShipGraphicsView):
         self._pen_markers.clear()
 
         # Always load deck DXF first so the drawing is the background
-        dxf_path = CAD_DIR / f"deck_{deck_name}.dxf"
+        dxf_path = _get_cad_dir() / f"deck_{deck_name}.dxf"
         _load_dxf_into_scene(dxf_path, self._scene)
 
         # Add tank polylines on top (same coordinate system as DXF so they match)

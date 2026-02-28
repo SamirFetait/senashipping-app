@@ -30,6 +30,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QStandardPaths
 from PyQt6.QtGui import QFont
 
 from senashipping_app.models import Voyage
@@ -616,25 +617,36 @@ class ResultsView(QWidget):
                 "Compute a condition first to export.",
             )
             return
+        default_dir = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DocumentsLocation
+        ) or str(Path.home())
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Export PDF",
-            str(Path.home()),
+            default_dir,
             "PDF (*.pdf)",
         )
         if not path:
             return
+        path = str(path).replace("file:///", "").replace("file://", "").strip()
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        filepath = Path(path).resolve()
         try:
             export_condition_to_pdf(
-                Path(path),
+                filepath,
                 self._last_ship,
                 self._last_voyage,
                 self._last_condition,
                 self._last_results,
             )
-            QMessageBox.information(self, "Export", f"Saved to {path}")
+            QMessageBox.information(self, "Export", f"Saved to {filepath}")
         except Exception as e:
-            QMessageBox.critical(self, "Export Error", str(e))
+            QMessageBox.critical(
+                self,
+                "Export Error",
+                f"Could not save PDF:\n{e}\n\nPath: {filepath}",
+            )
 
 
     def _on_export_excel(self) -> None:
@@ -645,26 +657,35 @@ class ResultsView(QWidget):
                 "Compute a condition first to export.",
             )
             return
+        default_dir = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.DocumentsLocation
+        ) or str(Path.home())
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Excel",
-            str(Path.home()),
+            default_dir,
             "Excel (*.xlsx)",
         )
         if not path:
             return
-        if not path.endswith(".xlsx"):
+        path = str(path).replace("file:///", "").replace("file://", "").strip()
+        if not path.lower().endswith(".xlsx"):
             path += ".xlsx"
+        filepath = Path(path).resolve()
         try:
             export_condition_to_excel(
-                Path(path),
+                filepath,
                 self._last_ship,
                 self._last_voyage,
                 self._last_condition,
                 self._last_results,
             )
-            QMessageBox.information(self, "Export", f"Saved to {path}")
+            QMessageBox.information(self, "Export", f"Saved to {filepath}")
         except Exception as e:
-            QMessageBox.critical(self, "Export Error", str(e))
+            QMessageBox.critical(
+                self,
+                "Export Error",
+                f"Could not save Excel:\n{e}\n\nPath: {filepath}",
+            )
 
 

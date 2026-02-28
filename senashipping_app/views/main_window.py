@@ -8,7 +8,6 @@ from dataclasses import dataclass
 
 from pathlib import Path
 from typing import Dict
-import os
 
 from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, QSize
@@ -70,8 +69,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Sena Shipping for Livestock Carriers")
         self.setMinimumSize(1200, 800)
         self.showMaximized()
-        app_icon_path = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "icon.png")
-        self.setWindowIcon(QIcon(app_icon_path))
+        icon_path = self._settings.project_root / "assets" / "icon.png"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
 
         self._stack = QStackedWidget(self)
         self.setCentralWidget(self._stack)

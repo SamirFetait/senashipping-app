@@ -12,8 +12,10 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
-# Project assets folder (sounding tables loaded automatically from here)
-_assets_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
+def _get_assets_dir() -> Path:
+    """Assets folder path; works in dev and when frozen (PyInstaller)."""
+    from senashipping_app.config.settings import Settings
+    return Settings.default().project_root / "assets"
 
 
 def _normalize_tank_name_for_match(name: str | None) -> str:
@@ -1103,10 +1105,10 @@ class ConditionEditorView(QWidget):
             return
         # Try "SOUNDING <ship name>.xlsx" then any SOUNDING*.xlsx in assets/
         safe_name = (ship.name or "").strip()
-        path = _assets_DIR / f"SOUNDING {safe_name}.xlsx"
+        path = _get_assets_dir() / f"SOUNDING {safe_name}.xlsx"
         if not path.exists():
             try:
-                candidates = list(_assets_DIR.glob("SOUNDING*.xlsx"))
+                candidates = list(_get_assets_dir().glob("SOUNDING*.xlsx"))
                 if not candidates:
                     return
                 path = candidates[0]

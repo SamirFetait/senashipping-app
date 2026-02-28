@@ -144,6 +144,25 @@ python senashipping_app/main.py
 
 ---
 
+## 📦 Building the executable (freeze)
+
+To create a standalone executable (no Python required on the target machine):
+
+```bash
+pip install -r requirements.txt
+pyinstaller senashipping_app.spec
+```
+
+The built executable **OsamaBayApp.exe** will appear in `dist/`. It bundles:
+
+- **Database**: `senashipping_app_data/senashipping.db` (if present at build time) is copied to the user data folder on first run
+- **CAD files**: All `cads/*.dxf` (profile, deck_A–H)
+- **Assets**: `assets/` (KN tables, SOUNDING Excel files, icon, PDFs)
+
+At runtime, user data (DB, logs) is stored next to the executable in `senashipping_app_data/`.
+
+---
+
 ## ⚙️ Configuration
 
 | Item | Location | Description |
