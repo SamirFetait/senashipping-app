@@ -288,9 +288,9 @@ class ConditionTableWidget(QWidget):
         return container
 
     def _create_deck8_table(self) -> QTableWidget:
-        """Create deck 8 table: Name, Quantity, Weight (MT), Total Weight (MT), VCG m-BL, LCG m-[FR], TCG m-CL, LS Moment m-MT."""
+        """Create deck 8 table: Name, Quantity, Weight (MT), Total Weight (MT), VCG m-BL, LCG m-[FR], TCG m-CL, LS Moment m-MT, Delete."""
         table = QTableWidget(self)
-        table.setColumnCount(8)
+        table.setColumnCount(self.DECK8_COLUMNS)
         table.setHorizontalHeaderLabels([
             "Name",
             "Quantity",
@@ -300,15 +300,24 @@ class ConditionTableWidget(QWidget):
             "LCG m-[FR]",
             "TCG m-CL",
             "LS Moment m-MT",
+            "",
         ])
         self._setup_common_table(table)
+        header = table.horizontalHeader()
+        if header is not None:
+            header.setSectionResizeMode(self.DECK8_COL_DELETE, QHeaderView.ResizeMode.Fixed)
+            table.setColumnWidth(self.DECK8_COL_DELETE, 120)
 
-        # Deck 8 table: all editable columns except Name are numeric-only.
+        # Deck 8 table: all editable columns except Name are numeric-only; column 8 is Delete button.
         numeric_delegate = _NumericItemDelegate(allow_negative=False, parent=table)
         table.setItemDelegate(numeric_delegate)
         text_delegate = QStyledItemDelegate(table)
         table.setItemDelegateForColumn(0, text_delegate)  # Name
         return table
+
+    # Deck 8 (Deck H) table: 9 columns including Delete button for full CRUD
+    DECK8_COLUMNS = 9
+    DECK8_COL_DELETE = 8
 
     # Tank table column indices (reference: green indicator, Name, Ull/Snd, UTrim, Capacity, %Full, Volume, Dens, Weight, VCG, LCG, TCG, FSopt, FSt)
     TANK_COL_NAME = 1
@@ -1238,9 +1247,9 @@ class ConditionTableWidget(QWidget):
         preserved_cargo_selections: Optional[Dict[int, str]] = None,
         preserved_head_counts: Optional[Dict[int, int]] = None,
     ) -> None:
-        """Populate deck 8 (H) tab with columns: Name, Quantity, Weight (MT), Total Weight (MT), LCG, VCG, TCG, LS Moment m-MT."""
+        """Populate deck 8 (H) tab with columns: Name, Quantity, Weight (MT), Total Weight (MT), LCG, VCG, TCG, LS Moment m-MT, Delete."""
         table = self._table_widgets.get(tab_name)
-        if not table or table.columnCount() != 8:
+        if not table or table.columnCount() != self.DECK8_COLUMNS:
             return
         deck_letter_upper = deck_letter.upper()
         deck_pens = [
@@ -1293,6 +1302,7 @@ class ConditionTableWidget(QWidget):
             moment_item = QTableWidgetItem(f"{lcg_moment:.2f}")
             moment_item.setFlags(moment_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 7, moment_item)
+            self._set_deck8_delete_button(table, row)
         # Totals row (always present for deck 8) - Total Weight in MT
         tot_row = table.rowCount()
         table.insertRow(tot_row)
@@ -1306,18 +1316,71 @@ class ConditionTableWidget(QWidget):
         if deck_pens or True:
             table.itemChanged.connect(self._make_deck8_item_changed(table))
     
+    def _set_deck8_delete_button(self, table: QTableWidget, row: int) -> None:
+        """Set a Delete button in the given row of the deck 8 table (column DECK8_COL_DELETE). Not used on the blank new row."""
+        if table.columnCount() != self.DECK8_COLUMNS:
+            return
+        btn = QPushButton("Delete", table)
+        btn.setToolTip("Remove this pen from Deck H")
+        btn.setStyleSheet(
+            "QPushButton {"
+            " min-width: 60px; max-height: 24px; font-size: 11px; font-weight: 500;"
+            " background-color: #dc3545; color: white; border: none; border-radius: 4px;"
+            " padding: 4px 10px;"
+            "}"
+            "QPushButton:hover { background-color: #c82333; }"
+            "QPushButton:pressed { background-color: #bd2130; }"
+            "QPushButton:disabled { background-color: #e0a0a8; color: #fff; }"
+        )
+        btn.clicked.connect(lambda checked=False: self._on_deck8_delete_clicked(table))
+        table.setCellWidget(row, self.DECK8_COL_DELETE, btn)
+
+    def _on_deck8_delete_clicked(self, table: QTableWidget) -> None:
+        """Find the row whose Delete button was clicked, delete the pen from DB if persisted, remove row, refresh totals."""
+        if table.columnCount() != self.DECK8_COLUMNS:
+            return
+        sender = self.sender()
+        if not isinstance(sender, QPushButton):
+            return
+        row = None
+        for r in range(table.rowCount()):
+            if table.cellWidget(r, self.DECK8_COL_DELETE) is sender:
+                row = r
+                break
+        if row is None:
+            return
+        name_cell = table.item(row, 0)
+        if not name_cell or "Totals" in (name_cell.text() or ""):
+            return
+        name_item = table.item(row, 0)
+        pen_id = name_item.data(Qt.ItemDataRole.UserRole) if name_item else None
+        if pen_id is not None and database.SessionLocal is not None:
+            try:
+                with database.SessionLocal() as db:
+                    repo = LivestockPenRepository(db)
+                    repo.delete(pen_id)
+                self._current_pens = [p for p in self._current_pens if (p.id or 0) != pen_id]
+            except Exception:
+                pass
+        was_last_row = row == table.rowCount() - 1
+        table.removeRow(row)
+        self._refresh_deck8_totals(table)
+        if was_last_row:
+            self._append_deck8_blank_row(table)
+
     def _append_deck8_blank_row(self, table: QTableWidget) -> None:
-        """Append one editable blank row to the deck 8 table. Total Weight (col 3, MT) and LS Moment (col 7) are read-only and auto-calculated."""
-        if table.columnCount() != 8:
+        """Append one editable blank row for new pen entry. No Delete button on this row."""
+        if table.columnCount() != self.DECK8_COLUMNS:
             return
         row = table.rowCount()
         table.insertRow(row)
-        for c in range(8):
+        for c in range(self.DECK8_COL_DELETE):
             item = QTableWidgetItem("")
             # Total Weight (col 3, MT) and LS Moment (col 7) are read-only, auto-calculated
             if c in (3, 7):
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, c, item)
+        # Leave column 8 empty so user sees only the row to fill
     
     def _make_deck8_item_changed(self, table: QTableWidget):
         """Return a handler for deck 8 itemChanged: auto-calc Total Weight when Quantity/Weight changes, or add blank row when last row is filled."""
@@ -1325,7 +1388,7 @@ class ConditionTableWidget(QWidget):
             if self._skip_item_changed:
                 return
             row = item.row()
-            if table.columnCount() != 8:
+            if table.columnCount() != self.DECK8_COLUMNS:
                 return
             last_row = table.rowCount() - 1
             if row == last_row:
@@ -1335,6 +1398,7 @@ class ConditionTableWidget(QWidget):
                     try:
                         self._save_deck8_row_to_database(table, row)
                         self._append_deck8_blank_row(table)
+                        self._set_deck8_delete_button(table, row)  # Add Delete to the row just saved
                         self._refresh_deck8_totals(table)
                     finally:
                         self._skip_item_changed = False
@@ -1359,18 +1423,19 @@ class ConditionTableWidget(QWidget):
         """Save or update a deck 8 row to the database as a LivestockPen."""
         if self._current_ship_id is None or database.SessionLocal is None:
             return
-        if table.columnCount() != 8:
+        if table.columnCount() != self.DECK8_COLUMNS:
             return
-        if "Totals" in (table.item(row, 0).text() or ""):
+        name_item = table.item(row, 0)
+        if not name_item or "Totals" in (name_item.text() or ""):
             return
         try:
-            name = (table.item(row, 0).text() or "").strip()
+            name = (name_item.text() or "").strip()
             if not name:
                 return
-            name_item = table.item(row, 0)
-            pen_id = name_item.data(Qt.ItemDataRole.UserRole) if name_item else None
+            pen_id = name_item.data(Qt.ItemDataRole.UserRole)
             try:
-                qty_text = (table.item(row, 1).text() or "").strip()
+                qty_item = table.item(row, 1)
+                qty_text = (qty_item.text() or "").strip() if qty_item else ""
                 qty = int(float(qty_text)) if qty_text else 0
             except (TypeError, ValueError):
                 qty = 0
@@ -1423,17 +1488,20 @@ class ConditionTableWidget(QWidget):
     
     def _deck8_row_is_filled(self, table: QTableWidget, row: int) -> bool:
         """True if the row has at least name or quantity filled (non-empty after strip)."""
-        if row < 0 or row >= table.rowCount() or table.columnCount() != 8:
+        if row < 0 or row >= table.rowCount() or table.columnCount() != self.DECK8_COLUMNS:
             return False
-        name = (table.item(row, 0).text() or "").strip()
-        qty = (table.item(row, 1).text() or "").strip()
+        name_item = table.item(row, 0)
+        qty_item = table.item(row, 1)
+        name = (name_item.text() or "").strip() if name_item else ""
+        qty = (qty_item.text() or "").strip() if qty_item else ""
         return bool(name or qty)
     
     def _recalculate_deck8_row_total_weight(self, table: QTableWidget, row: int) -> None:
         """Auto-calculate Total Weight (MT) = Quantity * Weight (MT) and LS Moment for any row (pen or user-entered)."""
-        if row < 0 or row >= table.rowCount() or table.columnCount() != 8:
+        if row < 0 or row >= table.rowCount() or table.columnCount() != self.DECK8_COLUMNS:
             return
-        if "Totals" in (table.item(row, 0).text() or ""):
+        name_cell = table.item(row, 0)
+        if not name_cell or "Totals" in (name_cell.text() or ""):
             return
         try:
             qty_text = (table.item(row, 1).text() or "").strip()
@@ -1476,11 +1544,12 @@ class ConditionTableWidget(QWidget):
     
     def _refresh_deck8_totals(self, table: QTableWidget) -> None:
         """Refresh deck 8 totals row (Total Weight MT col 3, LS Moment m-MT col 7). Data rows + user rows; exclude totals row and last (blank) row."""
-        if table.rowCount() < 2 or table.columnCount() != 8:
+        if table.rowCount() < 2 or table.columnCount() != self.DECK8_COLUMNS:
             return
         tot_row = None
         for r in range(table.rowCount()):
-            if "Totals" in (table.item(r, 0).text() or ""):
+            cell = table.item(r, 0)
+            if cell and "Totals" in (cell.text() or ""):
                 tot_row = r
                 break
         if tot_row is None:

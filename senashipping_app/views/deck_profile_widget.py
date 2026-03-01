@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFrame,
     QLabel,
     QGraphicsScene,
@@ -41,6 +42,17 @@ def _get_cad_dir() -> Path:
 # Fraction of drawing height (e.g. 0.02 = 2% up). Use this so the shift is visible
 # regardless of DXF units (mm vs m). Set to 0 to disable.
 POLYLINE_Y_OFFSET_FRACTION = 0.02
+
+# Profile pen (and tank) marker position offsets so they align with the DXF.
+# Tune these then restart the app (or reopen the condition) so pens redraw with the new offset.
+#
+# Fraction of ship length/depth: X positive = right, Y positive = UP.
+PROFILE_PEN_X_OFFSET_FRACTION = 0.0
+PROFILE_PEN_Y_OFFSET_FRACTION = 0.02
+# Absolute offset in scene units (same as DXF). Use if fraction has no visible effect.
+# X positive = right. Y: positive value = move pens UP (we subtract from y).
+PROFILE_PEN_X_OFFSET = 0.0
+PROFILE_PEN_Y_OFFSET = 0.0  # e.g. 30 to move pens up by 30 units
 
 # Z-order constants for profile/deck scene items (maintainable stacking).
 Z_HULL = -10
@@ -302,6 +314,9 @@ class ProfileView(ShipGraphicsView):
         self._current_tanks: list = []
         self._show_tanks = True
         self._syncing_selection = False
+        # Runtime pen/tank offset (applied on top of constants); no restart needed
+        self._pen_offset_x = 0.0
+        self._pen_offset_y = 0.0
 
         # Ship dimensions for scaling
         self._ship_length: float = 0.0
@@ -467,15 +482,18 @@ class ProfileView(ShipGraphicsView):
         if not self._current_pens or self._ship_length == 0:
             return
 
-        # Calculate scaling: assume pens are positioned relative to ship length
+        # Total offset: constants + runtime (toolbar spinboxes); positive Y = move pens up
+        dx = (self._ship_length * PROFILE_PEN_X_OFFSET_FRACTION) + PROFILE_PEN_X_OFFSET + self._pen_offset_x
+        dy_up = (self._ship_depth * PROFILE_PEN_Y_OFFSET_FRACTION) + PROFILE_PEN_Y_OFFSET + self._pen_offset_y
+
         # For profile view: x = LCG, y = VCG from keel (keel_y - vcg)
         for pen in self._current_pens:
             if not pen.id:
                 continue
 
-            # Position: LCG along ship, VCG from keel
-            x_center = pen.lcg_m
-            y_center = self._keel_y - pen.vcg_m  # VCG measured from keel upward
+            # Position: LCG along ship, VCG from keel; apply alignment offsets
+            x_center = pen.lcg_m + dx
+            y_center = self._keel_y - pen.vcg_m - dy_up  # dy_up > 0 moves pens up
 
             # Size rectangle based on area
             # Convert area (m²) to visual size: assume sqrt(area) gives a reasonable dimension
@@ -859,6 +877,14 @@ class ProfileView(ShipGraphicsView):
         self._show_tanks = show
         self._apply_profile_visibility()
 
+    def set_pen_offset(self, x: float, y: float) -> None:
+        """Set runtime offset for pens/tanks (no restart). Positive y = move up. Redraws immediately."""
+        self._pen_offset_x = x
+        self._pen_offset_y = y
+        self._update_pen_markers()
+        if self._current_tanks and self._hull_bounds and self._ship_length:
+            self.set_tanks(self._current_tanks)  # re-apply tanks with new offset
+
     def set_tanks(self, tanks: list) -> None:
         """Draw tank polylines on the profile (longitudinal band per tank at VCG)."""
         for item in self._tank_items:
@@ -874,6 +900,8 @@ class ProfileView(ShipGraphicsView):
         x_right = self._hull_bounds.right()
         # Height of tank band in profile (metres in scene if 1:1, else scale)
         tank_height = max(self._ship_depth * 0.04, 1.0)
+        dx = (self._ship_length * PROFILE_PEN_X_OFFSET_FRACTION) + PROFILE_PEN_X_OFFSET + self._pen_offset_x
+        dy_up = (self._ship_depth * PROFILE_PEN_Y_OFFSET_FRACTION) + PROFILE_PEN_Y_OFFSET + self._pen_offset_y
 
         for tank in self._current_tanks:
             tid = getattr(tank, "id", None) or -1
@@ -890,7 +918,8 @@ class ProfileView(ShipGraphicsView):
                 x_center = lcg_m
                 half_w = 2.0
 
-            y_center = self._keel_y - kg_m
+            x_center += dx
+            y_center = self._keel_y - kg_m - dy_up
             path = QPainterPath()
             path.addRect(
                 x_center - half_w,
@@ -1258,6 +1287,25 @@ class DeckProfileWidget(QWidget):
         self._chk_tanks.setChecked(True)
         self._chk_tanks.toggled.connect(self._on_show_tanks_toggled)
         tool_layout.addWidget(self._chk_tanks)
+        tool_layout.addSpacing(16)
+        tool_layout.addWidget(QLabel("Pen offset X:"))
+        self._spin_pen_x = QDoubleSpinBox()
+        self._spin_pen_x.setRange(-500.0, 500.0)
+        self._spin_pen_x.setValue(0.0)
+        self._spin_pen_x.setDecimals(1)
+        self._spin_pen_x.setSingleStep(5.0)
+        self._spin_pen_x.setToolTip("Move pens left/right (scene units). No restart needed.")
+        self._spin_pen_x.valueChanged.connect(self._apply_pen_offset)
+        tool_layout.addWidget(self._spin_pen_x)
+        tool_layout.addWidget(QLabel("Y (up):"))
+        self._spin_pen_y = QDoubleSpinBox()
+        self._spin_pen_y.setRange(-500.0, 500.0)
+        self._spin_pen_y.setValue(0.0)
+        self._spin_pen_y.setDecimals(1)
+        self._spin_pen_y.setSingleStep(5.0)
+        self._spin_pen_y.setToolTip("Move pens up (positive) or down (negative). No restart needed.")
+        self._spin_pen_y.valueChanged.connect(self._apply_pen_offset)
+        tool_layout.addWidget(self._spin_pen_y)
         tool_layout.addStretch()
         main_layout.addWidget(toolbar)
         main_layout.addWidget(self._profile_view, 55)
@@ -1294,6 +1342,10 @@ class DeckProfileWidget(QWidget):
         self._profile_view.set_show_tanks(checked)
         for tab_widget in self._deck_tab_widgets.values():
             tab_widget._deck_view.set_show_tanks(checked)
+
+    def _apply_pen_offset(self) -> None:
+        """Apply toolbar pen offset to profile (live, no restart)."""
+        self._profile_view.set_pen_offset(self._spin_pen_x.value(), self._spin_pen_y.value())
 
     def update_tables(self, pens: list, tanks: list) -> None:
         """Update all deck tab tables with current pens/tanks data."""

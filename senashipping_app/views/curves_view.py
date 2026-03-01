@@ -1,6 +1,6 @@
 """
 GZ curve view: matplotlib canvas embedded in PyQt.
-Uses KN table from Excel (gz_curve_plot), bilinear KN, no smoothing; stats, grid, shaded area.
+Uses KN table from Excel (gz_curve_plot), bilinear KN; smooth curve for display; stats, grid, shaded area.
 Refreshes when loading condition updates (condition_computed).
 Shows hydrostatics: KG, GM, and full KN table for debugging.
 """
@@ -133,6 +133,7 @@ class CurvesView(QWidget):
             show_zero_line=False,
             show_max_marker=True,
             show_area_shade=True,
+            smooth_display=True,
             max_gz=max_gz,
             angle_at_max_gz=angle_at_max,
             range_positive_deg=range_positive,

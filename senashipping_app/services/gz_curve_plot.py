@@ -444,7 +444,7 @@ def make_kn_function(kn_table: dict[float, float]) -> Callable[[float], float]:
 
 
 def _smooth_display_points(
-    x: np.ndarray, y: np.ndarray, num_points: int = 300
+    x: np.ndarray, y: np.ndarray, num_points: int = 400
 ) -> tuple[np.ndarray, np.ndarray]:
     """Dense points for smooth curve display only; stats still from raw (x, y)."""
     if len(x) < 2 or len(x) != len(y):
