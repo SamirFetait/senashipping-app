@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, QRectF, pyqtSignal, QSize, QSignalBlocker, QTimer
-from PyQt6.QtGui import QPen, QBrush, QColor, QPainterPath, QFont, QResizeEvent
+from PyQt6.QtGui import QPen, QBrush, QColor, QLinearGradient, QPainterPath, QFont, QResizeEvent
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -33,11 +33,19 @@ def _get_cad_dir() -> Path:
     return Settings.default().project_root / "cads"
 
 
-def _load_dxf_into_scene(dxf_path: Path, scene: QGraphicsScene) -> bool:
+# Vertical offset to shift profile/deck polylines up to match the ship DXF.
+# Fraction of drawing height (e.g. 0.02 = 2% up). Use this so the shift is visible
+# regardless of DXF units (mm vs m). Set to 0 to disable.
+POLYLINE_Y_OFFSET_FRACTION = 0.02
+
+
+def _load_dxf_into_scene(dxf_path: Path, scene: QGraphicsScene, y_offset: float = 0.0) -> bool:
     """
     Load basic geometry from a DXF file into the given scene.
 
     Supports LINE, LWPOLYLINE, POLYLINE and entities inside INSERT blocks.
+
+    y_offset: vertical offset in scene coordinates (e.g. -30 to shift content up by 30 px).
 
     Returns True if something was drawn, False otherwise.
     """
@@ -66,7 +74,7 @@ def _load_dxf_into_scene(dxf_path: Path, scene: QGraphicsScene) -> bool:
         if et == "LINE":
             x1, y1, _ = e.dxf.start
             x2, y2, _ = e.dxf.end
-            scene.addLine(x1, -y1, x2, -y2, pen)
+            scene.addLine(x1, -y1 + y_offset, x2, -y2 + y_offset, pen)
             drew_anything = True
         elif et in ("LWPOLYLINE", "POLYLINE"):
             try:
@@ -83,10 +91,10 @@ def _load_dxf_into_scene(dxf_path: Path, scene: QGraphicsScene) -> bool:
                 first = True
                 for x, y in points:
                     if first:
-                        path.moveTo(x, -y)
+                        path.moveTo(x, -y + y_offset)
                         first = False
                     else:
-                        path.lineTo(x, -y)
+                        path.lineTo(x, -y + y_offset)
                 closed = getattr(e, "closed", getattr(e, "is_closed", False))
                 if closed:
                     path.closeSubpath()
@@ -108,14 +116,14 @@ def _load_dxf_into_scene(dxf_path: Path, scene: QGraphicsScene) -> bool:
     return drew_anything
 
 
-def _outline_to_path(outline_xy: list) -> QPainterPath:
-    """Convert list of (x, y) to QPainterPath (y flipped for Qt)."""
+def _outline_to_path(outline_xy: list, y_offset: float = 0.0) -> QPainterPath:
+    """Convert list of (x, y) to QPainterPath (y flipped for Qt). y_offset shifts vertically to match DXF."""
     path = QPainterPath()
     for i, (x, y) in enumerate(outline_xy):
         if i == 0:
-            path.moveTo(x, -y)
+            path.moveTo(x, -y + y_offset)
         else:
-            path.lineTo(x, -y)
+            path.lineTo(x, -y + y_offset)
     path.closeSubpath()
     return path
 
@@ -260,8 +268,8 @@ class ProfileView(ShipGraphicsView):
         self._waterline_fwd_item: QGraphicsLineItem | None = None
         self._draft_markers: list[QGraphicsItem] = []
         self._trim_text_item: QGraphicsTextItem | None = None
-        self._hull_fill_item: QGraphicsPolygonItem | None = None  # Gray hull fill
-        self._pen_markers: dict[int, PenMarkerItem] = {}  # pen_id -> marker
+        self._hull_fill_item: QGraphicsPolygonItem | None = None
+        self._pen_markers: dict[int, PenMarkerItem] = {}
         self._current_pens: list = []
         self._syncing_selection = False
         
@@ -362,7 +370,7 @@ class ProfileView(ShipGraphicsView):
         self._hull_bounds = None
         
         dxf_path = _get_cad_dir() / "profile.dxf"
-        if not _load_dxf_into_scene(dxf_path, self._scene):
+        if not _load_dxf_into_scene(dxf_path, self._scene, y_offset=0.0):
             # No placeholder: use defaults so waterline/pen logic still works
             self._ship_length = 100.0
             self._ship_breadth = 20.0
@@ -371,21 +379,25 @@ class ProfileView(ShipGraphicsView):
             # Synthetic hull bounds so fit/zoom stays stable
             self._hull_bounds = QRectF(0.0, -self._ship_depth, self._ship_length, self._ship_depth)
         else:
-            # Estimate dimensions from scene bounds
+            # Compute offset as fraction of drawing height so shift is visible in any DXF units
             bounds = self._scene.itemsBoundingRect()
+            y_offset = -bounds.height() * POLYLINE_Y_OFFSET_FRACTION if POLYLINE_Y_OFFSET_FRACTION else 0.0
+            if y_offset != 0.0:
+                self._scene.clear()
+                _load_dxf_into_scene(dxf_path, self._scene, y_offset=y_offset)
+                bounds = self._scene.itemsBoundingRect()
             self._ship_length = max(bounds.width(), 100.0)
-            self._ship_breadth = max(abs(bounds.height()), 20.0)
-            self._ship_depth = self._ship_breadth
+            self._ship_depth = abs(self._keel_y - bounds.top())
             # Assume keel is at the bottom of the bounding box
             self._keel_y = bounds.bottom()
             # Freeze hull/profile bounds so waterline changes do not move the DXF
             self._hull_bounds = bounds
-            
+
             # Add gray hull fill behind DXF lines
             hull_fill_rect = QRectF(bounds.left(), bounds.top(), bounds.width(), bounds.height())
-            hull_fill_brush = QBrush(QColor(200, 200, 200, 180))  # Light gray, semi-transparent
+            hull_fill_brush = QBrush(QColor(200, 200, 200, 180))
             self._hull_fill_item = self._scene.addRect(hull_fill_rect, QPen(Qt.PenStyle.NoPen), hull_fill_brush)
-            self._hull_fill_item.setZValue(-10)  # Behind DXF lines and everything else
+            self._hull_fill_item.setZValue(-10)
         
         # Fit when layout is ready so profile fills the section
         QTimer.singleShot(0, self._fit_scene_to_view)
@@ -426,7 +438,7 @@ class ProfileView(ShipGraphicsView):
 
             rect = QRectF(x_center - width / 2, y_center - height / 2, width, height)
             marker = PenMarkerItem(pen.id, rect)
-            marker.setZValue(100)  # Above hull fill, below waterline
+            marker.setZValue(100)
             self._pen_markers[pen.id] = marker
             self._scene.addItem(marker)
     
@@ -543,7 +555,7 @@ class ProfileView(ShipGraphicsView):
             y_aft = self._keel_y - draft_aft * scale_y
             y_fwd = self._keel_y - draft_fwd * scale_y
 
-            # Draw waterline fill (semi-transparent blue polygon below waterline)
+            # Draw waterline fill (gradient from waterline down to keel)
             fill_path = QPainterPath()
             fill_path.moveTo(x_left, y_aft)
             fill_path.lineTo(x_right, y_fwd)
@@ -551,17 +563,20 @@ class ProfileView(ShipGraphicsView):
             fill_path.lineTo(x_left, self._keel_y)
             fill_path.closeSubpath()
 
-            # Subtle, professional fill under the waterline (light blue, low opacity)
+            y_top = min(y_aft, y_fwd)
+            gradient = QLinearGradient(0, y_top, 0, self._keel_y)
+            gradient.setColorAt(0, QColor(80, 140, 230, 60))
+            gradient.setColorAt(1, QColor(80, 140, 230, 20))
             self._waterline_fill_item = self._scene.addPath(
                 fill_path,
                 QPen(Qt.PenStyle.NoPen),
-                QBrush(QColor(80, 140, 230, 40))
+                QBrush(gradient)
             )
             self._waterline_fill_item.setZValue(50)
 
             # Draw a finer, less dominant waterline
             waterline_pen = QPen(QColor(0, 80, 160), 1.5)
-            waterline_pen.setCosmetic(True)  # Hairline width independent of zoom
+            waterline_pen.setCosmetic(True)
             self._waterline_item = self._scene.addLine(
                 x_left, y_aft, x_right, y_fwd, waterline_pen
             )
@@ -573,7 +588,7 @@ class ProfileView(ShipGraphicsView):
             self._add_draft_marker(mid_x, y_mid, draft_mid, "Mid")
             self._add_draft_marker(x_right, y_fwd, draft_fwd, "Fwd")
 
-            # Display trim value with a compact label that stays a fixed screen size
+            # Display trim value
             if trim_m is not None:
                 trim_str = f"Trim {abs(trim_m):.2f} m {'A' if trim_m >= 0 else 'F'}"
                 trim_color = QColor(0, 150, 0) if abs(trim_m) < 1.0 else QColor(200, 150, 0) if abs(trim_m) < 2.0 else QColor(200, 0, 0)
@@ -588,7 +603,7 @@ class ProfileView(ShipGraphicsView):
             # Level waterline
             y = self._keel_y - draft_mid * scale_y
 
-            # Draw waterline fill
+            # Draw waterline fill (gradient from waterline down to keel)
             fill_path = QPainterPath()
             fill_path.moveTo(x_left, y)
             fill_path.lineTo(x_right, y)
@@ -596,11 +611,13 @@ class ProfileView(ShipGraphicsView):
             fill_path.lineTo(x_left, self._keel_y)
             fill_path.closeSubpath()
 
-            # Subtle, professional fill under the waterline (light blue, low opacity)
+            gradient = QLinearGradient(0, y, 0, self._keel_y)
+            gradient.setColorAt(0, QColor(80, 140, 230, 60))
+            gradient.setColorAt(1, QColor(80, 140, 230, 20))
             self._waterline_fill_item = self._scene.addPath(
                 fill_path,
                 QPen(Qt.PenStyle.NoPen),
-                QBrush(QColor(80, 140, 230, 40))
+                QBrush(gradient)
             )
             self._waterline_fill_item.setZValue(50)
 
@@ -621,7 +638,6 @@ class ProfileView(ShipGraphicsView):
 
     def _add_draft_marker(self, x: float, y: float, draft_value: float, label: str) -> None:
         """Add a subtle draft measurement marker with label at the specified position."""
-        # Draw a fine, cosmetic vertical line marker (no cross) so it does not dominate the profile
         marker_pen = QPen(QColor(0, 100, 200), 0)
         marker_pen.setCosmetic(True)
         marker_length = 6.0
@@ -673,7 +689,7 @@ class DeckView(ShipGraphicsView):
         self.setInteractive(True)  # Enable interaction for clickable pens
         
         self._deck_name = ""
-        self._pen_markers: dict[int, PenMarkerItem] = {}  # pen_id -> marker
+        self._pen_markers: dict[int, PenMarkerItem] = {}
         self._current_pens: list = []
         self._syncing_selection = False
         self._scene.selectionChanged.connect(self._on_selection_changed)
@@ -755,13 +771,16 @@ class DeckView(ShipGraphicsView):
         self._scene.clear()
         self._pen_markers.clear()
 
-        # Always load deck DXF first so the drawing is the background
+        # Load deck DXF first; use fraction-of-height offset so shift is visible in any DXF units
         dxf_path = _get_cad_dir() / f"deck_{deck_name}.dxf"
-        _load_dxf_into_scene(dxf_path, self._scene)
+        _load_dxf_into_scene(dxf_path, self._scene, y_offset=0.0)
+        bounds = self._scene.itemsBoundingRect()
+        y_offset = -bounds.height() * POLYLINE_Y_OFFSET_FRACTION if POLYLINE_Y_OFFSET_FRACTION else 0.0
+        if y_offset != 0.0:
+            self._scene.clear()
+            _load_dxf_into_scene(dxf_path, self._scene, y_offset=y_offset)
 
-        # Add tank polylines on top (same coordinate system as DXF so they match)
-        # Draw with the same thin dark gray line as the DXF so they look like
-        # part of the original drawing until a tank is hovered/selected.
+        # Add tank polylines on top with same y_offset so they align with the deck DXF
         deck_tanks = []
         if tanks:
             for t in tanks:
@@ -771,7 +790,7 @@ class DeckView(ShipGraphicsView):
                     deck_tanks.append(t)
 
         for tank in deck_tanks:
-            path = _outline_to_path(tank.outline_xy)
+            path = _outline_to_path(tank.outline_xy, y_offset=y_offset)
             item = TankPolygonItem(tank.id or -1, path)
             self._scene.addItem(item)
 
@@ -852,7 +871,7 @@ class DeckView(ShipGraphicsView):
 
             rect = QRectF(x_center - size / 2, y_center - size / 2, size, size)
             marker = PenMarkerItem(pen.id, rect)
-            marker.setZValue(50)  # Above DXF lines
+            marker.setZValue(50)
             self._pen_markers[pen.id] = marker
             self._scene.addItem(marker)
 
@@ -963,15 +982,10 @@ class DeckProfileWidget(QWidget):
             self._deck_tabs.addTab(tab_widget, f"Deck {deck_letter}")
             tab_widget._deck_view.tank_selected.connect(self.tank_selected.emit)
             tab_widget._deck_view.selection_changed.connect(self._on_deck_view_selection_changed)
-        
-        # Connect profile view pen selection
+
         self._profile_view.pen_selection_changed.connect(self._on_profile_selection_changed)
-
         self._syncing_selection = False
-
         main_layout.addWidget(self._deck_tabs, 45)
-
-        # Wire tab changes
         self._deck_tabs.currentChanged.connect(self._on_tab_changed)
 
     def _on_tab_changed(self, index: int) -> None:
@@ -981,7 +995,6 @@ class DeckProfileWidget(QWidget):
             if isinstance(tab_widget, DeckTabWidget):
                 deck_name = tab_widget._deck_name
                 self.deck_changed.emit(deck_name)
-                # Fit deck drawing to section once tab has its size (fixes small drawing)
                 QTimer.singleShot(50, tab_widget._deck_view.fit_to_view)
 
     def update_tables(self, pens: list, tanks: list) -> None:
