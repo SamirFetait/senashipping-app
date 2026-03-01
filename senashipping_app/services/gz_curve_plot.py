@@ -142,7 +142,7 @@ def compute_gz_curve(
     kg: float,
     kn_table: dict[float, float],
     *,
-    angle_step_deg: float = 1.0,
+    angle_step_deg: float = 0.25,
     angle_max_deg: float = 90.0,
 ) -> tuple[list[float], list[float]]:
     """
@@ -151,7 +151,7 @@ def compute_gz_curve(
     Args:
         kg: Centre of gravity height (m).
         kn_table: Dictionary mapping heel angle (deg) → KN (m).
-        angle_step_deg: Heel angle step (default 1°).
+        angle_step_deg: Heel angle step (default 0.25° for smooth curve from table).
         angle_max_deg: Maximum heel angle (default 90°).
 
     Returns:
@@ -178,7 +178,7 @@ def compute_gz_curve_stats(
     kg: float,
     kn_table: dict[float, float],
     *,
-    angle_step_deg: float = 1.0,
+    angle_step_deg: float = 0.25,
     angle_max_deg: float = 90.0,
 ) -> tuple[list[float], list[float], float, float, float, float]:
     """
@@ -222,7 +222,8 @@ def compute_gz_curve_stats(
 
 # ---- KN table from Excel (self-contained, no kn_curves dependency) ----
 
-_KN_TABLE_CACHE: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}  # sheet_name -> (displacements, angles, matrix)
+# sheet_name -> ((disp, heel, kz_matrix), file_mtime) so we reload when Excel is edited
+_KN_TABLE_CACHE: dict[str, tuple[tuple[np.ndarray, np.ndarray, np.ndarray], float]] = {}
 
 
 def _get_kz_tables_path() -> Path | None:
@@ -397,12 +398,19 @@ def get_kn_table_dict(displacement_t: float, trim_m: float = 0.0) -> dict[float,
     sheet_name = _sheet_name_for_trim(path, trim_m)
     if sheet_name is None:
         return None
-    if sheet_name not in _KN_TABLE_CACHE:
+    try:
+        current_mtime = path.stat().st_mtime
+    except OSError:
+        current_mtime = 0.0
+    cached = _KN_TABLE_CACHE.get(sheet_name)
+    if cached is None or cached[1] != current_mtime:
         data = _load_kn_matrix(sheet_name, path)
         if data is None:
             return None
-        _KN_TABLE_CACHE[sheet_name] = data
-    disp, heel, kz = _KN_TABLE_CACHE[sheet_name]
+        _KN_TABLE_CACHE[sheet_name] = (data, current_mtime)
+        disp, heel, kz = data
+    else:
+        disp, heel, kz = cached[0]
     if disp.size == 0 or heel.size == 0:
         return None
 
@@ -443,44 +451,91 @@ def make_kn_function(kn_table: dict[float, float]) -> Callable[[float], float]:
     return lambda angle_deg: _interp_kn(angle_deg, kn_table)
 
 
+def _sanitize_for_spline(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Remove NaN, sort by x, and merge duplicate x so spline interpolators don't fail."""
+    mask = np.isfinite(x) & np.isfinite(y)
+    if not np.all(mask):
+        x, y = x[mask].copy(), y[mask].copy()
+    if len(x) < 2:
+        return x, y
+    order = np.argsort(x)
+    x = x[order]
+    y = y[order]
+    # Keep unique x (first y per x)
+    _, idx = np.unique(x, return_index=True)
+    idx = np.sort(idx)
+    x = x[idx]
+    y = y[idx]
+    return x, y
+
+
+def _knot_points_for_smooth_display(
+    x: np.ndarray, y: np.ndarray, knot_spacing_deg: float = 2.0
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Reduce to ~45 knot points (e.g. every 2°) so the spline draws a smooth curve
+    instead of following piecewise-linear segments from a sparse table.
+    """
+    x_end = float(x[-1])
+    if x_end <= 0:
+        return x, y
+    knot_angles = np.arange(0.0, x_end + 0.5 * knot_spacing_deg, knot_spacing_deg)
+    if len(knot_angles) < 3:
+        return x, y
+    knot_gz = np.interp(knot_angles, x, y)
+    return knot_angles, knot_gz
+
+
 def _smooth_display_points(
-    x: np.ndarray, y: np.ndarray, num_points: int = 400
+    x: np.ndarray, y: np.ndarray, num_points: int = 1200
 ) -> tuple[np.ndarray, np.ndarray]:
     """Dense points for smooth curve display only; stats still from raw (x, y)."""
     if len(x) < 2 or len(x) != len(y):
         return x, y
     # For display, stop at last positive GZ so we don't draw a flat segment on the zero axis
-    x_use = x
-    y_use = y
-    if np.any(y > 0.0):
-        pos_idx = np.where(y > 0.0)[0]
+    x_use = np.asarray(x, dtype=float)
+    y_use = np.asarray(y, dtype=float)
+    if np.any(y_use > 0.0):
+        pos_idx = np.where(y_use > 0.0)[0]
         last_pos = int(pos_idx[-1])
-        x_use = x[: last_pos + 1]
-        y_use = y[: last_pos + 1]
+        x_use = x_use[: last_pos + 1]
+        y_use = y_use[: last_pos + 1]
+    x_use, y_use = _sanitize_for_spline(x_use, y_use)
+    if len(x_use) < 2:
+        return x, y
+    # Use ~45 knot points (every 2°) so the spline draws a smooth curve even when
+    # the table has only 10 angles (0,10,...,90) and raw data is piecewise linear
+    x_knot, y_knot = _knot_points_for_smooth_display(x_use, y_use, knot_spacing_deg=2.0)
     x_fine = np.linspace(float(x_use[0]), float(x_use[-1]), num_points)
-    # Prefer shape-preserving Pchip, then cubic spline, then cubic interp1d
+    # Prefer shape-preserving Pchip, then cubic spline (smooth curve from ~45 knots)
     try:
         from scipy.interpolate import PchipInterpolator
-        interp = PchipInterpolator(x_use, y_use)
+        interp = PchipInterpolator(x_knot, y_knot)
         y_fine = np.maximum(0.0, interp(x_fine))
+        _LOG.info("GZ curve: smooth interpolation (Pchip), %d knots -> %d points", len(x_knot), len(x_fine))
         return x_fine, y_fine
-    except Exception:
-        pass
+    except Exception as e:
+        _LOG.debug("Pchip failed for GZ smooth display: %s", e)
     try:
         from scipy.interpolate import CubicSpline
-        cs = CubicSpline(x_use, y_use)
+        cs = CubicSpline(x_knot, y_knot)
         y_fine = np.maximum(0.0, cs(x_fine))
+        _LOG.info("GZ curve: smooth interpolation (CubicSpline), %d knots -> %d points", len(x_knot), len(x_fine))
         return x_fine, y_fine
-    except Exception:
-        pass
+    except Exception as e:
+        _LOG.debug("CubicSpline failed for GZ smooth display: %s", e)
     try:
         from scipy.interpolate import interp1d
-        f = interp1d(x_use, y_use, kind="cubic", bounds_error=False, fill_value=(y_use[0], y_use[-1]))
+        f = interp1d(x_knot, y_knot, kind="cubic", bounds_error=False, fill_value=(y_knot[0], y_knot[-1]))
         y_fine = np.maximum(0.0, f(x_fine))
+        _LOG.info("GZ curve: smooth interpolation (cubic interp1d), %d knots -> %d points", len(x_knot), len(x_fine))
         return x_fine, y_fine
-    except Exception:
-        pass
-    # Dense linear interpolation so line looks less jagged
+    except Exception as e:
+        _LOG.debug("interp1d cubic failed for GZ smooth display: %s", e)
+    # Fallback: dense linear; install scipy for a smooth curve
+    _LOG.warning(
+        "GZ curve: piecewise linear (no scipy). Install scipy for smooth curve: pip install scipy"
+    )
     y_fine = np.maximum(0.0, np.interp(x_fine, x_use, y_use))
     return x_fine, y_fine
 
@@ -532,8 +587,8 @@ def plot_gz_curve(
         y_shade = np.maximum(0.0, y_plot[mask])
         ax.fill_between(x_shade, 0, y_shade, color="steelblue", alpha=0.25, label="Stability energy")
 
-    # Curve (smooth line for display when requested)
-    ax.plot(x_plot, y_plot, color="#2c3e50", linewidth=2, label="GZ")
+    # Curve (smooth line for display when requested; antialiased for clean rendering)
+    ax.plot(x_plot, y_plot, color="#2c3e50", linewidth=2, label="GZ", antialiased=True)
 
     # Mark max GZ point
     if show_max_marker and len(y) > 0:

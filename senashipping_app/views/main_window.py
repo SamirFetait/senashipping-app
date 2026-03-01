@@ -133,6 +133,9 @@ class MainWindow(QMainWindow):
             curves=curves_idx,
         )
 
+        # Store last condition so Curves tab can refresh when switched to (no recompute needed)
+        self._last_condition_payload: tuple[object, object, object, object] | None = None
+
         # Wire condition editor to results and curves views
         self._condition_editor.condition_computed.connect(
             self._results_view.update_results
@@ -140,6 +143,7 @@ class MainWindow(QMainWindow):
         self._condition_editor.condition_computed.connect(
             self._curves_view.update_curve
         )
+        self._condition_editor.condition_computed.connect(self._on_condition_computed)
         # Save Condition button (no voyage): trigger File → Save / Save As
         self._condition_editor.save_condition_requested.connect(self._on_save)
 
@@ -686,9 +690,23 @@ class MainWindow(QMainWindow):
         menu_bar = self.menuBar()
         menu_bar.setCornerWidget(status_widget, Qt.Corner.TopRightCorner)
 
+    def _on_condition_computed(
+        self,
+        results: object,
+        ship: object,
+        condition: object,
+        voyage: object,
+    ) -> None:
+        """Store last computed condition so Curves/Results can refresh when switching tabs."""
+        self._last_condition_payload = (results, ship, condition, voyage)
+
     def _switch_page(self, index: int, status_message: str) -> None:
         self._stack.setCurrentIndex(index)
         self._status_bar.showMessage(status_message)
+
+        # When switching to Curves, refresh with last condition so curve is up to date
+        if index == self._page_indexes.curves and self._last_condition_payload is not None:
+            self._curves_view.update_curve(*self._last_condition_payload)
 
         # Update toolbar checked state (Loading Condition / Results / Curves have nav buttons)
         for idx, action in self._nav_actions.items():
