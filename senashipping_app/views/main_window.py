@@ -4,6 +4,9 @@ Qt main window for the senashipping desktop app.
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
 import tempfile
 import urllib.parse
 from dataclasses import dataclass
@@ -30,6 +33,13 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QDialog,
     QPlainTextEdit,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QCheckBox,
+    QScrollArea,
+    QGridLayout,
+    QAbstractItemView,
 )
 
 from typing import Dict
@@ -51,6 +61,7 @@ from senashipping_app.views.condition_editor_view import ConditionEditorView
 from senashipping_app.views.results_view import ResultsView
 from senashipping_app.views.cargo_library_dialog import CargoLibraryDialog
 from senashipping_app.views.curves_view import CurvesView
+from senashipping_app.services import historian_service
 
 
 @dataclass
@@ -471,59 +482,42 @@ class MainWindow(QMainWindow):
 
         # Historian Menu actions
         take_snapshot_action = QAction("Take Snapshot", self)
-        take_snapshot_action.triggered.connect(
-            lambda: self._status_bar.showMessage("Take Snapshot")
-        )
-
+        take_snapshot_action.triggered.connect(self._on_take_snapshot)
         historian_menu.addAction(take_snapshot_action)
 
         historian_menu.addSeparator()
 
         field_selection_action = QAction("Field Selection...", self)
-        field_selection_action.triggered.connect(
-            lambda: self._status_bar.showMessage("Field Selection")
-        )
-
+        field_selection_action.triggered.connect(self._on_historian_field_selection)
         historian_menu.addAction(field_selection_action)
+
         visualize_date_action = QAction("Visualize Data...", self)
-        visualize_date_action.triggered.connect(
-            lambda: self._status_bar.showMessage("Visualize Data")
-        )
+        visualize_date_action.triggered.connect(self._on_historian_visualize)
         historian_menu.addAction(visualize_date_action)
 
         export_data_action = QAction("Export Data...", self)
-        export_data_action.triggered.connect(
-            lambda: self._status_bar.showMessage("Export Data")
-        )
+        export_data_action.triggered.connect(self._on_historian_export)
         historian_menu.addAction(export_data_action)
 
         # Help menu
 
         vessel_documentation_action = QAction("Vessel Documentation", self)
-        vessel_documentation_action.triggered.connect(
-            lambda: self._status_bar.showMessage("Vessel Documentation")
-        )
+        vessel_documentation_action.triggered.connect(self._open_vessel_documentation)
         help_menu.addAction(vessel_documentation_action)
 
         help_menu.addSeparator()
 
         help_contents_action = QAction("Help Contents", self)
-        help_contents_action.triggered.connect(
-            lambda: self._status_bar.showMessage("Help Contents")
-        )
+        help_contents_action.triggered.connect(self._show_help_contents)
         help_menu.addAction(help_contents_action)
         help_contents_action.setShortcut("F1")
 
         sena_website_action = QAction("Sena Website", self)
-        sena_website_action.triggered.connect(
-            lambda: self._status_bar.showMessage("Sena Website")
-        )
+        sena_website_action.triggered.connect(self._open_sena_website)
         help_menu.addAction(sena_website_action)
 
         show_program_log_action = QAction("Show Program Log", self)
-        show_program_log_action.triggered.connect(
-            lambda: self._status_bar.showMessage("Show Program Log")
-        )
+        show_program_log_action.triggered.connect(self._show_program_log)
         help_menu.addAction(show_program_log_action)
 
         help_menu.addSeparator()
@@ -1322,6 +1316,162 @@ class MainWindow(QMainWindow):
                 f"Failed to export Excel file:\n{str(e)}"
             )
 
+    def _on_take_snapshot(self) -> None:
+        """Save current calculation result as a historian snapshot (Historian → Take Snapshot)."""
+        if not hasattr(self._results_view, "_last_results") or not self._results_view._last_results:
+            QMessageBox.information(
+                self,
+                "Take Snapshot",
+                "Compute a condition first, then use Take Snapshot to save it to the historian.",
+            )
+            if self._stack.currentIndex() != self._page_indexes.condition_editor:
+                self._switch_page(self._page_indexes.condition_editor, "Loading Condition")
+            return
+        snapshot = getattr(self._results_view._last_results, "snapshot", None)
+        if not snapshot or not hasattr(snapshot, "to_dict"):
+            QMessageBox.information(
+                self,
+                "Take Snapshot",
+                "No traceability snapshot available for the last calculation.",
+            )
+            return
+        data_dir = self._settings.data_dir
+        try:
+            sid = historian_service.save_snapshot(data_dir, snapshot.to_dict())
+            self._status_bar.showMessage(f"Snapshot saved (id: {sid})", 4000)
+            QMessageBox.information(
+                self,
+                "Take Snapshot",
+                "Current calculation has been saved to the historian.",
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Take Snapshot",
+                f"Could not save snapshot:\n{e}",
+            )
+
+    def _on_historian_field_selection(self) -> None:
+        """Open dialog to choose which fields to show in Historian view/export."""
+        data_dir = self._settings.data_dir
+        selected = historian_service.load_field_selection(data_dir)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Historian – Field Selection")
+        QShortcut(Qt.Key.Key_Escape, dlg, activated=dlg.reject)
+        layout = QVBoxLayout(dlg)
+        scroll = QScrollArea(dlg)
+        scroll.setWidgetResizable(True)
+        scroll_w = QWidget()
+        grid = QGridLayout(scroll_w)
+        checks = {}
+        for i, field in enumerate(historian_service.HISTORIAN_ALL_FIELDS):
+            cb = QCheckBox(field.replace("_", " ").title(), dlg)
+            cb.setChecked(field in selected)
+            checks[field] = cb
+            grid.addWidget(cb, i // 3, i % 3)
+        scroll.setWidget(scroll_w)
+        layout.addWidget(scroll)
+        ok_btn = QPushButton("OK", dlg)
+        cancel_btn = QPushButton("Cancel", dlg)
+
+        def save_and_accept() -> None:
+            chosen = [f for f, cb in checks.items() if cb.isChecked()]
+            if chosen:
+                historian_service.save_field_selection(data_dir, chosen)
+            dlg.accept()
+
+        ok_btn.clicked.connect(save_and_accept)
+        cancel_btn.clicked.connect(dlg.reject)
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+        dlg.exec()
+        self._status_bar.showMessage("Historian field selection", 2000)
+
+    def _on_historian_visualize(self) -> None:
+        """Show historian snapshots in a table (Historian → Visualize Data)."""
+        data_dir = self._settings.data_dir
+        snapshots = historian_service.load_snapshots(data_dir)
+        columns = historian_service.load_field_selection(data_dir)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Historian – Visualize Data")
+        dlg.setMinimumSize(700, 400)
+        QShortcut(Qt.Key.Key_Escape, dlg, activated=dlg.reject)
+        layout = QVBoxLayout(dlg)
+        table = QTableWidget(dlg)
+        table.setColumnCount(len(columns))
+        table.setHorizontalHeaderLabels([c.replace("_", " ").title() for c in columns])
+        table.setRowCount(len(snapshots))
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        for row, snap in enumerate(snapshots):
+            row_data = historian_service.snapshot_to_flat_row(snap, columns)
+            for col, key in enumerate(columns):
+                val = row_data.get(key, "")
+                if val is None:
+                    val = ""
+                if isinstance(val, dict):
+                    val = json.dumps(val)[:80]
+                table.setItem(row, col, QTableWidgetItem(str(val)))
+        layout.addWidget(table)
+        ok_btn = QPushButton("OK", dlg)
+        ok_btn.clicked.connect(dlg.accept)
+        layout.addWidget(ok_btn)
+        dlg.exec()
+        self._status_bar.showMessage(f"Historian: {len(snapshots)} snapshot(s)", 2000)
+
+    def _on_historian_export(self) -> None:
+        """Export historian snapshots to CSV (Historian → Export Data)."""
+        data_dir = self._settings.data_dir
+        snapshots = historian_service.load_snapshots(data_dir)
+        if not snapshots:
+            QMessageBox.information(
+                self,
+                "Export Data",
+                "No historian snapshots. Use Take Snapshot after computing a condition.",
+            )
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Historian Data",
+            str(Path.home() / "historian_export.csv"),
+            "CSV Files (*.csv);;All Files (*)",
+        )
+        if not path:
+            return
+        if not path.endswith(".csv"):
+            path += ".csv"
+        columns = historian_service.load_field_selection(data_dir)
+        try:
+            import csv
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(columns)
+                for snap in snapshots:
+                    row_data = historian_service.snapshot_to_flat_row(snap, columns)
+                    row = []
+                    for c in columns:
+                        v = row_data.get(c, "")
+                        if isinstance(v, dict):
+                            v = json.dumps(v)
+                        row.append(v if v is not None else "")
+                    writer.writerow(row)
+            self._status_bar.showMessage(f"Exported to {Path(path).name}", 3000)
+            QMessageBox.information(
+                self,
+                "Export Data",
+                f"Exported {len(snapshots)} snapshot(s) to\n{path}",
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Export Data",
+                f"Could not export:\n{e}",
+            )
+
     def _on_summary_info(self) -> None:
         """Show a brief summary dialog for the current ship."""
         cond_editor = self._condition_editor
@@ -1540,12 +1690,117 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Alarms", "Viewing alarm status. Check the Results tab for details.")
 
     def _on_log_clicked(self) -> None:
-        """Handle log button click."""
-        QMessageBox.information(self, "Program Log", "Program log viewer - coming soon")
+        """Handle log button click - show program log."""
+        self._show_program_log()
 
     def _on_offline_clicked(self) -> None:
         """Handle offline button click."""
         QMessageBox.information(self, "Offline Mode", "Offline mode - coming soon")
+
+    def _open_vessel_documentation(self) -> None:
+        """Open vessel documentation PDF (MV OSAMA BEY Ship's Particulars) in default viewer.
+        Copies to a temp file before opening so it works when the app is frozen (PyInstaller);
+        the system viewer gets a normal path instead of one inside the extract folder.
+        """
+        pdf_path = self._settings.project_root / "assets" / "MV OSAMA BEY- Ship's Particulars.pdf"
+        if not pdf_path.exists():
+            QMessageBox.warning(
+                self,
+                "Vessel Documentation",
+                f"Reference file not found:\n{pdf_path}",
+            )
+            return
+        try:
+            fd, tmp_path = tempfile.mkstemp(suffix=".pdf", prefix="senashipping_vessel_")
+            os.close(fd)
+            shutil.copy2(pdf_path, tmp_path)
+            url = QUrl.fromLocalFile(tmp_path)
+            if not QDesktopServices.openUrl(url):
+                QMessageBox.warning(
+                    self,
+                    "Vessel Documentation",
+                    "Could not open the PDF. Check that a default viewer is set.",
+                )
+        except OSError as e:
+            QMessageBox.warning(
+                self,
+                "Vessel Documentation",
+                f"Could not prepare PDF for viewing: {e}",
+            )
+
+    def _show_help_contents(self) -> None:
+        """Show USER_GUIDE.md in a read-only dialog."""
+        guide_path = self._settings.project_root / "USER_GUIDE.md"
+        if not guide_path.exists():
+            QMessageBox.warning(
+                self,
+                "Help Contents",
+                f"User guide not found:\n{guide_path}",
+            )
+            return
+        try:
+            text = guide_path.read_text(encoding="utf-8")
+        except OSError as e:
+            QMessageBox.warning(
+                self,
+                "Help Contents",
+                f"Could not read user guide: {e}",
+            )
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("User Guide")
+        dlg.setMinimumSize(700, 500)
+        layout = QVBoxLayout(dlg)
+        view = QPlainTextEdit(dlg)
+        view.setPlainText(text)
+        view.setReadOnly(True)
+        layout.addWidget(view)
+        close_btn = QPushButton("Close", dlg)
+        close_btn.clicked.connect(dlg.accept)
+        layout.addWidget(close_btn)
+        dlg.exec()
+
+    def _show_program_log(self) -> None:
+        """Show program log file (senashipping.log) in a read-only dialog."""
+        log_path = self._settings.data_dir / "senashipping.log"
+        if not log_path.exists():
+            QMessageBox.information(
+                self,
+                "Program Log",
+                f"Log file not found yet:\n{log_path}\n\nIt will be created when the app has written log output.",
+            )
+            return
+        try:
+            text = log_path.read_text(encoding="utf-8")
+        except OSError as e:
+            QMessageBox.warning(
+                self,
+                "Program Log",
+                f"Could not read log file: {e}",
+            )
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Program Log")
+        dlg.setMinimumSize(700, 400)
+        layout = QVBoxLayout(dlg)
+        view = QPlainTextEdit(dlg)
+        view.setPlainText(text)
+        view.setReadOnly(True)
+        layout.addWidget(view)
+        close_btn = QPushButton("Close", dlg)
+        close_btn.clicked.connect(dlg.accept)
+        layout.addWidget(close_btn)
+        dlg.exec()
+
+    def _open_sena_website(self) -> None:
+        """Open Sena Shipping website in default browser."""
+        url = QUrl("https://senashipping.com/")
+        if not QDesktopServices.openUrl(url):
+            QMessageBox.warning(
+                self,
+                "Sena Website",
+                "Could not open the default browser.",
+            )
 
     def _show_about(self) -> None:
         """Show about dialog."""
