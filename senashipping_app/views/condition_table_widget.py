@@ -880,6 +880,7 @@ class ConditionTableWidget(QWidget):
         # Preserve all editable data from tables before clearing
         preserved_cargo_selections: Dict[int, str] = {}  # pen_id -> cargo_name
         preserved_head_counts: Dict[int, int] = {}  # pen_id -> head_count
+        preserved_avw_weight: Dict[int, Tuple[float, float]] = {}  # pen_id -> (mass_per_head_t, weight_mt)
         preserved_tank_weights: Dict[int, float] = {}  # tank_id -> weight_mt
         
         # Preserve livestock pen data (cargo and head counts)
@@ -914,6 +915,26 @@ class ConditionTableWidget(QWidget):
                                 preserved_head_counts[pen_id] = head_count
                         except (ValueError, TypeError):
                             pass
+                    
+                    # Preserve AvW/Head MT (col 8) and Weight MT (col 9) for decks 1-7 so Compute does not reset them
+                    if deck_num != 8 and table.columnCount() >= 10:
+                        avw_item = table.item(row, 8)
+                        weight_item = table.item(row, 9)
+                        if avw_item and weight_item:
+                            try:
+                                avw = float(avw_item.text() or "0")
+                                wmt = float(weight_item.text() or "0")
+                                if avw > 0 or wmt > 0:
+                                    preserved_avw_weight[pen_id] = (avw, wmt)
+                            except (ValueError, TypeError):
+                                pass
+        
+        # On "New condition" (empty loadings and volumes), do not restore previous state
+        if not pen_loadings and not tank_volumes:
+            preserved_cargo_selections.clear()
+            preserved_head_counts.clear()
+            preserved_avw_weight.clear()
+            preserved_tank_weights.clear()
         
         # Preserve tank weights from all tank category tables
         tank_category_tabs = [
@@ -989,6 +1010,7 @@ class ConditionTableWidget(QWidget):
                     cargo_types=self._current_cargo_types,
                     preserved_cargo_selections=preserved_cargo_selections,
                     preserved_head_counts=preserved_head_counts,
+                    preserved_avw_weight=preserved_avw_weight,
                 )
             
         # Update tank category tabs (store ullage/FSM so row recalc can re-apply when weight changes)
@@ -1029,6 +1051,7 @@ class ConditionTableWidget(QWidget):
         cargo_types: Optional[List[Any]] = None,
         preserved_cargo_selections: Optional[Dict[int, str]] = None,
         preserved_head_counts: Optional[Dict[int, int]] = None,
+        preserved_avw_weight: Optional[Dict[int, Tuple[float, float]]] = None,
     ) -> None:
         """Populate a livestock deck tab with pens for that deck. Cargo dropdown + dynamic recalc when Cargo or # Head changes."""
         table = self._table_widgets.get(tab_name)
@@ -1059,7 +1082,9 @@ class ConditionTableWidget(QWidget):
             else:
                 initial_heads = pen_loadings.get(pen_id, 0)
             
-            if area_per_head_from_cargo is not None:
+            if cargo_name == "-- Blank --":
+                area_per_head = 0.0
+            elif area_per_head_from_cargo is not None:
                 area_per_head = area_per_head_from_cargo
             else:
                 # Use cargo's area_per_head if available, otherwise calculate from initial heads
@@ -1119,7 +1144,14 @@ class ConditionTableWidget(QWidget):
             head_pct = (heads / head_capacity * 100.0) if head_capacity > 0 else 0.0
             
             weight_mt = heads * mass_per_head_t
-            total_weight += weight_mt
+            display_avw = mass_per_head_t
+            display_weight = weight_mt
+            if preserved_avw_weight and pen_id in preserved_avw_weight:
+                prev_avw, prev_weight = preserved_avw_weight[pen_id]
+                if prev_avw > 0 or prev_weight > 0:
+                    display_avw = prev_avw
+                    display_weight = prev_weight
+            total_weight += display_weight
             total_area_used += area_used
             total_area += pen.area_m2
             
@@ -1128,8 +1160,8 @@ class ConditionTableWidget(QWidget):
             vcg_from_deck = (getattr(ct_sel, "vcg_from_deck_m", 0) or 0) if ct_sel else 0.0
             vcg_display = pen.vcg_m + vcg_from_deck
             
-            # LS Moment (m-MT) = Weight (MT) ├ù LCG (m)
-            lcg_moment = weight_mt * pen.lcg_m
+            # LS Moment (m-MT) = Weight (MT) × LCG (m); use display_weight when preserved
+            lcg_moment = display_weight * pen.lcg_m
             
             name_item = QTableWidgetItem(pen.name)
             name_item.setData(Qt.ItemDataRole.UserRole, pen.id)
@@ -1186,12 +1218,11 @@ class ConditionTableWidget(QWidget):
             area_per_head_item = QTableWidgetItem(f"{area_per_head:.2f}")
             area_per_head_item.setFlags(area_per_head_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 7, area_per_head_item)
-            # AvW/Head MT (col 8) - from cargo type, read-only
-            mass_item = QTableWidgetItem(f"{mass_per_head_t:.2f}")
+            # AvW/Head MT (col 8) and Weight MT (col 9) - use display_avw/display_weight (already set above, preserves on Compute)
+            mass_item = QTableWidgetItem(f"{display_avw:.2f}")
             mass_item.setFlags(mass_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 8, mass_item)
-            # Weight MT (col 9) - calculated, read-only
-            weight_item = QTableWidgetItem(f"{weight_mt:.2f}")
+            weight_item = QTableWidgetItem(f"{display_weight:.2f}")
             weight_item.setFlags(weight_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 9, weight_item)
             # VCG m-BL (col 10) - calculated, read-only
