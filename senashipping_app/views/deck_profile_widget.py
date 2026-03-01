@@ -11,7 +11,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFrame,
     QLabel,
     QGraphicsScene,
@@ -314,9 +313,9 @@ class ProfileView(ShipGraphicsView):
         self._current_tanks: list = []
         self._show_tanks = True
         self._syncing_selection = False
-        # Runtime pen/tank offset (applied on top of constants); no restart needed
-        self._pen_offset_x = 0.0
-        self._pen_offset_y = 0.0
+        # Default pen/tank offset so they align with DXF (X: 10, Y up: 3.6)
+        self._pen_offset_x = 10.0
+        self._pen_offset_y = 3.6
 
         # Ship dimensions for scaling
         self._ship_length: float = 0.0
@@ -1287,25 +1286,6 @@ class DeckProfileWidget(QWidget):
         self._chk_tanks.setChecked(True)
         self._chk_tanks.toggled.connect(self._on_show_tanks_toggled)
         tool_layout.addWidget(self._chk_tanks)
-        tool_layout.addSpacing(16)
-        tool_layout.addWidget(QLabel("Pen offset X:"))
-        self._spin_pen_x = QDoubleSpinBox()
-        self._spin_pen_x.setRange(-500.0, 500.0)
-        self._spin_pen_x.setValue(0.0)
-        self._spin_pen_x.setDecimals(1)
-        self._spin_pen_x.setSingleStep(5.0)
-        self._spin_pen_x.setToolTip("Move pens left/right (scene units). No restart needed.")
-        self._spin_pen_x.valueChanged.connect(self._apply_pen_offset)
-        tool_layout.addWidget(self._spin_pen_x)
-        tool_layout.addWidget(QLabel("Y (up):"))
-        self._spin_pen_y = QDoubleSpinBox()
-        self._spin_pen_y.setRange(-500.0, 500.0)
-        self._spin_pen_y.setValue(0.0)
-        self._spin_pen_y.setDecimals(1)
-        self._spin_pen_y.setSingleStep(5.0)
-        self._spin_pen_y.setToolTip("Move pens up (positive) or down (negative). No restart needed.")
-        self._spin_pen_y.valueChanged.connect(self._apply_pen_offset)
-        tool_layout.addWidget(self._spin_pen_y)
         tool_layout.addStretch()
         main_layout.addWidget(toolbar)
         main_layout.addWidget(self._profile_view, 55)
@@ -1342,10 +1322,6 @@ class DeckProfileWidget(QWidget):
         self._profile_view.set_show_tanks(checked)
         for tab_widget in self._deck_tab_widgets.values():
             tab_widget._deck_view.set_show_tanks(checked)
-
-    def _apply_pen_offset(self) -> None:
-        """Apply toolbar pen offset to profile (live, no restart)."""
-        self._profile_view.set_pen_offset(self._spin_pen_x.value(), self._spin_pen_y.value())
 
     def update_tables(self, pens: list, tanks: list) -> None:
         """Update all deck tab tables with current pens/tanks data."""

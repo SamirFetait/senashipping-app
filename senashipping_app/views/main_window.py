@@ -4,13 +4,15 @@ Qt main window for the senashipping desktop app.
 
 from __future__ import annotations
 
+import tempfile
+import urllib.parse
 from dataclasses import dataclass
-
+from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
-from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QIcon, QDesktopServices
+from PyQt6.QtCore import Qt, QSize, QUrl
 from PyQt6.QtGui import QAction, QIcon, QActionGroup, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QMainWindow,
@@ -172,14 +174,6 @@ class MainWindow(QMainWindow):
         file_menu.addAction(open_action)
         open_action.setShortcut("Ctrl+O")
 
-        open_recent_action = QAction("&Open Recent Loading conditions ...", self)
-        open_recent_action.triggered.connect(lambda: self._status_bar.showMessage("Open Recent Loading Conditions"))
-        file_menu.addAction(open_recent_action)
-
-        open_standard_action = QAction("&Open Standard Loading conditions ...", self)
-        open_standard_action.triggered.connect(lambda: self._status_bar.showMessage("Open Standard Loading Conditions"))
-        file_menu.addAction(open_standard_action)
-
         file_menu.addSeparator()
 
         save_action = QAction("&Save Loading condition ...", self)
@@ -205,7 +199,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
 
         summary_action = QAction("&Summary Info ...", self)
-        summary_action.triggered.connect(lambda: self._status_bar.showMessage("Summary Info"))
+        summary_action.triggered.connect(self._on_summary_info)
         file_menu.addAction(summary_action)
 
         program_notes_action = QAction("&Program Notes ...", self)
@@ -213,7 +207,7 @@ class MainWindow(QMainWindow):
         file_menu.addAction(program_notes_action)
 
         send_loading_condition_by_email_action = QAction("&Send Loading condition by email ...", self)
-        send_loading_condition_by_email_action.triggered.connect(lambda: self._status_bar.showMessage("Send Loading Condition by Email"))
+        send_loading_condition_by_email_action.triggered.connect(self._on_send_loading_condition_by_email)
         file_menu.addAction(send_loading_condition_by_email_action)
 
         file_menu.addSeparator()
@@ -1328,6 +1322,66 @@ class MainWindow(QMainWindow):
                 f"Failed to export Excel file:\n{str(e)}"
             )
 
+    def _on_summary_info(self) -> None:
+        """Show a brief summary dialog for the current ship."""
+        cond_editor = self._condition_editor
+        ship = getattr(cond_editor, "_current_ship", None)
+        if not ship or not getattr(ship, "id", None):
+            self._status_bar.showMessage("Select a ship first (Tools → Ship & data setup)", 4000)
+            QMessageBox.information(
+                self,
+                "Summary Info",
+                "No ship selected.\n\nGo to Tools → Ship & data setup to select or create a ship.",
+            )
+            return
+        lines = [
+            "Ship brief",
+            "─────────",
+            f"Name: {ship.name or '—'}",
+            f"IMO: {ship.imo_number or '—'}",
+            f"Flag: {ship.flag or '—'}",
+            "",
+            "Principal dimensions",
+            "──────────────────",
+            f"Length overall: {ship.length_overall_m or 0:.2f} m",
+            f"Breadth:        {ship.breadth_m or 0:.2f} m",
+            f"Depth:          {ship.depth_m or 0:.2f} m",
+            f"Design draft:   {ship.design_draft_m or 0:.2f} m",
+            f"Lightship draft: {ship.lightship_draft_m or 0:.2f} m",
+            f"Lightship displacement: {ship.lightship_displacement_t or 0:.1f} t",
+        ]
+        if database.SessionLocal and ship.id:
+            try:
+                with database.SessionLocal() as db:
+                    from senashipping_app.services.condition_service import ConditionService
+                    cond_svc = ConditionService(db)
+                    tanks = cond_svc.get_tanks_for_ship(ship.id)
+                    pens = cond_svc.get_pens_for_ship(ship.id)
+                    lines.extend([
+                        "",
+                        "Data setup",
+                        "──────────",
+                        f"Tanks: {len(tanks)}",
+                        f"Pens (decks): {len(pens)}",
+                    ])
+            except Exception:
+                pass
+        text = "\n".join(lines)
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Summary Info – Ship brief")
+        QShortcut(Qt.Key.Key_Escape, dlg, activated=dlg.reject)
+        layout = QVBoxLayout(dlg)
+        te = QPlainTextEdit(dlg)
+        te.setPlainText(text)
+        te.setReadOnly(True)
+        te.setMinimumSize(420, 320)
+        layout.addWidget(te)
+        ok_btn = QPushButton("OK", dlg)
+        ok_btn.clicked.connect(dlg.accept)
+        layout.addWidget(ok_btn)
+        dlg.exec()
+        self._status_bar.showMessage("Summary Info", 2000)
+
     def _on_program_notes(self) -> None:
         """Show Program Notes dialog with stability manual reference and operating restrictions."""
         lines = [
@@ -1353,6 +1407,52 @@ class MainWindow(QMainWindow):
         ok_btn.clicked.connect(dlg.accept)
         layout.addWidget(ok_btn)
         dlg.exec()
+
+    def _on_send_loading_condition_by_email(self) -> None:
+        """Save the current loading condition (if needed), open default email client and the file's folder for attaching."""
+        current_widget = self._stack.currentWidget()
+        if not isinstance(current_widget, ConditionEditorView):
+            self._switch_page(self._page_indexes.condition_editor, "Loading Condition")
+            current_widget = self._stack.currentWidget()
+        if not isinstance(current_widget, ConditionEditorView):
+            self._status_bar.showMessage("Switch to Loading Condition view first", 3000)
+            return
+        # Ensure we have a file to send: use current path or save to a temp file
+        file_path = self._current_file_path
+        if not file_path:
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_path = Path(tempfile.gettempdir()) / f"loading_condition_{stamp}.senashipping"
+        else:
+            file_path = Path(file_path)
+        # Save current condition to that path
+        try:
+            self._save_to_file(file_path, current_widget)
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Send by email",
+                f"Could not save the condition:\n{str(e)}",
+            )
+            self._status_bar.showMessage("Save failed", 3000)
+            return
+        # Build mailto subject and body
+        subject = f"Loading Condition: {file_path.name}"
+        body = (
+            "Please find the loading condition file attached.\n\n"
+            f"File: {file_path}\n\n"
+            "A folder window has been opened — drag the file into your email to attach it."
+        )
+        mailto = f"mailto:?subject={urllib.parse.quote(subject)}&body={urllib.parse.quote(body)}"
+        if not QDesktopServices.openUrl(QUrl(mailto)):
+            QMessageBox.warning(
+                self,
+                "Send by email",
+                "Could not open your email client. You can attach the file manually from the folder that will open.",
+            )
+        # Open the folder containing the file so user can attach it (mailto does not support attachments)
+        folder_url = QUrl.fromLocalFile(str(file_path.resolve().parent))
+        QDesktopServices.openUrl(folder_url)
+        self._status_bar.showMessage(f"Condition saved. Attach {file_path.name} from the opened folder.", 5000)
 
     def _on_print_export(self) -> None:
         """Handle print/export action from toolbar."""

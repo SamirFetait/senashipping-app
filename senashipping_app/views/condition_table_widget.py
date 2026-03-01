@@ -877,13 +877,13 @@ class ConditionTableWidget(QWidget):
         self._current_cargo_types = cargo_types or []
         self._current_ship_id = ship_id
         
-        # Preserve all editable data from tables before clearing
+        # Preserve all editable data from tables before clearing (so Compute does not reset any column)
         preserved_cargo_selections: Dict[int, str] = {}  # pen_id -> cargo_name
         preserved_head_counts: Dict[int, int] = {}  # pen_id -> head_count
-        preserved_avw_weight: Dict[int, Tuple[float, float]] = {}  # pen_id -> (mass_per_head_t, weight_mt)
+        preserved_pen_rows: Dict[int, Dict[int, str]] = {}  # pen_id -> {col_index: cell_text} for cols 2,3,4,5,7,8,9,10,11,12,13
         preserved_tank_weights: Dict[int, float] = {}  # tank_id -> weight_mt
         
-        # Preserve livestock pen data (cargo and head counts)
+        # Preserve livestock pen data (cargo, head counts, and full row for decks 1-7)
         for deck_num in range(1, 9):
             tab_name = f"Livestock-DK{deck_num}"
             table = self._table_widgets.get(tab_name)
@@ -894,6 +894,8 @@ class ConditionTableWidget(QWidget):
                         continue
                     pen_id = name_item.data(Qt.ItemDataRole.UserRole)
                     if pen_id is None:
+                        continue
+                    if "Totals" in (name_item.text() or ""):
                         continue
                     
                     # Get cargo selection from combo box (column 1)
@@ -916,24 +918,19 @@ class ConditionTableWidget(QWidget):
                         except (ValueError, TypeError):
                             pass
                     
-                    # Preserve AvW/Head MT (col 8) and Weight MT (col 9) for decks 1-7 so Compute does not reset them
-                    if deck_num != 8 and table.columnCount() >= 10:
-                        avw_item = table.item(row, 8)
-                        weight_item = table.item(row, 9)
-                        if avw_item and weight_item:
-                            try:
-                                avw = float(avw_item.text() or "0")
-                                wmt = float(weight_item.text() or "0")
-                                if avw > 0 or wmt > 0:
-                                    preserved_avw_weight[pen_id] = (avw, wmt)
-                            except (ValueError, TypeError):
-                                pass
+                    # Preserve all data columns for decks 1-7 (2,3,4,5,7,8,9,10,11,12,13) so Compute does not reset them
+                    if deck_num != 8 and table.columnCount() >= 14:
+                        row_data: Dict[int, str] = {}
+                        for col in (2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13):
+                            item = table.item(row, col)
+                            row_data[col] = (item.text() or "0").strip() if item else "0"
+                        preserved_pen_rows[pen_id] = row_data
         
         # On "New condition" (empty loadings and volumes), do not restore previous state
         if not pen_loadings and not tank_volumes:
             preserved_cargo_selections.clear()
             preserved_head_counts.clear()
-            preserved_avw_weight.clear()
+            preserved_pen_rows.clear()
             preserved_tank_weights.clear()
         
         # Preserve tank weights from all tank category tables
@@ -1010,7 +1007,7 @@ class ConditionTableWidget(QWidget):
                     cargo_types=self._current_cargo_types,
                     preserved_cargo_selections=preserved_cargo_selections,
                     preserved_head_counts=preserved_head_counts,
-                    preserved_avw_weight=preserved_avw_weight,
+                    preserved_pen_rows=preserved_pen_rows,
                 )
             
         # Update tank category tabs (store ullage/FSM so row recalc can re-apply when weight changes)
@@ -1051,7 +1048,7 @@ class ConditionTableWidget(QWidget):
         cargo_types: Optional[List[Any]] = None,
         preserved_cargo_selections: Optional[Dict[int, str]] = None,
         preserved_head_counts: Optional[Dict[int, int]] = None,
-        preserved_avw_weight: Optional[Dict[int, Tuple[float, float]]] = None,
+        preserved_pen_rows: Optional[Dict[int, Dict[int, str]]] = None,
     ) -> None:
         """Populate a livestock deck tab with pens for that deck. Cargo dropdown + dynamic recalc when Cargo or # Head changes."""
         table = self._table_widgets.get(tab_name)
@@ -1075,93 +1072,97 @@ class ConditionTableWidget(QWidget):
             row = table.rowCount()
             table.insertRow(row)
             
-            # Check for preserved head count first, then use pen_loadings
             pen_id = pen.id or -1
-            if preserved_head_counts and pen_id in preserved_head_counts:
-                initial_heads = preserved_head_counts[pen_id]
+            pr = (preserved_pen_rows or {}).get(pen_id)
+            
+            if pr:
+                # Use full preserved row so Compute does not reset any column
+                def _f(d: Dict[int, str], c: int, default: str = "0") -> float:
+                    try:
+                        return float(d.get(c, default))
+                    except (ValueError, TypeError):
+                        return float(default) if default != "" else 0.0
+                def _i(d: Dict[int, str], c: int, default: str = "0") -> int:
+                    try:
+                        return int(float(d.get(c, default)))
+                    except (ValueError, TypeError):
+                        return 0
+                heads = _i(pr, 2)
+                head_pct = _f(pr, 3)
+                head_capacity = _i(pr, 4)
+                area_used = _f(pr, 5)
+                area_per_head = _f(pr, 7)
+                display_avw = _f(pr, 8)
+                display_weight = _f(pr, 9)
+                weight_mt = display_weight
+                vcg_display = _f(pr, 10, str(pen.vcg_m))
+                lcg_display = _f(pr, 11, str(pen.lcg_m))
+                tcg_display = _f(pr, 12, str(pen.tcg_m))
+                lcg_moment = _f(pr, 13)
+                total_weight += display_weight
+                total_area_used += area_used
+                total_area += pen.area_m2
             else:
-                initial_heads = pen_loadings.get(pen_id, 0)
-            
-            if cargo_name == "-- Blank --":
-                area_per_head = 0.0
-            elif area_per_head_from_cargo is not None:
-                area_per_head = area_per_head_from_cargo
-            else:
-                # Use cargo's area_per_head if available, otherwise calculate from initial heads
-                ct_sel = next((c for c in (cargo_types or []) if (getattr(c, "name", "") or "").strip() == cargo_name), None)
-                if ct_sel:
-                    area_per_head = getattr(ct_sel, "deck_area_per_head_m2", 1.85) or 1.85
+                # Calculate from cargo/loadings
+                if preserved_head_counts and pen_id in preserved_head_counts:
+                    initial_heads = preserved_head_counts[pen_id]
                 else:
-                    area_per_head = pen.area_m2 / initial_heads if initial_heads > 0 else 1.85
-            
-            # Calculate maximum heads based on area constraint: max_heads = floor(Total Area / Area per Head)
-            max_heads_by_area = 0
-            if area_per_head > 0:
-                max_heads_by_area = int(pen.area_m2 / area_per_head)
-            
-            # Calculate maximum heads based on capacity constraint
-            max_heads_by_capacity = int(pen.capacity_head) if pen.capacity_head > 0 else max_heads_by_area
-            
-            # Use preserved head count if available, otherwise calculate based on cargo
-            # If cargo is "-- Blank --", keep heads at 0 and set head capacity to 0
-            # Check cargo_name from the function parameter
-            if preserved_head_counts and pen_id in preserved_head_counts:
-                # Use preserved head count
-                heads = preserved_head_counts[pen_id]
-                # Calculate area used based on preserved heads
-                if area_per_head > 0:
-                    area_used = heads * area_per_head
-                    area_used = min(area_used, pen.area_m2)  # Cap at total area
-                    head_capacity = int(pen.area_m2 / area_per_head) if area_per_head > 0 else 0
+                    initial_heads = pen_loadings.get(pen_id, 0)
+                
+                if cargo_name == "-- Blank --":
+                    area_per_head = 0.0
+                elif area_per_head_from_cargo is not None:
+                    area_per_head = area_per_head_from_cargo
                 else:
-                    area_used = 0.0
+                    # Use cargo's area_per_head if available, otherwise calculate from initial heads
+                    ct_sel = next((c for c in (cargo_types or []) if (getattr(c, "name", "") or "").strip() == cargo_name), None)
+                    if ct_sel:
+                        area_per_head = getattr(ct_sel, "deck_area_per_head_m2", 1.85) or 1.85
+                    else:
+                        area_per_head = pen.area_m2 / initial_heads if initial_heads > 0 else 1.85
+                
+                # Calculate maximum heads based on area constraint
+                max_heads_by_area = int(pen.area_m2 / area_per_head) if area_per_head > 0 else 0
+                max_heads_by_capacity = int(pen.capacity_head) if pen.capacity_head > 0 else max_heads_by_area
+                
+                if preserved_head_counts and pen_id in preserved_head_counts:
+                    heads = preserved_head_counts[pen_id]
+                    if area_per_head > 0:
+                        area_used = min(heads * area_per_head, pen.area_m2)
+                        head_capacity = int(pen.area_m2 / area_per_head)
+                    else:
+                        area_used = 0.0
+                        head_capacity = 0
+                elif cargo_name == "-- Blank --":
+                    heads = 0
                     head_capacity = 0
-            elif cargo_name == "-- Blank --":
-                heads = 0
-                head_capacity = 0
-                area_used = 0.0
-            else:
-                # Set heads to maximum (minimum of area-based and capacity-based maximums)
-                # This auto-selects the maximum as default, but column remains editable
-                if max_heads_by_area > 0 and max_heads_by_capacity > 0:
-                    heads = min(max_heads_by_area, max_heads_by_capacity)
-                elif max_heads_by_area > 0:
-                    heads = max_heads_by_area
-                elif max_heads_by_capacity > 0:
-                    heads = max_heads_by_capacity
+                    area_used = 0.0
                 else:
-                    heads = initial_heads  # Fallback to initial value if no constraints
+                    if max_heads_by_area > 0 and max_heads_by_capacity > 0:
+                        heads = min(max_heads_by_area, max_heads_by_capacity)
+                    elif max_heads_by_area > 0:
+                        heads = max_heads_by_area
+                    elif max_heads_by_capacity > 0:
+                        heads = max_heads_by_capacity
+                    else:
+                        heads = initial_heads
+                    area_used = min(heads * area_per_head, pen.area_m2) if heads > 0 else 0.0
+                    head_capacity = int(pen.area_m2 / area_per_head) if area_per_head > 0 else 0
                 
-                # Calculate Used Area (will be ≤ Total Area due to capping)
-                area_used = heads * area_per_head if heads > 0 else 0.0
-                # Ensure Used Area ≤ Total Area (safety check)
-                area_used = min(area_used, pen.area_m2)
+                head_pct = (heads / head_capacity * 100.0) if head_capacity > 0 else 0.0
+                weight_mt = heads * mass_per_head_t
+                display_avw = mass_per_head_t
+                display_weight = weight_mt
+                total_weight += display_weight
+                total_area_used += area_used
+                total_area += pen.area_m2
                 
-                # Head Capacity = Total Area / Area per Head (max capacity based on area), floored to integer
-                head_capacity = int(pen.area_m2 / area_per_head) if area_per_head > 0 else 0
-            
-            # Head %Full = (Head / Head Capacity) * 100
-            head_pct = (heads / head_capacity * 100.0) if head_capacity > 0 else 0.0
-            
-            weight_mt = heads * mass_per_head_t
-            display_avw = mass_per_head_t
-            display_weight = weight_mt
-            if preserved_avw_weight and pen_id in preserved_avw_weight:
-                prev_avw, prev_weight = preserved_avw_weight[pen_id]
-                if prev_avw > 0 or prev_weight > 0:
-                    display_avw = prev_avw
-                    display_weight = prev_weight
-            total_weight += display_weight
-            total_area_used += area_used
-            total_area += pen.area_m2
-            
-            # VCG (m-BL) = pen deck level + cargo VCG from deck (matches stability calculation)
-            ct_sel = next((c for c in (cargo_types or []) if (getattr(c, "name", "") or "").strip() == cargo_name), None)
-            vcg_from_deck = (getattr(ct_sel, "vcg_from_deck_m", 0) or 0) if ct_sel else 0.0
-            vcg_display = pen.vcg_m + vcg_from_deck
-            
-            # LS Moment (m-MT) = Weight (MT) × LCG (m); use display_weight when preserved
-            lcg_moment = display_weight * pen.lcg_m
+                ct_sel = next((c for c in (cargo_types or []) if (getattr(c, "name", "") or "").strip() == cargo_name), None)
+                vcg_from_deck = (getattr(ct_sel, "vcg_from_deck_m", 0) or 0) if ct_sel else 0.0
+                vcg_display = pen.vcg_m + vcg_from_deck
+                lcg_display = pen.lcg_m
+                tcg_display = pen.tcg_m
+                lcg_moment = display_weight * pen.lcg_m
             
             name_item = QTableWidgetItem(pen.name)
             name_item.setData(Qt.ItemDataRole.UserRole, pen.id)
@@ -1229,12 +1230,12 @@ class ConditionTableWidget(QWidget):
             vcg_item = QTableWidgetItem(f"{vcg_display:.3f}")
             vcg_item.setFlags(vcg_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 10, vcg_item)
-            # LCG m-[FR] (col 11) - from ship manager, read-only
-            lcg_item = QTableWidgetItem(f"{pen.lcg_m:.3f}")
+            # LCG m-[FR] (col 11) - from ship manager or preserved, read-only
+            lcg_item = QTableWidgetItem(f"{lcg_display:.3f}")
             lcg_item.setFlags(lcg_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 11, lcg_item)
-            # TCG m-CL (col 12) - from ship manager, read-only
-            tcg_item = QTableWidgetItem(f"{pen.tcg_m:.3f}")
+            # TCG m-CL (col 12) - from ship manager or preserved, read-only
+            tcg_item = QTableWidgetItem(f"{tcg_display:.3f}")
             tcg_item.setFlags(tcg_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 12, tcg_item)
             # LS Moment m-MT (col 13) - calculated, read-only
