@@ -63,7 +63,6 @@ def init_logging(settings: Settings) -> None:
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
         handlers=[
-            logging.StreamHandler(),
             logging.FileHandler(log_file, encoding="utf-8"),
         ],
     )

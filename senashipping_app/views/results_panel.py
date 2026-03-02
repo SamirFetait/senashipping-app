@@ -26,12 +26,16 @@ from senashipping_app.services.stability_service import ConditionResults
 class StatusLabel(QLabel):
     """Label with color-coded status indicator."""
     
+    # Compact row height for single-line values (adjust as needed: 18–24 typical)
+    ROW_HEIGHT = 20
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setMaximumWidth(120)  # Reduced to fit within panel
         self.setMinimumWidth(100)
+        self.setFixedHeight(self.ROW_HEIGHT)
         self.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.setWordWrap(False)
         self.setTextFormat(Qt.TextFormat.PlainText)
         

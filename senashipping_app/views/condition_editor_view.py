@@ -29,9 +29,9 @@ def _normalize_tank_name_for_match(name: str | None) -> str:
     s = s.replace(".", "")
     return s.strip()
 
-from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtWidgets import QFileDialog
-from PyQt6.QtGui import QShowEvent
+from PyQt6.QtCore import pyqtSignal, Qt, QEvent
+from PyQt6.QtWidgets import QApplication, QFileDialog
+from PyQt6.QtGui import QKeyEvent, QShowEvent
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -140,6 +140,7 @@ class ConditionEditorView(QWidget):
 
         self._build_layout()
         self._connect_signals()
+        QApplication.instance().installEventFilter(self)  # Catch ESC when focus is in profile/deck
         self._save_condition_btn.setToolTip("Save condition to file (prompts for path if not saved yet)")
         # Connect deck profile widget to condition table for bidirectional synchronization
         self._condition_table.set_deck_profile_widget(self._deck_profile_widget)
@@ -1059,6 +1060,41 @@ class ConditionEditorView(QWidget):
     def clear_selection(self) -> None:
         """Clear selection in the active condition table tab."""
         self._condition_table.clear_selection()
+
+    def eventFilter(self, obj: QWidget, event: QEvent) -> bool:
+        """Catch ESC when focus is anywhere in this view - clear deck/profile and table."""
+        if (
+            event.type() == QEvent.Type.KeyPress
+            and isinstance(event, QKeyEvent)
+            and event.key() == Qt.Key.Key_Escape
+        ):
+            fw = QApplication.focusWidget()
+            if fw and self._is_descendant(fw):
+                self._clear_deck_profile_selection()
+                self._condition_table.clear_selection()
+                return True
+        return super().eventFilter(obj, event)
+
+    def _is_descendant(self, widget: QWidget) -> bool:
+        """Return True if widget is self or a descendant of self."""
+        w = widget
+        while w:
+            if w == self:
+                return True
+            w = w.parentWidget()
+        return False
+
+    def _clear_deck_profile_selection(self) -> None:
+        """Clear selection in profile and all deck scenes, then force style refresh (same as hover)."""
+        pv = getattr(self._deck_profile_widget, "_profile_view", None)
+        if pv and getattr(pv, "_scene", None):
+            pv._scene.clearSelection()
+        for tab_widget in getattr(self._deck_profile_widget, "_deck_tab_widgets", {}).values():
+            deck_view = getattr(tab_widget, "_deck_view", None)
+            if deck_view and getattr(deck_view, "_scene", None):
+                deck_view._scene.clearSelection()
+        self._deck_profile_widget.refresh_all_pen_tank_styles()  # Force _update_style on every pen/tank
+        self._deck_profile_widget.selection_changed.emit(set(), set())
 
     def empty_spaces(self) -> None:
         """Empty selected spaces/tanks in the current tank tab (0% full)."""

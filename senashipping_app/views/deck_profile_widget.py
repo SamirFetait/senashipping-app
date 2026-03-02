@@ -3,8 +3,8 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, QRectF, pyqtSignal, QSize, QSignalBlocker, QTimer
-from PyQt6.QtGui import QPen, QBrush, QColor, QLinearGradient, QPainterPath, QFont, QResizeEvent
+from PyQt6.QtCore import Qt, QRectF, pyqtSignal, QSize, QSignalBlocker, QTimer, QEvent
+from PyQt6.QtGui import QPen, QBrush, QColor, QLinearGradient, QPainterPath, QFont, QResizeEvent, QKeyEvent
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -1307,6 +1307,14 @@ class DeckProfileWidget(QWidget):
         main_layout.addWidget(self._deck_tabs, 45)
         self._deck_tabs.currentChanged.connect(self._on_tab_changed)
 
+        # Install event filter on view and viewport - key events may go to viewport when focused
+        for w in (self._profile_view, self._profile_view.viewport()):
+            w.installEventFilter(self)
+        for tab_widget in self._deck_tab_widgets.values():
+            deck_view = tab_widget._deck_view
+            for w in (deck_view, deck_view.viewport()):
+                w.installEventFilter(self)
+
     def _on_tab_changed(self, index: int) -> None:
         """Called when user switches to a different deck tab."""
         if 0 <= index < self._deck_tabs.count():
@@ -1335,16 +1343,44 @@ class DeckProfileWidget(QWidget):
         if self._syncing_selection:
             return
         self.selection_changed.emit(set(pen_ids), None)
+        # Propagate to deck views so pen lights up in deck drawing too
+        self.set_selected(pen_ids, set())
 
     def _on_profile_selection_changed_full(self, pen_ids: set, tank_ids: set) -> None:
         if self._syncing_selection:
             return
         self.selection_changed.emit(set(pen_ids or ()), set(tank_ids or ()))
+        # Propagate to deck views so pen lights up in deck drawing too
+        self.set_selected(set(pen_ids or ()), set(tank_ids or ()))
 
     def _on_deck_view_selection_changed(self, pen_ids: set[int], tank_ids: set[int]) -> None:
         if self._syncing_selection:
             return
         self.selection_changed.emit(set(pen_ids), set(tank_ids))
+        # Propagate to profile view and other deck tabs so pen lights up everywhere
+        self.set_selected(set(pen_ids), set(tank_ids))
+
+    def eventFilter(self, obj: QWidget, event: QEvent) -> bool:
+        """ESC clears selection when pressed in profile or deck view."""
+        if (
+            event.type() == QEvent.Type.KeyPress
+            and isinstance(event, QKeyEvent)
+            and event.key() == Qt.Key.Key_Escape
+        ):
+            # Clear selection directly on profile and all deck scenes to avoid any
+            # feedback-loop issues with higher-level helpers.
+            if self._profile_view and getattr(self._profile_view, "_scene", None):
+                self._profile_view._scene.clearSelection()
+            for tab_widget in self._deck_tab_widgets.values():
+                deck_view = getattr(tab_widget, "_deck_view", None)
+                scene = getattr(deck_view, "_scene", None) if deck_view is not None else None
+                if scene is not None:
+                    scene.clearSelection()
+
+            # Also notify listeners (e.g. tables) that selection is now empty
+            self.selection_changed.emit(set(), set())
+            return True
+        return super().eventFilter(obj, event)
 
     def set_selected(self, pen_ids: set[int], tank_ids: set[int]) -> None:
         """Programmatically set selection in profile + all deck views."""
@@ -1356,6 +1392,21 @@ class DeckProfileWidget(QWidget):
                 tab_widget._deck_view.set_selected(pen_ids, tank_ids)
         finally:
             self._syncing_selection = False
+
+    def refresh_all_pen_tank_styles(self) -> None:
+        """Force all pens and tanks to refresh their visual style (e.g. after ESC clear)."""
+        for item in list(getattr(self._profile_view, "_pen_markers", {}).values()) + getattr(
+            self._profile_view, "_tank_items", []
+        ):
+            if hasattr(item, "_update_style"):
+                item._update_style()
+        for tab_widget in self._deck_tab_widgets.values():
+            deck_view = tab_widget._deck_view
+            for item in list(getattr(deck_view, "_pen_markers", {}).values()) + getattr(
+                deck_view, "_tank_polygon_items", []
+            ):
+                if hasattr(item, "_update_style"):
+                    item._update_style()
     
     def highlight_pen(self, pen_id: int) -> None:
         """Highlight a pen in profile view and deck view."""

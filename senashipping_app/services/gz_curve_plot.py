@@ -487,7 +487,7 @@ def _knot_points_for_smooth_display(
 
 
 def _smooth_display_points(
-    x: np.ndarray, y: np.ndarray, num_points: int = 1200
+    x: np.ndarray, y: np.ndarray, num_points: int = 2000
 ) -> tuple[np.ndarray, np.ndarray]:
     """Dense points for smooth curve display only; stats still from raw (x, y)."""
     if len(x) < 2 or len(x) != len(y):
@@ -503,11 +503,11 @@ def _smooth_display_points(
     x_use, y_use = _sanitize_for_spline(x_use, y_use)
     if len(x_use) < 2:
         return x, y
-    # Use ~45 knot points (every 2°) so the spline draws a smooth curve even when
-    # the table has only 10 angles (0,10,...,90) and raw data is piecewise linear
-    x_knot, y_knot = _knot_points_for_smooth_display(x_use, y_use, knot_spacing_deg=2.0)
+    # Use knot points every 1° (~77 knots) so the spline draws a smooth curve even when
+    # the table has only 10 angles; then evaluate at many points for a smooth line
+    x_knot, y_knot = _knot_points_for_smooth_display(x_use, y_use, knot_spacing_deg=1.0)
     x_fine = np.linspace(float(x_use[0]), float(x_use[-1]), num_points)
-    # Prefer shape-preserving Pchip, then cubic spline (smooth curve from ~45 knots)
+    # Prefer shape-preserving Pchip, then cubic spline (smooth curve; requires scipy)
     try:
         from scipy.interpolate import PchipInterpolator
         interp = PchipInterpolator(x_knot, y_knot)
@@ -587,8 +587,16 @@ def plot_gz_curve(
         y_shade = np.maximum(0.0, y_plot[mask])
         ax.fill_between(x_shade, 0, y_shade, color="steelblue", alpha=0.25, label="Stability energy")
 
-    # Curve (smooth line for display when requested; antialiased for clean rendering)
-    ax.plot(x_plot, y_plot, color="#2c3e50", linewidth=2, label="GZ", antialiased=True)
+    # Curve (smooth line for display when requested; antialiased, rounded joins)
+    ax.plot(
+        x_plot, y_plot,
+        color="#2c3e50",
+        linewidth=2,
+        label="GZ",
+        antialiased=True,
+        solid_capstyle="round",
+        solid_joinstyle="round",
+    )
 
     # Mark max GZ point
     if show_max_marker and len(y) > 0:

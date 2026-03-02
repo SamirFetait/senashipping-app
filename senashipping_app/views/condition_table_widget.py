@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent
 from PyQt6.QtWidgets import (
     QApplication,
     QWidget,
@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
     QStyledItemDelegate,
     QLineEdit,
 )
-from PyQt6.QtGui import QDoubleValidator
+from PyQt6.QtGui import QDoubleValidator, QKeyEvent
 
 from senashipping_app.models import Tank, LivestockPen
 from senashipping_app.models.tank import TankType
@@ -372,13 +372,14 @@ class ConditionTableWidget(QWidget):
     def _setup_common_table(self, table: QTableWidget) -> None:
         table.setAlternatingRowColors(True)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)  # Allow multi-selection
+        table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)  # Allow multi-selection (Ctrl+click, Shift+click)
         # Minimum row height so cell widgets (e.g. QComboBox) never get zero-size paint device (QPainter engine == 0)
         vh = table.verticalHeader()
         if vh is not None:
             vh.setDefaultSectionSize(max(vh.defaultSectionSize(), 24))
         # Connect selection changes to sync with deck layout
         table.itemSelectionChanged.connect(lambda: self._on_table_selection_changed(table))
+        table.installEventFilter(self)  # ESC to clear selection
     
     def set_tank_cog_callback(self, callback: Optional[Callable[[int, float], Optional[Tuple[float, float, float]]]]) -> None:
         """Set callback to get (VCG, LCG, TCG) for display when sounding table is used. (tank_id, volume_m3) -> (vcg_m, lcg_m, tcg_m) or None."""
@@ -483,6 +484,18 @@ class ConditionTableWidget(QWidget):
         if not table:
             return
         table.clearSelection()
+
+    def eventFilter(self, obj: QWidget, event: QEvent) -> bool:
+        """ESC clears selection in any table."""
+        if (
+            event.type() == QEvent.Type.KeyPress
+            and isinstance(event, QKeyEvent)
+            and event.key() == Qt.Key.Key_Escape
+            and obj in self._table_widgets.values()
+        ):
+            self.clear_selection()
+            return True
+        return super().eventFilter(obj, event)
 
     def clear_selected_items(self) -> None:
         """
@@ -806,25 +819,27 @@ class ConditionTableWidget(QWidget):
             self._syncing_selection = False
     
     def _on_deck_layout_selection_changed(self, pen_ids: set[int], tank_ids: set[int]) -> None:
-        """Handle deck layout selection change - sync to tables."""
+        """Handle deck layout selection change - sync to tables (multi-select)."""
         if self._syncing_selection:
             return
         
         self._syncing_selection = True
         try:
-            # Update all deck tables with the selection
             for tab_name, table in self._table_widgets.items():
                 if not isinstance(table, QTableWidget):
                     continue
-                # Clear current selection
                 table.clearSelection()
-                # Select rows matching the pen IDs
+                # ExtendedSelection + selectRow() only keeps last row; use MultiSelection for programmatic multi-select
+                mode = table.selectionMode()
+                table.setSelectionMode(QTableWidget.SelectionMode.MultiSelection)
                 for row in range(table.rowCount()):
                     item = table.item(row, 0)
-                    if item:
-                        pen_id = item.data(Qt.ItemDataRole.UserRole)
-                        if pen_id in pen_ids:
-                            table.selectRow(row)
+                    if not item:
+                        continue
+                    pen_id = item.data(Qt.ItemDataRole.UserRole)
+                    if pen_id in pen_ids:
+                        table.selectRow(row)
+                table.setSelectionMode(mode)
         finally:
             self._syncing_selection = False
     
