@@ -1115,12 +1115,40 @@ class ConditionEditorView(QWidget):
         return self._current_condition is not None
         
     def new_condition(self) -> None:
-        """Create a new condition. Called from toolbar."""
+        """
+        Create a new (blank) loading condition for the current voyage.
+        
+        Behaviour:
+        - Condition-specific inputs (condition name, cargo type, estimated time)
+          are reset to their defaults.
+        - All pens/tanks are reset to their unloaded start state in both the
+          simple tables and the detailed condition table.
+        - Graphics and results are cleared so no waterline/results from the
+          previous condition remain visible.
+        """
+        # Drop reference to any previously saved/loaded condition
         self._current_condition = None
-        self._cargo_type_combo.setCurrentText("")
+
+        # Reset condition-specific header inputs
+        if self._cargo_type_combo.count() > 0:
+            # Index 0 is kept as "-- Blank --"
+            self._cargo_type_combo.setCurrentIndex(0)
+        else:
+            self._cargo_type_combo.setCurrentText("")
         self._condition_name_edit.clear()
+        self._estimated_time_days_edit.clear()
+
+        # Reload pens/tanks for the current ship with empty loadings/volumes
         if self._current_ship:
             self._set_current_ship(self._current_ship)
+
+        # Clear any previously computed results and graphical overlays
+        if hasattr(self, "_results_panel") and hasattr(self._results_panel, "_clear_all"):
+            self._results_panel._clear_all()
+        if hasattr(self, "_deck_profile_widget"):
+            self._deck_profile_widget.clear_waterline()
+            # Also clear any pen/tank selection in profile/deck views
+            self._deck_profile_widget.set_selected(set(), set())
         
     def zoom_in_graphics(self) -> None:
         """Zoom in on profile and deck views."""

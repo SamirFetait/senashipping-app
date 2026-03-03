@@ -182,12 +182,12 @@ class TankPolygonItem(QGraphicsPathItem):
         highlight in blue so the chosen tank stands out.
         """
         if self.isSelected():
-            # Hairline blue outline (thinnest) with light fill for selection.
-            self.setPen(QPen(QColor(0, 120, 255), 0))
+            # Very thin blue outline (~0.3) with light fill for selection.
+            self.setPen(QPen(QColor(0, 120, 255), 0.6))
             self.setBrush(QBrush(QColor(0, 120, 255, 80)))
         elif self._hover:
             # Very light blue on hover.
-            self.setPen(QPen(QColor(80, 160, 255), 1.0))
+            self.setPen(QPen(QColor(80, 160, 255), 0.5))
             self.setBrush(QBrush(QColor(80, 160, 255, 30)))
         else:
             # Neutral, unobtrusive default that matches DXF.
@@ -241,8 +241,8 @@ class PenMarkerItem(QGraphicsRectItem):
         Style pen marker rectangles: thin dark gray normally, blue when hovered/selected.
         """
         if self.isSelected():
-            # Hairline blue outline and subtle fill for selected pens.
-            self.setPen(QPen(QColor(0, 120, 255), 0))
+            # Very thin blue outline (~0.3) and subtle fill for selected pens.
+            self.setPen(QPen(QColor(0, 120, 255), 0.3))
             self.setBrush(QBrush(QColor(0, 120, 255, 80)))
         elif self._hover:
             # Slight blue hint on hover.
@@ -764,7 +764,7 @@ class ProfileView(ShipGraphicsView):
             self._waterline_fill_item.setZValue(Z_WATER)
 
             # Draw a finer, less dominant waterline
-            waterline_pen = QPen(QColor(0, 80, 160), 1.5)
+            waterline_pen = QPen(QColor(0, 80, 200), 1.5)
             waterline_pen.setCosmetic(True)
             self._waterline_item = self._scene.addLine(
                 x_left, y_aft, x_right, y_fwd, waterline_pen
