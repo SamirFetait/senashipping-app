@@ -27,7 +27,7 @@ This document explains how the Sena Marine app computes loading conditions: disp
 
 ---
 
-## 1. Calculation flow (big picture)
+## 1. Calculation flow 
 
 When you press **Compute**, the app:
 
