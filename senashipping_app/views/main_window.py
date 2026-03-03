@@ -395,9 +395,9 @@ class MainWindow(QMainWindow):
 
         # TODO: Add button to add tank or pen
         # Wire condition table '+' button: switch to Ship & data setup to add tanks/pens
-        self._condition_editor._condition_table.add_requested.connect(
-            lambda: self._switch_page(self._page_indexes.ship_manager, "Ship & data setup – add tanks and pens")
-        ) # 
+        # self._condition_editor._condition_table.add_requested.connect(
+        #     lambda: self._switch_page(self._page_indexes.ship_manager, "Ship & data setup – add tanks and pens")
+        # ) # 
 
         return pages
 
@@ -1487,9 +1487,20 @@ class MainWindow(QMainWindow):
             # Create condition from current form state (condition name from field, else cargo type)
             from senashipping_app.models import LoadingCondition
             condition_name = condition_widget._condition_name_edit.text().strip() or condition_widget._cargo_type_combo.currentText().strip() or "Condition"
+            # Parse estimated time (days) from the editor if available
+            try:
+                est_time_days = float(
+                    (getattr(condition_widget, "_estimated_time_days_edit", None).text() or "0").strip()
+                ) if hasattr(condition_widget, "_estimated_time_days_edit") else 0.0
+                if est_time_days < 0:
+                    est_time_days = 0.0
+            except (TypeError, ValueError):
+                est_time_days = 0.0
+
             condition = LoadingCondition(
                 voyage_id=condition_widget._current_voyage.id if condition_widget._current_voyage else None,
                 name=condition_name,
+                estimated_time_days=est_time_days,
             )
 
         # Keep condition name in sync with the form (e.g. user edited after Compute)

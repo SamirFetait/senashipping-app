@@ -41,6 +41,8 @@ class LoadingConditionORM(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     tank_volumes_json: Mapped[str] = mapped_column(Text, default="{}")
     pen_loadings_json: Mapped[str] = mapped_column(Text, default="{}")
+    # Estimated voyage time in days (paired with cargo type dung weight %/day)
+    estimated_time_days: Mapped[float] = mapped_column(Float, default=0.0)
     displacement_t: Mapped[float] = mapped_column(Float, default=0.0)
     draft_m: Mapped[float] = mapped_column(Float, default=0.0)
     trim_m: Mapped[float] = mapped_column(Float, default=0.0)
@@ -182,6 +184,7 @@ class ConditionRepository:
             draft_m=condition.draft_m,
             trim_m=condition.trim_m,
             gm_m=condition.gm_m,
+            estimated_time_days=getattr(condition, "estimated_time_days", 0.0),
         )
         self._db.add(obj)
         self._db.commit()
@@ -208,6 +211,7 @@ class ConditionRepository:
             trim_m=obj.trim_m,
             gm_m=obj.gm_m,
             created_at=obj.created_at,
+            estimated_time_days=getattr(obj, "estimated_time_days", 0.0) or 0.0,
         )
 
     def list_for_voyage(self, voyage_id: int) -> List[LoadingCondition]:
@@ -233,6 +237,7 @@ class ConditionRepository:
                     trim_m=obj.trim_m,
                     gm_m=obj.gm_m,
                     created_at=obj.created_at,
+                    estimated_time_days=getattr(obj, "estimated_time_days", 0.0) or 0.0,
                 )
             )
         return conditions
@@ -253,6 +258,8 @@ class ConditionRepository:
         obj.draft_m = condition.draft_m
         obj.trim_m = condition.trim_m
         obj.gm_m = condition.gm_m
+        if hasattr(obj, "estimated_time_days"):
+            obj.estimated_time_days = getattr(condition, "estimated_time_days", 0.0) or 0.0
         self._db.commit()
         self._db.refresh(obj)
         return condition

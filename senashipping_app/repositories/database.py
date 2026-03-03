@@ -143,6 +143,17 @@ def init_database(db_path: Path) -> sessionmaker:
         except Exception:
             pass
 
+    # Migration: loading_conditions estimated time in days
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE loading_conditions ADD COLUMN estimated_time_days REAL DEFAULT 0.0"
+            ))
+            conn.commit()
+    except Exception:
+        # Column may already exist; ignore migration failure
+        pass
+
     global SessionLocal
     SessionLocal = sessionmaker(
         bind=engine,

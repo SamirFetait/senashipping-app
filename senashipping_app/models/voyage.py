@@ -23,6 +23,9 @@ class LoadingCondition:
     # Mapping: pen_id -> head count (Phase 2 livestock)
     pen_loadings: Dict[int, int] = field(default_factory=dict)
 
+    # Estimated voyage time in days (used together with cargo type dung weight %/day)
+    estimated_time_days: float = 0.0
+
     # Calculated properties (simplified for MVP)
     displacement_t: float = 0.0
     draft_m: float = 0.0

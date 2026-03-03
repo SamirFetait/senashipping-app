@@ -110,6 +110,11 @@ class ConditionEditorView(QWidget):
         self._arrival_port_edit.setPlaceholderText("Arr. Port")
         self._arrival_port_edit.setFixedWidth(120)
 
+        # Estimated time (days) for voyage – used together with cargo type dung weight %/day
+        self._estimated_time_days_edit = QLineEdit(self)
+        self._estimated_time_days_edit.setPlaceholderText("Time (days)")
+        self._estimated_time_days_edit.setFixedWidth(80)
+
         self._condition_name_edit = QLineEdit(self)
         self._condition_name_edit.setPlaceholderText("Condition name")
         self._condition_name_edit.setFixedWidth(180)
@@ -239,10 +244,14 @@ class ConditionEditorView(QWidget):
         top.addWidget(self._departure_port_edit)
         top.addWidget(QLabel("Arr. Port:", self))
         top.addWidget(self._arrival_port_edit)
+        top.addWidget(QLabel("Est. time (days):", self))
+        top.addWidget(self._estimated_time_days_edit)
         top.addWidget(QLabel("Condition:", self))
         top.addWidget(self._condition_name_edit)
         top.addWidget(QLabel("Cargo type:", self))
-        top.addWidget(self._cargo_type_combo, 2)
+        # Keep cargo type dropdown visually compact so it doesn't dominate the header row
+        self._cargo_type_combo.setMaximumWidth(220)
+        top.addWidget(self._cargo_type_combo)
         top.addWidget(self._cargo_library_btn)
         top.addStretch()
         root.addLayout(top)
@@ -620,6 +629,9 @@ class ConditionEditorView(QWidget):
         self._voyage_name_edit.setText(voyage.name or "")
         self._departure_port_edit.setText(getattr(voyage, "departure_port", "") or "")
         self._arrival_port_edit.setText(getattr(voyage, "arrival_port", "") or "")
+        # Estimated time (days) comes from condition (per loading condition)
+        est_days = getattr(condition, "estimated_time_days", 0.0) or 0.0
+        self._estimated_time_days_edit.setText(f"{est_days:.2f}" if est_days > 0 else "")
         self._condition_name_edit.setText(condition.name)
         self._set_cargo_type_text(condition.name)
         self._ship_label.setText(ship.name if ship else "—")
@@ -658,6 +670,7 @@ class ConditionEditorView(QWidget):
             self._voyage_name_edit.clear()
             self._departure_port_edit.clear()
             self._arrival_port_edit.clear()
+            self._estimated_time_days_edit.clear()
             # When no voyage selected, ensure cargo is "-- Blank --" to show blank values
             if self._cargo_type_combo.count() > 0:
                 self._cargo_type_combo.setCurrentIndex(0)  # "-- Blank --"
@@ -668,6 +681,8 @@ class ConditionEditorView(QWidget):
             self._voyage_name_edit.setText(self._current_voyage.name or "")
             self._departure_port_edit.setText(getattr(self._current_voyage, "departure_port", "") or "")
             self._arrival_port_edit.setText(getattr(self._current_voyage, "arrival_port", "") or "")
+            # Estimated time is per condition; clear when switching voyages
+            self._estimated_time_days_edit.clear()
         self._load_conditions()
         self._save_condition_btn.setEnabled(True)
         if self._current_ship:
@@ -735,10 +750,19 @@ class ConditionEditorView(QWidget):
                             pass
             self._current_voyage = voyage
 
+        # Parse estimated time (days); keep 0.0 when empty/invalid
+        try:
+            est_time_days = float((self._estimated_time_days_edit.text() or "0").strip())
+            if est_time_days < 0:
+                est_time_days = 0.0
+        except (TypeError, ValueError):
+            est_time_days = 0.0
+
         condition = LoadingCondition(
             id=self._current_condition.id if self._current_condition else None,
             voyage_id=self._current_voyage.id if self._current_voyage else None,
             name=condition_name,
+            estimated_time_days=est_time_days,
         )
 
         tank_volumes: Dict[int, float] = {}
@@ -967,12 +991,21 @@ class ConditionEditorView(QWidget):
                 if heads > 0:
                     pen_loadings[int(pen_id)] = heads
 
+        # Parse estimated time (days); keep 0.0 when empty/invalid
+        try:
+            est_time_days = float((self._estimated_time_days_edit.text() or "0").strip())
+            if est_time_days < 0:
+                est_time_days = 0.0
+        except (TypeError, ValueError):
+            est_time_days = 0.0
+
         condition = LoadingCondition(
             id=self._current_condition.id if self._current_condition else None,
             voyage_id=self._current_voyage.id,
             name=condition_name,
             tank_volumes_m3=tank_volumes,
             pen_loadings=pen_loadings,
+            estimated_time_days=est_time_days,
         )
 
         with database.SessionLocal() as db:

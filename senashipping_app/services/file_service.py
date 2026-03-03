@@ -30,6 +30,7 @@ def save_condition_to_file(filepath: Path, condition: LoadingCondition) -> None:
         "draft_m": condition.draft_m,
         "trim_m": condition.trim_m,
         "gm_m": condition.gm_m,
+        "estimated_time_days": getattr(condition, "estimated_time_days", 0.0),
     }
     
     with open(filepath, "w", encoding="utf-8") as f:
@@ -77,4 +78,5 @@ def load_condition_from_file(filepath: Path) -> LoadingCondition:
         draft_m=float(data.get("draft_m", 0.0)),
         trim_m=float(data.get("trim_m", 0.0)),
         gm_m=float(data.get("gm_m", 0.0)),
+        estimated_time_days=float(data.get("estimated_time_days", 0.0) or 0.0),
     )

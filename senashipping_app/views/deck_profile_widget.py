@@ -55,6 +55,11 @@ PROFILE_PEN_Y_OFFSET_FRACTION = 0.02
 PROFILE_PEN_X_OFFSET = 0.0
 PROFILE_PEN_Y_OFFSET = 0.0  # e.g. 30 to move pens up by 30 units
 
+# Draft visual scaling factor.
+# A physical draft of 4 m will be drawn at the same vertical position
+# that 1.7 m would have in the previous scale.
+DRAFT_VISUAL_SCALE_FACTOR = 1.8 / 4.0
+
 # Z-order constants for profile/deck scene items (maintainable stacking).
 Z_HULL = -10
 Z_BASELINE = 0
@@ -716,8 +721,10 @@ class ProfileView(ShipGraphicsView):
 
         if draft_aft is not None and draft_fwd is not None:
             # Angled waterline showing trim
-            y_aft = self._keel_y - draft_aft * scale_y
-            y_fwd = self._keel_y - draft_fwd * scale_y
+            scaled_draft_aft = draft_aft * DRAFT_VISUAL_SCALE_FACTOR
+            scaled_draft_fwd = draft_fwd * DRAFT_VISUAL_SCALE_FACTOR
+            y_aft = self._keel_y - scaled_draft_aft * scale_y
+            y_fwd = self._keel_y - scaled_draft_fwd * scale_y
             if hull_top_y is not None:
                 y_aft = max(y_aft, hull_top_y)
                 y_fwd = max(y_fwd, hull_top_y)
@@ -771,7 +778,8 @@ class ProfileView(ShipGraphicsView):
                 self._trim_text_item.setZValue(Z_SELECTION)
         else:
             # Level waterline
-            y = self._keel_y - draft_mid * scale_y
+            scaled_draft_mid = draft_mid * DRAFT_VISUAL_SCALE_FACTOR
+            y = self._keel_y - scaled_draft_mid * scale_y
             if hull_top_y is not None:
                 y = max(y, hull_top_y)
 
@@ -853,28 +861,12 @@ class ProfileView(ShipGraphicsView):
         self._draft_markers.append(text_item)
 
     def _add_draft_scale(self, x_left: float, x_right: float, scale_y: float) -> None:
-        """Add vertical draft scale at midship (draft values in m)."""
-        mid_x = (x_left + x_right) / 2.0
-        scale_x = mid_x - 12.0  # Left of center
-        # Tick every 0.5 m from 0 to ship_depth
-        draft_max = self._ship_depth if self._ship_depth > 0 else 10.0
-        step = 0.5
-        pen_scale = QPen(QColor(100, 100, 100), 0)
-        pen_scale.setCosmetic(True)
-        font = QFont("Arial", 7, QFont.Weight.Normal)
-        d = 0.0
-        while d <= draft_max:
-            y_scene = self._keel_y - d * scale_y
-            line = self._scene.addLine(scale_x, y_scene, scale_x + 4, y_scene, pen_scale)
-            line.setZValue(Z_DRAFT_MARKERS)
-            self._draft_scale_items.append(line)
-            txt = self._scene.addText(f"{d:.1f}", font)
-            txt.setDefaultTextColor(QColor(80, 80, 80))
-            txt.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
-            txt.setPos(scale_x - 18, y_scene - 4)
-            txt.setZValue(Z_DRAFT_LABELS)
-            self._draft_scale_items.append(txt)
-            d += step
+        """
+        Draft scale (ticks and numeric labels) intentionally disabled.
+        Waterline and draft markers are still shown, but the side scale
+        lines and numbers are hidden as requested.
+        """
+        return
 
     def _add_cog_marker(
         self, cog_lcg_m: float, cog_vcg_m: float, scale_y: float, x_left: float, x_right: float
