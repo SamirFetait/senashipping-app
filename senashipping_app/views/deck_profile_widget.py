@@ -416,13 +416,30 @@ class ProfileView(ShipGraphicsView):
 
         if not bounds.isValid() or bounds.isEmpty():
             return
-        margin = 0.04  # 4% padding
-        w, h = bounds.width(), bounds.height()
-        if w > 0 and h > 0:
-            bounds = bounds.adjusted(-w * margin, -h * margin, w * margin, h * margin)
+
+        # No extra padding so the profile DXF uses the full
+        # available width/height of its parent section.
         self._scene.setSceneRect(bounds)
-        if self.width() > 0 and self.height() > 0:
-            self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
+
+        vp = self.viewport()
+        if not vp:
+            return
+        view_w = vp.width()
+        view_h = vp.height()
+        if view_w <= 0 or view_h <= 0:
+            return
+        if bounds.width() <= 0 or bounds.height() <= 0:
+            return
+
+        # Scale independently in X and Y so the profile drawing
+        # fills both the full width and full height of the view.
+        # This intentionally stretches the aspect ratio slightly
+        # instead of leaving unused margins.
+        self.resetTransform()
+        sx = view_w / bounds.width()
+        sy = view_h / bounds.height()
+        self.scale(sx, sy)
+        self.centerOn(bounds.center())
 
     def fit_to_view(self) -> None:
         """Fit profile drawing to view (same as resize/load)."""
@@ -870,8 +887,19 @@ class ProfileView(ShipGraphicsView):
         text_item.setDefaultTextColor(QColor(0, 100, 200))
         # Keep label size constant even if the view is rescaled
         text_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
-        # Position label just above and slightly to the left of the marker
-        text_item.setPos(x - 24, y - 18)
+        # Position label just above and slightly to the left of the marker.
+        # Clamp so labels never end up outside the visible hull bounds
+        # (aft label was disappearing off the left/top edges).
+        label_x = x - 24
+        label_y = y - 18
+        if self._hull_bounds is not None and self._hull_bounds.isValid():
+            min_y = self._hull_bounds.top() + 2.0
+            min_x = self._hull_bounds.left() + 2.0
+            if label_y < min_y:
+                label_y = min_y
+            if label_x < min_x:
+                label_x = min_x
+        text_item.setPos(label_x, label_y)
         text_item.setZValue(Z_DRAFT_LABELS)
         self._draft_markers.append(text_item)
 
@@ -1039,6 +1067,10 @@ class DeckView(ShipGraphicsView):
         self._current_pens: list = []
         self._syncing_selection = False
         self._show_tanks = True
+        # Fixed bounds of the deck DXF only (used for fitting).
+        # This keeps the DXF plan fitted to its parent view even when
+        # additional items (pens, tank polygons) extend beyond it.
+        self._deck_bounds: QRectF | None = None
         self._scene.selectionChanged.connect(self._on_selection_changed)
 
     def set_show_tanks(self, show: bool) -> None:
@@ -1061,23 +1093,48 @@ class DeckView(ShipGraphicsView):
         QTimer.singleShot(0, self._fit_scene_to_view)
     
     def _fit_scene_to_view(self) -> None:
-        """Fit all scene items to the viewport so the deck plan fills the section."""
+        """
+        Fit the static deck DXF to the viewport so the drawing fills
+        its parent section, independent of pens/tank overlays.
+        """
         if not self._scene:
             return
         # Skip if viewport not yet sized (e.g. tab not visible)
         vp = self.viewport()
         if vp.width() < 20 or vp.height() < 20:
             return
-        bounds = self._scene.itemsBoundingRect()
+        # Prefer the stored deck DXF bounds so dynamic items (pens, tanks)
+        # do not change the automatic fitting/zoom.
+        if self._deck_bounds is not None and self._deck_bounds.isValid() and not self._deck_bounds.isEmpty():
+            bounds = self._deck_bounds
+        else:
+            bounds = self._scene.itemsBoundingRect()
         if not bounds.isValid() or bounds.isEmpty():
             return
-        margin = 0.04  # 4% padding
-        w, h = bounds.width(), bounds.height()
-        if w > 0 and h > 0:
-            bounds = bounds.adjusted(-w * margin, -h * margin, w * margin, h * margin)
+
+        # No extra padding in the scene rect so the deck DXF can use
+        # the full available width/height of its parent section.
         self._scene.setSceneRect(bounds)
-        if self.width() > 0 and self.height() > 0:
-            self.fitInView(bounds, Qt.AspectRatioMode.KeepAspectRatio)
+
+        vp = self.viewport()
+        if not vp:
+            return
+        view_w = vp.width()
+        view_h = vp.height()
+        if view_w <= 0 or view_h <= 0:
+            return
+        if bounds.width() <= 0 or bounds.height() <= 0:
+            return
+
+        # Scale independently in X and Y so the deck drawing fills the
+        # full width of the view. In height we leave more margin
+        # (~20%) so the DXF sits comfortably inside the frame instead
+        # of touching the top/bottom.
+        self.resetTransform()
+        sx = view_w / bounds.width()
+        sy = (view_h * 0.80) / bounds.height()
+        self.scale(sx, sy)
+        self.centerOn(bounds.center())
 
     def fit_to_view(self) -> None:
         """Fit deck drawing to view (same as resize/load)."""
@@ -1169,6 +1226,7 @@ class DeckView(ShipGraphicsView):
         self._scene.clear()
         self._pen_markers.clear()
         self._tank_polygon_items.clear()
+        self._deck_bounds = None
 
         # Load deck DXF first; use fraction-of-height offset so shift is visible in any DXF units
         dxf_path = _get_cad_dir() / f"deck_{deck_name}.dxf"
@@ -1178,6 +1236,12 @@ class DeckView(ShipGraphicsView):
         if y_offset != 0.0:
             self._scene.clear()
             _load_dxf_into_scene(dxf_path, self._scene, y_offset=y_offset)
+            bounds = self._scene.itemsBoundingRect()
+
+        # Freeze deck DXF bounds so later overlays (pens, tanks) do not
+        # affect how the plan is fitted to the parent view.
+        if bounds.isValid() and not bounds.isEmpty():
+            self._deck_bounds = bounds
 
         # Add tank polylines on top with same y_offset so they align with the deck DXF
         deck_tanks = []
@@ -1198,12 +1262,16 @@ class DeckView(ShipGraphicsView):
         # Update pen markers for this deck
         self._update_pen_markers()
 
-        # Set scene rect so view uses full content extent; fit when layout is ready
-        bounds = self._scene.itemsBoundingRect()
+        # Set scene rect based on the fixed deck DXF bounds so the deck
+        # plan always fills the view consistently.
+        bounds = self._deck_bounds or self._scene.itemsBoundingRect()
         if bounds.isValid() and not bounds.isEmpty():
-            margin = 0.04
+            # No extra padding here either so the loaded
+            # deck DXF can fill the view as much as its
+            # aspect ratio allows.
+            margin = 0.0
             w, h = bounds.width(), bounds.height()
-            if w > 0 and h > 0:
+            if w > 0 and h > 0 and margin:
                 bounds = bounds.adjusted(-w * margin, -h * margin, w * margin, h * margin)
             self._scene.setSceneRect(bounds)
         QTimer.singleShot(0, self._fit_scene_to_view)
