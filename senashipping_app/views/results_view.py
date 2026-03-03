@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QLabel,
     QFormLayout,
     QLineEdit,
@@ -28,6 +29,7 @@ from PyQt6.QtWidgets import (
     QSplitter,
     QGroupBox,
     QAbstractItemView,
+    QSizePolicy,
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtCore import QStandardPaths
@@ -121,8 +123,20 @@ class ResultsView(QWidget):
             ["No", "Status", "Description", "Attained", "Pass If", "Type"]
         )
         self._alarms_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        self._alarms_table.setMaximumHeight(200)
+        # Let the alarms table grow to fill the tab vertically (no fixed max height)
         self._alarms_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        # Initial empty state so the alarms area doesn't look blank
+        self._alarms_table.setRowCount(1)
+        self._alarms_table.setItem(0, 0, QTableWidgetItem(""))
+        self._alarms_table.setItem(0, 1, QTableWidgetItem(""))
+        self._alarms_table.setItem(
+            0,
+            2,
+            QTableWidgetItem("No alarms yet – compute a condition to populate this list."),
+        )
+        self._alarms_table.setItem(0, 3, QTableWidgetItem(""))
+        self._alarms_table.setItem(0, 4, QTableWidgetItem(""))
+        self._alarms_table.setItem(0, 5, QTableWidgetItem(""))
         self._alarms_tab_widget = QWidget(self)
         alarms_layout = QVBoxLayout(self._alarms_tab_widget)
         alarms_layout.setContentsMargins(8, 10, 8, 8)
@@ -135,7 +149,7 @@ class ResultsView(QWidget):
         self._weights_table.setColumnCount(2)
         self._weights_table.setHorizontalHeaderLabels(["Item", "Weight (t)"])
         self._weights_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        self._weights_table.setMaximumHeight(220)
+        # Let the weights table grow to fill the tab vertically (no fixed max height)
         self._weights_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._weights_tab_widget = QWidget(self)
         weights_layout = QVBoxLayout(self._weights_tab_widget)
@@ -204,7 +218,7 @@ class ResultsView(QWidget):
         self._cargo_table.setColumnCount(4)
         self._cargo_table.setHorizontalHeaderLabels(["Pen name", "Pen deck", "Head count", "Weight (t)"])
         self._cargo_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        self._cargo_table.setMaximumHeight(220)
+        # Let the cargo table grow to fill the tab vertically (no fixed max height)
         self._cargo_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._cargo_tab_widget = QWidget(self)
         cargo_layout = QVBoxLayout(self._cargo_tab_widget)
@@ -215,12 +229,16 @@ class ResultsView(QWidget):
 
         self._report_view = QPlainTextEdit(self)
         self._report_view.setReadOnly(True)
+        self._report_view.setPlaceholderText("Text report will appear here after you compute a condition.")
 
         self._status_label = QLabel(self)
         self._status_label.setStyleSheet("font-weight: bold; font-size: 11pt;")
+        self._status_label.setFixedHeight(20)
         self._warnings_edit = QPlainTextEdit(self)
         self._warnings_edit.setReadOnly(True)
-        self._warnings_edit.setMaximumHeight(80)
+        # Allow a bit more vertical space for validation messages
+        self._warnings_edit.setMaximumHeight(140)
+        self._warnings_edit.setPlaceholderText("Validation messages will appear here after you compute a condition.")
 
         self._criteria_table = QTableWidget(self)
         self._criteria_table.setColumnCount(7)
@@ -230,9 +248,19 @@ class ResultsView(QWidget):
         self._criteria_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self._criteria_table.setMaximumHeight(180)
         self._criteria_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        # Initial empty state row so the area doesn't look blank
+        self._criteria_table.setRowCount(1)
+        self._criteria_table.setItem(0, 0, QTableWidgetItem(""))
+        self._criteria_table.setItem(0, 1, QTableWidgetItem(""))
+        self._criteria_table.setItem(0, 2, QTableWidgetItem("Compute a condition to see criteria results."))
+        self._criteria_table.setItem(0, 3, QTableWidgetItem(""))
+        self._criteria_table.setItem(0, 4, QTableWidgetItem(""))
+        self._criteria_table.setItem(0, 5, QTableWidgetItem(""))
+        self._criteria_table.setItem(0, 6, QTableWidgetItem(""))
 
         self._trace_label = QLabel(self)
         self._trace_label.setWordWrap(True)
+        self._trace_label.setText("Compute a condition to see calculation traceability details here.")
 
         # Stability manual reference (from Loading Manual – operating restrictions)
         self._manual_ref_group = QGroupBox("Stability manual reference")
@@ -264,10 +292,10 @@ class ResultsView(QWidget):
 
     def _build_layout(self) -> None:
         root = QVBoxLayout(self)
-        root.setSpacing(10)
+        # Slightly tighter vertical spacing for a more compact layout
+        root.setSpacing(6)
         root.addWidget(self._section_header(self, "Condition Results", is_main=True))
-        root.addSpacing(4)
-
+        root.addSpacing(2)
         # Top split: Alarms (left) | Calculation Summary (right)
         splitter = QSplitter(Qt.Orientation.Horizontal)
         # Alarms panel with tabs
@@ -287,7 +315,8 @@ class ResultsView(QWidget):
         )
         summary_group.setMinimumWidth(260)
         summary_form = QFormLayout()
-        summary_form.setSpacing(6)
+        # Tighter spacing between summary rows
+        summary_form.setSpacing(4)
         summary_form.addRow("Ship:", self._ship_name)
         summary_form.addRow("Condition:", self._condition_name)
         summary_form.addRow("Displacement (t):", self._disp_edit)
@@ -307,28 +336,71 @@ class ResultsView(QWidget):
         summary_form.addRow("Air draft (m):", self._air_draft_edit)
         summary_group.setLayout(summary_form)
         splitter.addWidget(summary_group)
-        splitter.setSizes([400, 280])
-        root.addWidget(splitter)
+        splitter.setSizes([420, 260])
+        root.addWidget(splitter, 1)
 
-        root.addWidget(self._status_label)
-        root.addWidget(self._section_header(self, "Validation messages"))
-        root.addSpacing(2)
-        root.addWidget(self._warnings_edit)
-        root.addWidget(self._section_header(self, "IMO & Livestock Criteria Checklist"))
-        root.addSpacing(2)
-        root.addWidget(self._criteria_table)
-        root.addWidget(self._section_header(self, "Calculation traceability"))
-        root.addSpacing(2)
-        root.addWidget(self._trace_label)
-        root.addWidget(self._manual_ref_group)
-        root.addWidget(self._section_header(self, "Text Report"))
-        root.addSpacing(2)
-        root.addWidget(self._report_view, 1)
+        # Bottom half: 2x2 grid layout filling available space
+        bottom_container = QWidget(self)
+        grid = QGridLayout(bottom_container)
+        # Reduce margins and spacing so the 2x2 grid feels tighter
+        grid.setContentsMargins(2, 2, 2, 2)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(6)
 
+        # Top-left: Validation panel (compact 2-row form: Status + Messages)
+        validation_group = QGroupBox("Validation")
+        v_form = QFormLayout()
+        v_form.setContentsMargins(4, 4, 4, 4)
+        v_form.setSpacing(4)
+        v_form.addRow("Status:", self._status_label)
+        v_form.addRow("Messages:", self._warnings_edit)
+        validation_group.setLayout(v_form)
+        grid.addWidget(validation_group, 0, 0)
+
+        # Top-right: IMO & Livestock criteria checklist
+        criteria_group = QGroupBox("IMO & Livestock Criteria")
+        c_layout = QVBoxLayout(criteria_group)
+        c_layout.setContentsMargins(6, 6, 6, 6)
+        c_layout.addWidget(self._section_header(criteria_group, "Checklist"))
+        c_layout.addWidget(self._criteria_table, 1)
+        grid.addWidget(criteria_group, 0, 1)
+
+        # Bottom-left: Calculation traceability + Stability manual reference
+        trace_group = QGroupBox("Calculation traceability & manual")
+        t_layout = QVBoxLayout(trace_group)
+        t_layout.setContentsMargins(6, 6, 6, 6)
+        t_layout.addWidget(self._section_header(trace_group, "Calculation traceability"))
+        t_layout.addWidget(self._trace_label)
+        t_layout.addWidget(self._manual_ref_group, 1)
+        grid.addWidget(trace_group, 1, 0)
+
+        # Bottom-right: Text report + export actions
+        report_group = QGroupBox("Text Report")
+        r_layout = QVBoxLayout(report_group)
+        r_layout.setContentsMargins(6, 6, 6, 6)
+        r_layout.addWidget(self._report_view, 1)
         export_row = QHBoxLayout()
+        # Make both buttons expand and share the full width (50/50)
+        self._export_pdf_btn.setSizePolicy(
+            QSizePolicy.Policy.Expanding, self._export_pdf_btn.sizePolicy().verticalPolicy()
+        )
+        self._export_excel_btn.setSizePolicy(
+            QSizePolicy.Policy.Expanding, self._export_excel_btn.sizePolicy().verticalPolicy()
+        )
         export_row.addWidget(self._export_pdf_btn)
         export_row.addWidget(self._export_excel_btn)
-        root.addLayout(export_row)
+        export_row.setStretch(0, 1)
+        export_row.setStretch(1, 1)
+        r_layout.addLayout(export_row)
+        grid.addWidget(report_group, 1, 1)
+
+        # Make all grid cells expand evenly
+        grid.setRowStretch(0, 1)
+        grid.setRowStretch(1, 1)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+
+        root.addWidget(bottom_container, 1)
 
     def _connect_signals(self) -> None:
         self._export_pdf_btn.clicked.connect(self._on_export_pdf)
@@ -340,6 +412,22 @@ class ResultsView(QWidget):
         criteria: object | None,
     ) -> None:
         rows = build_alarm_rows(results, validation, criteria)
+        self._alarms_table.setRowCount(0)
+        if not rows:
+            # Friendly empty state when there are no alarms
+            self._alarms_table.setRowCount(1)
+            self._alarms_table.setItem(0, 0, QTableWidgetItem(""))
+            self._alarms_table.setItem(0, 1, QTableWidgetItem(""))
+            self._alarms_table.setItem(
+                0,
+                2,
+                QTableWidgetItem("No alarms for this condition."),
+            )
+            self._alarms_table.setItem(0, 3, QTableWidgetItem(""))
+            self._alarms_table.setItem(0, 4, QTableWidgetItem(""))
+            self._alarms_table.setItem(0, 5, QTableWidgetItem(""))
+            return
+
         self._alarms_table.setRowCount(len(rows))
         for row, ar in enumerate(rows):
             self._alarms_table.setItem(row, 0, QTableWidgetItem(str(ar.no)))
@@ -359,6 +447,19 @@ class ResultsView(QWidget):
     def _populate_criteria_table(self, criteria: object | None) -> None:
         self._criteria_table.setRowCount(0)
         if not criteria or not hasattr(criteria, "lines"):
+            # Show a friendly empty state instead of a blank table
+            self._criteria_table.setRowCount(1)
+            self._criteria_table.setItem(0, 0, QTableWidgetItem(""))
+            self._criteria_table.setItem(0, 1, QTableWidgetItem(""))
+            self._criteria_table.setItem(
+                0,
+                2,
+                QTableWidgetItem("No criteria results yet – compute a condition to populate this table."),
+            )
+            self._criteria_table.setItem(0, 3, QTableWidgetItem(""))
+            self._criteria_table.setItem(0, 4, QTableWidgetItem(""))
+            self._criteria_table.setItem(0, 5, QTableWidgetItem(""))
+            self._criteria_table.setItem(0, 6, QTableWidgetItem(""))
             return
         for row, line in enumerate(criteria.lines):
             self._criteria_table.insertRow(row)

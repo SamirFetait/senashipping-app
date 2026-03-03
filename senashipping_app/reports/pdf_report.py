@@ -620,6 +620,7 @@ def export_condition_to_pdf(
             styles["Normal"],
         )
     )
+    story.append(Paragraph(f"Voyage: {voyage.name} {voyage.departure_port} -> {voyage.arrival_port}", styles["Normal"]))
     story.append(Paragraph(f"Condition: {condition.name}", styles["Normal"]))
     story.append(Spacer(1, 0.5 * cm))
 

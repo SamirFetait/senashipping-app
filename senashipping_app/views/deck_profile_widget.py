@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
     QGraphicsTextItem,
     QGraphicsPolygonItem,
     QMenu,
+    QToolTip,
 )
 
 from senashipping_app.views.graphics_views import ShipGraphicsView
@@ -327,6 +328,7 @@ class ProfileView(ShipGraphicsView):
         
         self._load_profile()
         self._scene.selectionChanged.connect(self._on_selection_changed)
+        self._hover_menu_active: bool = False
     
     def _on_selection_changed(self) -> None:
         """Emit full selected pen set (multi-selection)."""
@@ -405,6 +407,64 @@ class ProfileView(ShipGraphicsView):
     def fit_to_view(self) -> None:
         """Fit profile drawing to view (same as resize/load)."""
         self._fit_scene_to_view()
+
+    def mousePressEvent(self, event) -> None:
+        """
+        When clicking on an area where multiple pens/tanks overlap, show a small
+        menu so the user can choose which pen/tank they want details for.
+        Single-item clicks fall back to the normal selection behaviour.
+        """
+        if not self._scene or self._hover_menu_active:
+            super().mousePressEvent(event)
+            return
+
+        # Left-click only; let other buttons behave normally
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+
+        scene_pos = self.mapToScene(event.position().toPoint())
+        items_at_pos = self._scene.items(scene_pos)
+        selectable_items: list[QGraphicsItem] = [
+            it for it in items_at_pos if isinstance(it, (TankPolygonItem, PenMarkerItem))
+        ]
+
+        # Only show menu when more than one selectable item is under the cursor
+        if len(selectable_items) <= 1:
+            super().mousePressEvent(event)
+            return
+
+        self._hover_menu_active = True
+        try:
+            menu = QMenu(self)
+            action_to_item: dict[object, QGraphicsItem] = {}
+            for it in selectable_items:
+                tooltip = it.toolTip() if hasattr(it, "toolTip") else ""
+                first_line = (tooltip or "").splitlines()[0].strip()
+                if not first_line:
+                    if isinstance(it, PenMarkerItem):
+                        first_line = f"Pen {getattr(it, 'pen_id', '')}"
+                    elif isinstance(it, TankPolygonItem):
+                        first_line = f"Tank {getattr(it, 'tank_id', '')}"
+                    else:
+                        first_line = "Item"
+                action = menu.addAction(first_line)
+                action_to_item[action] = it
+
+            global_pos = event.globalPosition().toPoint()
+            chosen = menu.exec(global_pos)
+            if not chosen:
+                return
+            chosen_item = action_to_item.get(chosen)
+            if chosen_item is not None:
+                self._scene.clearSelection()
+                chosen_item.setSelected(True)
+                # Also show the standard tooltip/details for the chosen item
+                tip = chosen_item.toolTip() if hasattr(chosen_item, "toolTip") else ""
+                if tip:
+                    QToolTip.showText(global_pos, tip, self)
+        finally:
+            self._hover_menu_active = False
 
     def _load_profile(self) -> None:
         """Load ship profile from DXF. Add hull fill and keel baseline. No placeholder."""

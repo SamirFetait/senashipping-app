@@ -1743,6 +1743,25 @@ class ConditionTableWidget(QWidget):
                         combo.setCurrentText(current_text)
                     elif all_cargo_names:
                         combo.setCurrentIndex(0)
+
+    def apply_cargo_to_all_pens(self, cargo_name: str) -> None:
+        """
+        Apply the given cargo name to all livestock pens on decks DK1–DK7.
+
+        This uses the same bulk-apply logic as the per-deck header dropdown,
+        but runs it for every livestock deck so a single cargo selection
+        (e.g. from the main Cargo type input) updates the whole ship at once.
+        """
+        cargo_name = (cargo_name or "").strip()
+        if not cargo_name or cargo_name == "-- Blank --":
+            return
+        # Only allow cargoes that exist in the current library
+        if not any((getattr(c, "name", "") or "").strip() == cargo_name for c in self._current_cargo_types):
+            return
+
+        for deck_num in range(1, 8):
+            tab_name = f"Livestock-DK{deck_num}"
+            self._on_header_cargo_changed(tab_name, cargo_name)
     
     def _on_header_cargo_changed(self, tab_name: str, cargo: str) -> None:
         """Handle cargo selection from header combo - apply to all rows in the table."""

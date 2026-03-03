@@ -96,9 +96,23 @@ class ConditionEditorView(QWidget):
         self._cargo_type_combo.setEditable(True)  # allow typing if not in library
         self._cargo_type_combo.setMinimumWidth(180)
         self._cargo_library_btn = QPushButton("Edit library...", self)
+
+        # Top-bar text inputs
+        self._voyage_name_edit = QLineEdit(self)
+        self._voyage_name_edit.setPlaceholderText("Voyage name")
+        self._voyage_name_edit.setFixedWidth(160)
+
+        self._departure_port_edit = QLineEdit(self)
+        self._departure_port_edit.setPlaceholderText("Dept. Port")
+        self._departure_port_edit.setFixedWidth(120)
+
+        self._arrival_port_edit = QLineEdit(self)
+        self._arrival_port_edit.setPlaceholderText("Arr. Port")
+        self._arrival_port_edit.setFixedWidth(120)
+
         self._condition_name_edit = QLineEdit(self)
-        self._condition_name_edit.setPlaceholderText("e.g. Ballast departure")
-        self._condition_name_edit.setMinimumWidth(180)
+        self._condition_name_edit.setPlaceholderText("Condition name")
+        self._condition_name_edit.setFixedWidth(180)
         self._tank_table = QTableWidget(self)
         self._tank_table.setColumnCount(3)
         self._tank_table.setHorizontalHeaderLabels(
@@ -213,14 +227,20 @@ class ConditionEditorView(QWidget):
             }
         """)
 
-        # Top controls – single-ship: ship read-only; condition name then cargo type
+        # Top controls – single-ship: ship; voyage + ports; condition name; cargo type
         top = QHBoxLayout()
         top.setSpacing(8)
         top.addWidget(QLabel("Ship:", self))
         top.addWidget(self._ship_label, 1)
         self._ship_label.setStyleSheet("color: #555; padding: 4px;")
-        top.addWidget(QLabel("Condition name:", self))
-        top.addWidget(self._condition_name_edit, 1)
+        top.addWidget(QLabel("Voyage:", self))
+        top.addWidget(self._voyage_name_edit)
+        top.addWidget(QLabel("Dept. Port:", self))
+        top.addWidget(self._departure_port_edit)
+        top.addWidget(QLabel("Arr. Port:", self))
+        top.addWidget(self._arrival_port_edit)
+        top.addWidget(QLabel("Condition:", self))
+        top.addWidget(self._condition_name_edit)
         top.addWidget(QLabel("Cargo type:", self))
         top.addWidget(self._cargo_type_combo, 2)
         top.addWidget(self._cargo_library_btn)
@@ -295,6 +315,10 @@ class ConditionEditorView(QWidget):
         volumes = self._current_condition.tank_volumes_m3 if self._current_condition else {}
         pen_loads = getattr(self._current_condition, "pen_loadings", {}) or {} if self._current_condition else {}
         self._update_condition_table(pens, tanks, pen_loads, volumes)
+        # When a cargo type is chosen from the library, apply it to all pens at once.
+        cargo_name = cargo_text.strip()
+        if cargo_name and cargo_name != "-- Blank --" and hasattr(self._condition_table, "apply_cargo_to_all_pens"):
+            self._condition_table.apply_cargo_to_all_pens(cargo_name)
 
     def _load_ships(self) -> None:
         self._ship_combo.clear()
@@ -592,6 +616,10 @@ class ConditionEditorView(QWidget):
             self._condition_combo.setCurrentIndex(idx)
         self._condition_combo.blockSignals(False)
 
+        # Update top bar fields with voyage and condition names and ports
+        self._voyage_name_edit.setText(voyage.name or "")
+        self._departure_port_edit.setText(getattr(voyage, "departure_port", "") or "")
+        self._arrival_port_edit.setText(getattr(voyage, "arrival_port", "") or "")
         self._condition_name_edit.setText(condition.name)
         self._set_cargo_type_text(condition.name)
         self._ship_label.setText(ship.name if ship else "—")
@@ -626,12 +654,20 @@ class ConditionEditorView(QWidget):
         if index <= 0:
             self._current_voyage = None
             self._current_condition = None
+            # No voyage selected: clear voyage and port display
+            self._voyage_name_edit.clear()
+            self._departure_port_edit.clear()
+            self._arrival_port_edit.clear()
             # When no voyage selected, ensure cargo is "-- Blank --" to show blank values
             if self._cargo_type_combo.count() > 0:
                 self._cargo_type_combo.setCurrentIndex(0)  # "-- Blank --"
         elif index - 1 < len(self._voyages):
             self._current_voyage = self._voyages[index - 1]
             self._current_condition = None
+            # Show selected voyage details in the top bar fields
+            self._voyage_name_edit.setText(self._current_voyage.name or "")
+            self._departure_port_edit.setText(getattr(self._current_voyage, "departure_port", "") or "")
+            self._arrival_port_edit.setText(getattr(self._current_voyage, "arrival_port", "") or "")
         self._load_conditions()
         self._save_condition_btn.setEnabled(True)
         if self._current_ship:
@@ -666,6 +702,38 @@ class ConditionEditorView(QWidget):
         condition_name = self._condition_name_edit.text().strip() or self._cargo_type_combo.currentText().strip() or "Condition"
         if not self._condition_name_edit.text().strip():
             self._condition_name_edit.setText(condition_name)
+
+        # Keep voyage name and ports in sync with the top-bar inputs so reports (text/PDF/Excel)
+        # see the same values the user sees here.
+        voyage_name = self._voyage_name_edit.text().strip()
+        departure_port = self._departure_port_edit.text().strip()
+        arrival_port = self._arrival_port_edit.text().strip()
+        voyage = self._current_voyage
+        if voyage_name or departure_port or arrival_port:
+            if voyage is None:
+                # Ad-hoc voyage (not stored in DB) – create an in-memory Voyage used for reports.
+                voyage = Voyage(
+                    id=None,
+                    ship_id=self._current_ship.id if self._current_ship else None,
+                    name=voyage_name or "Ad-hoc",
+                    departure_port=departure_port,
+                    arrival_port=arrival_port,
+                )
+            else:
+                if voyage_name:
+                    voyage.name = voyage_name
+                voyage.departure_port = departure_port
+                voyage.arrival_port = arrival_port
+                # Persist changes when this voyage exists in the database.
+                if voyage.id is not None and database.SessionLocal is not None:
+                    with database.SessionLocal() as db:
+                        svc = VoyageService(db)
+                        try:
+                            svc.save_voyage(voyage)
+                        except VoyageValidationError:
+                            # Validation errors are surfaced via Voyage Planner; avoid blocking compute here.
+                            pass
+            self._current_voyage = voyage
 
         condition = LoadingCondition(
             id=self._current_condition.id if self._current_condition else None,
@@ -829,6 +897,16 @@ class ConditionEditorView(QWidget):
         if database.SessionLocal is None:
             return
 
+        # Update current voyage name and ports from top-bar inputs before saving condition
+        voyage_name = self._voyage_name_edit.text().strip()
+        departure_port = self._departure_port_edit.text().strip()
+        arrival_port = self._arrival_port_edit.text().strip()
+        if self._current_voyage:
+            if voyage_name:
+                self._current_voyage.name = voyage_name
+            self._current_voyage.departure_port = departure_port
+            self._current_voyage.arrival_port = arrival_port
+
         # Build condition from current form (same as compute but we need volumes)
         condition_name = self._condition_name_edit.text().strip() or self._cargo_type_combo.currentText().strip() or "Condition"
         tank_volumes: Dict[int, float] = {}
@@ -836,6 +914,14 @@ class ConditionEditorView(QWidget):
 
         with database.SessionLocal() as db:
             cond_service = ConditionService(db)
+            # Persist voyage changes (name/ports) so Voyage Planner and later sessions see them
+            if self._current_voyage and self._current_voyage.id is not None:
+                voy_svc = VoyageService(db)
+                try:
+                    self._current_voyage = voy_svc.save_voyage(self._current_voyage)
+                except VoyageValidationError:
+                    # Keep going; condition can still be saved even if voyage validation fails.
+                    pass
             tanks = cond_service.get_tanks_for_ship(self._current_ship.id)
             tank_by_id = {t.id: t for t in tanks}
 
