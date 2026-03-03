@@ -8,7 +8,7 @@ This document explains how the Sena Marine app computes loading conditions: disp
 
 ## Table of contents
 
-1. [Calculation flow (big picture)](#1-calculation-flow-big-picture)
+1. [Calculation flow](#1-calculation-flow-big-picture)
 2. [Inputs: ship, tanks, condition, livestock](#2-inputs-ship-tanks-condition-livestock)
 3. [Mass and centers of gravity](#3-mass-and-centers-of-gravity)
 4. [Displacement](#4-displacement)
@@ -27,7 +27,7 @@ This document explains how the Sena Marine app computes loading conditions: disp
 
 ---
 
-## 1. Calculation flow 
+## 1. Calculation flow
 
 When you press **Compute**, the app:
 
