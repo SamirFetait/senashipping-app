@@ -804,27 +804,46 @@ class ConditionTableWidget(QWidget):
             all_table.setItem(row, 14, QTableWidgetItem(f"{deck_data.get('lcg_moment', 0.0):.2f}"))
     
     def _on_table_selection_changed(self, table: QTableWidget) -> None:
-        """Handle table selection change - sync to deck layout."""
+        """Handle table selection change - sync to deck/profile layout."""
         if self._syncing_selection or not self._deck_profile_widget:
             return
-        
-        # Get selected pen IDs from the table
-        selected_pen_ids = set()
+
+        # Determine which logical tab this table belongs to
+        tab_name = None
+        for name, tbl in self._table_widgets.items():
+            if tbl is table:
+                tab_name = name
+                break
+
+        selected_pen_ids: set[int] = set()
+        selected_tank_ids: set[int] = set()
+
         selection_model = table.selectionModel()
         if selection_model:
-            selected_rows = selection_model.selectedRows()
-            for index in selected_rows:
+            for index in selection_model.selectedRows():
                 row = index.row()
-                item = table.item(row, 0)
-                if item:
+
+                # Tank category tabs: select tanks by tank id stored on Name column
+                if tab_name in TANK_CATEGORY_NAMES:
+                    name_item = table.item(row, self.TANK_COL_NAME)
+                    if not name_item:
+                        continue
+                    tank_id = name_item.data(Qt.ItemDataRole.UserRole)
+                    if tank_id:
+                        selected_tank_ids.add(tank_id)
+                else:
+                    # Livestock and "All" tabs: select pens by id stored on first column
+                    item = table.item(row, 0)
+                    if not item:
+                        continue
                     pen_id = item.data(Qt.ItemDataRole.UserRole)
                     if pen_id:
                         selected_pen_ids.add(pen_id)
-        
-        # Update deck layout selection
+
+        # Update deck/profile selection (both pens and tanks)
         self._syncing_selection = True
         try:
-            self._deck_profile_widget.set_selected(selected_pen_ids, set())
+            self._deck_profile_widget.set_selected(selected_pen_ids, selected_tank_ids)
         finally:
             self._syncing_selection = False
     
@@ -833,6 +852,10 @@ class ConditionTableWidget(QWidget):
         if self._syncing_selection:
             return
         
+        # Guard against callers passing None instead of empty sets
+        pen_ids = pen_ids or set()
+        tank_ids = tank_ids or set()
+
         self._syncing_selection = True
         try:
             for tab_name, table in self._table_widgets.items():
@@ -843,12 +866,22 @@ class ConditionTableWidget(QWidget):
                 mode = table.selectionMode()
                 table.setSelectionMode(QTableWidget.SelectionMode.MultiSelection)
                 for row in range(table.rowCount()):
-                    item = table.item(row, 0)
-                    if not item:
-                        continue
-                    pen_id = item.data(Qt.ItemDataRole.UserRole)
-                    if pen_id in pen_ids:
-                        table.selectRow(row)
+                    if tab_name in TANK_CATEGORY_NAMES:
+                        # Tank category tables: match by tank id stored on Name column
+                        name_item = table.item(row, self.TANK_COL_NAME)
+                        if not name_item:
+                            continue
+                        tank_id = name_item.data(Qt.ItemDataRole.UserRole)
+                        if tank_id in tank_ids:
+                            table.selectRow(row)
+                    else:
+                        # Livestock and "All" tabs: match by pen id stored on first column
+                        item = table.item(row, 0)
+                        if not item:
+                            continue
+                        pen_id = item.data(Qt.ItemDataRole.UserRole)
+                        if pen_id in pen_ids:
+                            table.selectRow(row)
                 table.setSelectionMode(mode)
         finally:
             self._syncing_selection = False
@@ -1155,15 +1188,15 @@ class ConditionTableWidget(QWidget):
                     else:
                         area_per_head = pen.area_m2 / initial_heads if initial_heads > 0 else 1.85
                 
-                # Calculate maximum heads based on area constraint
-                max_heads_by_area = int(pen.area_m2 / area_per_head) if area_per_head > 0 else 0
+                # Calculate maximum heads based on area constraint (rounded to nearest integer)
+                max_heads_by_area = int(round(pen.area_m2 / area_per_head)) if area_per_head > 0 else 0
                 max_heads_by_capacity = int(pen.capacity_head) if pen.capacity_head > 0 else max_heads_by_area
                 
                 if preserved_head_counts and pen_id in preserved_head_counts:
                     heads = preserved_head_counts[pen_id]
                     if area_per_head > 0:
                         area_used = min(heads * area_per_head, pen.area_m2)
-                        head_capacity = int(pen.area_m2 / area_per_head)
+                        head_capacity = int(round(pen.area_m2 / area_per_head))
                     else:
                         area_used = 0.0
                         head_capacity = 0
@@ -1181,7 +1214,7 @@ class ConditionTableWidget(QWidget):
                     else:
                         heads = initial_heads
                     area_used = min(heads * area_per_head, pen.area_m2) if heads > 0 else 0.0
-                    head_capacity = int(pen.area_m2 / area_per_head) if area_per_head > 0 else 0
+                    head_capacity = int(round(pen.area_m2 / area_per_head)) if area_per_head > 0 else 0
                 
                 head_pct = (heads / head_capacity * 100.0) if head_capacity > 0 else 0.0
                 weight_mt = heads * mass_per_head_t
@@ -1237,7 +1270,7 @@ class ConditionTableWidget(QWidget):
             head_pct_item = QTableWidgetItem(f"{head_pct:.2f}")
             head_pct_item.setFlags(head_pct_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 3, head_pct_item)
-            # Head Capacity (col 4) - calculated from Total Area / Area per Head, floored to integer, read-only
+            # Head Capacity (col 4) - calculated from Total Area / Area per Head, rounded to nearest integer, read-only
             cap_item = QTableWidgetItem(str(head_capacity))
             cap_item.setFlags(cap_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 4, cap_item)
@@ -1922,10 +1955,10 @@ class ConditionTableWidget(QWidget):
             mass_per_head_t = MASS_PER_HEAD_T
             area_per_head = pen.area_m2 / heads if heads > 0 else 0.0
         
-        # Calculate maximum heads based on area constraint: max_heads = floor(Total Area / Area per Head)
+        # Calculate maximum heads based on area constraint: max_heads = round(Total Area / Area per Head)
         max_heads_by_area = 0
         if area_per_head > 0:
-            max_heads_by_area = int(pen.area_m2 / area_per_head)
+            max_heads_by_area = int(round(pen.area_m2 / area_per_head))
         
         # Calculate maximum heads based on capacity constraint
         max_heads_by_capacity = int(pen.capacity_head) if pen.capacity_head > 0 else max_heads_by_area
@@ -1951,8 +1984,8 @@ class ConditionTableWidget(QWidget):
             # Ensure Used Area Γëñ Total Area (safety check)
             area_used = min(area_used, pen.area_m2)
             
-            # Head Capacity = Total Area / Area per Head (max capacity based on area), floored to integer
-            head_capacity = int(pen.area_m2 / area_per_head) if area_per_head > 0 else 0
+            # Head Capacity = Total Area / Area per Head (max capacity based on area), rounded to nearest integer
+            head_capacity = int(round(pen.area_m2 / area_per_head)) if area_per_head > 0 else 0
         else:
             # Use current heads value but cap it to maximums
             heads = max(0, heads)
@@ -1967,8 +2000,8 @@ class ConditionTableWidget(QWidget):
             # Ensure Used Area Γëñ Total Area (safety check)
             area_used = min(area_used, pen.area_m2)
             
-            # Head Capacity = Total Area / Area per Head (max capacity based on area), floored to integer
-            head_capacity = int(pen.area_m2 / area_per_head) if area_per_head > 0 else 0
+            # Head Capacity = Total Area / Area Per Head (max capacity based on area), rounded to nearest integer
+            head_capacity = int(round(pen.area_m2 / area_per_head)) if area_per_head > 0 else 0
         
         # Head %Full = (Head / Head Capacity) * 100
         head_pct = (heads / head_capacity * 100.0) if head_capacity > 0 else 0.0

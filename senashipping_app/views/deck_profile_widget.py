@@ -182,13 +182,15 @@ class TankPolygonItem(QGraphicsPathItem):
         highlight in blue so the chosen tank stands out.
         """
         if self.isSelected():
-            self.setPen(QPen(QColor(0, 100, 255), 2.5))
-            self.setBrush(QBrush(QColor(100, 160, 255, 80)))
+            # Hairline blue outline (thinnest) with light fill for selection.
+            self.setPen(QPen(QColor(0, 120, 255), 0))
+            self.setBrush(QBrush(QColor(0, 120, 255, 80)))
         elif self._hover:
-            self.setPen(QPen(QColor(80, 140, 255), 1.5))
-            self.setBrush(QBrush(QColor(200, 220, 255, 40)))
+            # Very light blue on hover.
+            self.setPen(QPen(QColor(80, 160, 255), 1.0))
+            self.setBrush(QBrush(QColor(80, 160, 255, 30)))
         else:
-            # Match DXF look: cosmetic hairline dark gray, no fill
+            # Neutral, unobtrusive default that matches DXF.
             base_pen = QPen(Qt.GlobalColor.darkGray, 0)
             self.setPen(base_pen)
             self.setBrush(QBrush(Qt.BrushStyle.NoBrush))
@@ -204,10 +206,15 @@ class TankPolygonItem(QGraphicsPathItem):
         self._update_style()
         super().hoverLeaveEvent(event)
 
-    def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value) -> None:
-        if change == QGraphicsItem.GraphicsItemChange.ItemSelectedChange:
+    def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
+        """
+        Update style *after* Qt has actually applied the new selection state.
+        Use ItemSelectedHasChanged so isSelected() reflects the current value.
+        """
+        result = super().itemChange(change, value)
+        if change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
             self._update_style()
-        return super().itemChange(change, value)
+        return result
 
     @property
     def tank_id(self) -> int:
@@ -234,12 +241,15 @@ class PenMarkerItem(QGraphicsRectItem):
         Style pen marker rectangles: thin dark gray normally, blue when hovered/selected.
         """
         if self.isSelected():
-            self.setPen(QPen(QColor(0, 150, 255), 1.5))
-            self.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+            # Hairline blue outline and subtle fill for selected pens.
+            self.setPen(QPen(QColor(0, 120, 255), 0))
+            self.setBrush(QBrush(QColor(0, 120, 255, 80)))
         elif self._hover:
-            self.setPen(QPen(QColor(100, 180, 255), 1.2))
-            self.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+            # Slight blue hint on hover.
+            self.setPen(QPen(QColor(80, 170, 255), 1.0))
+            self.setBrush(QBrush(QColor(80, 170, 255, 30)))
         else:
+            # Neutral default: thin gray outline, no fill.
             self.setPen(QPen(Qt.GlobalColor.darkGray, 0))
             self.setBrush(QBrush(Qt.BrushStyle.NoBrush))
         self.update()
@@ -254,10 +264,15 @@ class PenMarkerItem(QGraphicsRectItem):
         self._update_style()
         super().hoverLeaveEvent(event)
 
-    def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value) -> None:
-        if change == QGraphicsItem.GraphicsItemChange.ItemSelectedChange:
+    def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
+        """
+        Update style only after the selection state has actually changed,
+        so the first click immediately shows the blue highlight.
+        """
+        result = super().itemChange(change, value)
+        if change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
             self._update_style()
-        return super().itemChange(change, value)
+        return result
 
     @property
     def pen_id(self) -> int:
