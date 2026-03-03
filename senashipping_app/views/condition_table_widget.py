@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QStyledItemDelegate,
     QLineEdit,
+    QAbstractItemView,
 )
 from PyQt6.QtGui import QDoubleValidator, QKeyEvent
 
@@ -141,12 +142,12 @@ class ConditionTableWidget(QWidget):
         bottom.addStretch()
 
         # TODO: Add button to add tank or pen
-        # self._add_btn = QPushButton("+", self)
-        # self._add_btn.setFixedSize(32, 28)
-        # self._add_btn.setToolTip("Add tank or pen ΓÇô define in Tools ΓåÆ Ship & data setup, then they appear here")
-        # self._add_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-size: 16px; font-weight: bold; border: none; border-radius: 3px; } QPushButton:hover { background-color: #45a049; }")
-        # self._add_btn.clicked.connect(self._on_add_clicked)
-        # bottom.addWidget(self._add_btn)
+        self._add_btn = QPushButton("+", self)
+        self._add_btn.setFixedSize(32, 28)
+        self._add_btn.setToolTip("Add tank or pen ΓÇô define in Tools ΓåÆ Ship & data setup, then they appear here")
+        self._add_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-size: 16px; font-weight: bold; border: none; border-radius: 3px; } QPushButton:hover { background-color: #45a049; }")
+        self._add_btn.clicked.connect(self._on_add_clicked)
+        bottom.addWidget(self._add_btn)
         layout.addLayout(bottom)
         
     def _on_add_clicked(self) -> None:
@@ -373,6 +374,15 @@ class ConditionTableWidget(QWidget):
         table.setAlternatingRowColors(True)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)  # Allow multi-selection (Ctrl+click, Shift+click)
+        # Make scrolling and painting cheaper for large tables (guard methods for older Qt/PyQt)
+        if hasattr(table, "setUniformRowHeights"):
+            table.setUniformRowHeights(True)
+        if hasattr(table, "setWordWrap"):
+            table.setWordWrap(False)
+        if hasattr(table, "setHorizontalScrollMode"):
+            table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        if hasattr(table, "setVerticalScrollMode"):
+            table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         # Minimum row height so cell widgets (e.g. QComboBox) never get zero-size paint device (QPainter engine == 0)
         vh = table.verticalHeader()
         if vh is not None:
@@ -892,6 +902,11 @@ class ConditionTableWidget(QWidget):
         self._current_cargo_types = cargo_types or []
         self._current_ship_id = ship_id
         
+        # Temporarily disable painting during bulk updates to avoid flicker and lag
+        tables = list(self._table_widgets.values())
+        for table in tables:
+            table.setUpdatesEnabled(False)
+        
         # Preserve all editable data from tables before clearing (so Compute does not reset any column)
         preserved_cargo_selections: Dict[int, str] = {}  # pen_id -> cargo_name
         preserved_head_counts: Dict[int, int] = {}  # pen_id -> head_count
@@ -1049,6 +1064,10 @@ class ConditionTableWidget(QWidget):
         self._refresh_cargo_header_dropdowns()
         # Refresh VCG/LCG/TCG for all tank rows in all tank category tabs
         self.refresh_all_tank_cog_cells()
+        
+        # Re-enable painting now that all tables are updated
+        for table in tables:
+            table.setUpdatesEnabled(True)
         
     def _populate_livestock_tab(
         self,

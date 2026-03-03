@@ -14,10 +14,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
-from PyQt6.QtGui import QIcon, QDesktopServices
-from PyQt6.QtCore import Qt, QSize, QUrl
+from PyQt6.QtGui import QIcon, QDesktopServices, QPixmap
+from PyQt6.QtCore import Qt, QSize, QUrl, QTimer
 from PyQt6.QtGui import QAction, QIcon, QActionGroup, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
+    QApplication,
     QMainWindow,
     QStackedWidget,
     QWidget,
@@ -40,6 +41,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QGridLayout,
     QAbstractItemView,
+    QProgressBar,
 )
 
 from typing import Dict
@@ -91,39 +93,278 @@ class MainWindow(QMainWindow):
 
         self._status_bar = QStatusBar(self)
         self.setStatusBar(self._status_bar)
+        # Indeterminate loading indicator shown during long operations (preload, compute, file I/O)
+        self._loading_bar = QProgressBar(self)
+        self._loading_bar.setRange(0, 0)  # Busy indicator
+        self._loading_bar.setMaximumWidth(120)
+        self._loading_bar.hide()
+        self._status_bar.addPermanentWidget(self._loading_bar)
 
         # Track navigation actions for checked state
         self._nav_actions: dict[int, QAction] = {}
+        self._toolbar: QToolBar | None = None
+        # Temporary mapping used before pages are created: logical key -> action
+        self._nav_actions_by_key: dict[str, QAction] = {}
 
         # Track current file path for save
         self._current_file_path: Path | None = None
 
-        self._page_indexes = self._create_pages()
+        # Landing page shown on startup with ship images and Start button
+        self._landing_page = self._create_landing_page()
+        self._stack.addWidget(self._landing_page)
+
+        # Defer creation of heavy pages until user clicks Start Sailing
+        self._page_indexes: _PageIndexes | None = None
+        self._ship_manager: ShipManagerView | None = None
+        self._voyage_planner: VoyagePlannerView | None = None
+        self._condition_editor: ConditionEditorView | None = None
+        self._results_view: ResultsView | None = None
+        self._curves_view: CurvesView | None = None
+
         self._create_menu()
         self._create_toolbar()
         self._create_status_panel()
 
-        # Single-ship app: open on Loading Condition; Ship/Voyage are setup-only
-        self._switch_page(self._page_indexes.condition_editor, "Loading Condition")
+        # Start on landing page; user clicks Start Sailing to enter the app
+        self._stack.setCurrentWidget(self._landing_page)
+        self._set_shell_chrome_visible(False)
         self._status_bar.showMessage("Ready")
+
+        # Prepare heavy pages in the background shortly after the window appears
+        # so that clicking Start Sailing feels instant.
+        QTimer.singleShot(1000, self._ensure_pages_created)
+
+    def _create_landing_page(self) -> QWidget:
+        """Create initial landing page with ship images and a Start Sailing button."""
+        page = QWidget(self)
+        page.setObjectName("landing-page")
+        page.setStyleSheet(
+            """
+            QWidget#landing-page {
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 1,
+                    stop: 0 #0b1f33,
+                    stop: 0.5 #123552,
+                    stop: 1 #14506b
+                );
+            }
+            """
+        )
+
+        # Use stacked layout so overlay can cover content during loading
+        stack = QStackedWidget(page)
+        stack.setContentsMargins(0, 0, 0, 0)
+
+        # Main content
+        content = QWidget(page)
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(48, 32, 48, 32)
+        layout.setSpacing(32)
+
+        title = QLabel("Sena Shipping – OSAMA BEY", content)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 26px; font-weight: 700; letter-spacing: 0.5px; color: #ecf0f1;")
+
+        subtitle = QLabel("Intact stability and livestock loading assistant for professional operators", content)
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet("font-size: 13px; color: #cfd8dc;")
+
+        layout.addStretch(1)
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+
+        # Ship images laid out in a 2x2 grid inside a centered content card
+        card = QWidget(content)
+        content_layout = QVBoxLayout(card)
+        content_layout.setContentsMargins(24, 24, 24, 24)
+        content_layout.setSpacing(20)
+        card.setMaximumWidth(980)
+        card.setStyleSheet(
+            "background-color: rgba(15, 23, 42, 0.92);"
+            "border-radius: 10px;"
+            "border: 1px solid rgba(148, 163, 184, 0.35);"
+        )
+
+        grid = QGridLayout()
+        grid.setSpacing(16)
+
+        image_paths = [
+            self._settings.project_root / "assets" / "osama-1.jfif",
+            self._settings.project_root / "assets" / "osama-2.jpg",
+            self._settings.project_root / "assets" / "osama-3.jfif",
+            self._settings.project_root / "assets" / "osama-4.jfif",
+        ]
+
+        row = 0
+        col = 0
+        for idx, path in enumerate(image_paths):
+            img_label = QLabel(content)
+            # Give each image a fixed box; pixmap will be scaled to fully cover it
+            img_label.setFixedSize(420, 260)
+            img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            if path.exists():
+                pix = QPixmap(str(path))
+                if not pix.isNull():
+                    # Scale so the image completely fills the box (may crop a little)
+                    scaled = pix.scaled(
+                        img_label.size(),
+                        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                    img_label.setPixmap(scaled)
+                else:
+                    img_label.setText(f"Ship {idx + 1}")
+            else:
+                img_label.setText(f"Ship {idx + 1}")
+            img_label.setStyleSheet(
+                "border-radius: 6px;"
+                "background-color: #0f172a;"
+                "border: 1px solid rgba(148, 163, 184, 0.4);"
+            )
+            grid.addWidget(img_label, row, col)
+            col += 1
+            if col >= 2:
+                col = 0
+                row += 1
+        content_layout.addLayout(grid)
+        layout.addWidget(card, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Start button centered at bottom
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        start_btn = QPushButton("Start Sailing", content)
+        start_btn.setFixedWidth(200)
+        start_btn.setEnabled(False)  # Enabled when background preload finishes
+        start_btn.setStyleSheet(
+            "QPushButton {"
+            "  padding: 8px 20px;"
+            "  border-radius: 4px;"
+            "  background-color: #1abc9c;"
+            "  color: white;"
+            "  font-weight: bold;"
+            "  font-size: 14px;"
+            "}"
+            "QPushButton:hover {"
+            "  background-color: #16a085;"
+            "}"
+            "QPushButton:pressed {"
+            "  background-color: #149174;"
+            "}"
+        )
+        start_btn.clicked.connect(self._on_start_sailing_clicked)
+        btn_row.addWidget(start_btn)
+        page._start_btn = start_btn
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+        layout.addStretch(2)
+
+        stack.addWidget(content)
+
+        # Loading overlay: shown when user clicks Start Sailing while app loads
+        overlay = QWidget(page)
+        overlay.setObjectName("landing-overlay")
+        overlay.setStyleSheet(
+            "QWidget#landing-overlay { background-color: rgba(11, 31, 51, 0.9); }"
+        )
+        overlay_layout = QVBoxLayout(overlay)
+        overlay_layout.addStretch()
+        loading_label = QLabel("Loading application...", overlay)
+        loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        loading_label.setStyleSheet("color: #ecf0f1; font-size: 16px; font-weight: bold;")
+        overlay_layout.addWidget(loading_label)
+        overlay_prog = QProgressBar(overlay)
+        overlay_prog.setRange(0, 0)
+        overlay_prog.setFixedSize(48, 48)
+        overlay_prog.setStyleSheet(
+            "QProgressBar { border: none; border-radius: 24px; background: rgba(255,255,255,0.15); }"
+            "QProgressBar::chunk { background: #1abc9c; border-radius: 24px; }"
+        )
+        overlay_layout.addWidget(overlay_prog, alignment=Qt.AlignmentFlag.AlignCenter)
+        overlay_layout.addStretch()
+        stack.addWidget(overlay)
+
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.addWidget(stack)
+
+        page._landing_stack = stack
+        page._loading_overlay_index = 1
+
+        return page
+
+    def _on_start_sailing_clicked(self) -> None:
+        """Enter the main Loading Condition view from the landing page."""
+        # Show loading overlay on landing page while preparing
+        stack = getattr(self._landing_page, "_landing_stack", None)
+        overlay_idx = getattr(self._landing_page, "_loading_overlay_index", 1)
+        if stack is not None:
+            stack.setCurrentIndex(overlay_idx)
+        self._status_bar.showMessage("Loading Loading Condition view...")
+        QApplication.processEvents()  # Allow overlay to paint before blocking work
+        try:
+            self._ensure_pages_created()
+            if self._page_indexes is not None:
+                self._set_shell_chrome_visible(True)
+                self._switch_page(self._page_indexes.condition_editor, "Loading Condition")
+        finally:
+            if stack is not None:
+                stack.setCurrentIndex(0)  # Back to main content
+
+    def _ensure_pages_created(self) -> None:
+        """Create core application pages once, on first entry from landing page."""
+        if self._page_indexes is not None:
+            return
+        self._status_bar.showMessage("Loading application...")
+        self._set_loading(True)
+        # Show loading overlay on landing page if visible
+        stack = getattr(self._landing_page, "_landing_stack", None)
+        overlay_idx = getattr(self._landing_page, "_loading_overlay_index", 1)
+        if stack is not None and self._stack.currentWidget() is self._landing_page:
+            stack.setCurrentIndex(overlay_idx)
+        QApplication.processEvents()
+        self._page_indexes = self._create_pages()
+        # Now that we know the real page indexes, wire nav actions to them
+        self._nav_actions.clear()
+        if self._page_indexes:
+            key_to_index = {
+                "condition_editor": self._page_indexes.condition_editor,
+                "results": self._page_indexes.results,
+                "curves": self._page_indexes.curves,
+            }
+            for key, idx in key_to_index.items():
+                action = self._nav_actions_by_key.get(key)
+                if action:
+                    self._nav_actions[idx] = action
+        self._set_loading(False)
+        # Enable Start Sailing and restore Ready when still on landing (background preload finished)
+        if self._stack.currentWidget() is self._landing_page:
+            if stack is not None:
+                stack.setCurrentIndex(0)  # Hide overlay, show main content
+            self._status_bar.showMessage("Ready")
+            btn = getattr(self._landing_page, "_start_btn", None)
+            if btn is not None:
+                btn.setEnabled(True)
 
     def _create_pages(self) -> _PageIndexes:
         """Create core application pages and add them to the stacked widget."""
         # Keep references to views to allow signal wiring between them
         self._ship_manager = ShipManagerView(self)
+        QApplication.processEvents()
         self._voyage_planner = VoyagePlannerView(self)
+        QApplication.processEvents()
         self._condition_editor = ConditionEditorView(self)
+        QApplication.processEvents()
         self._results_view = ResultsView(self)
+        QApplication.processEvents()
         self._curves_view = CurvesView(self)  # GZ curve from KN table (matplotlib)
+        QApplication.processEvents()
 
         ship_idx = self._stack.addWidget(self._ship_manager)
         voy_idx = self._stack.addWidget(self._voyage_planner)
         cond_idx = self._stack.addWidget(self._condition_editor)
         res_idx = self._stack.addWidget(self._results_view)
         curves_idx = self._stack.addWidget(self._curves_view)
-
-        # Default page
-        self._stack.setCurrentIndex(cond_idx)
 
         pages = _PageIndexes(
             ship_manager=ship_idx,
@@ -154,13 +395,16 @@ class MainWindow(QMainWindow):
 
         # TODO: Add button to add tank or pen
         # Wire condition table '+' button: switch to Ship & data setup to add tanks/pens
-        # self._condition_editor._condition_table.add_requested.connect(
-        #     lambda: self._switch_page(self._page_indexes.ship_manager, "Ship & data setup – add tanks and pens")
-        # ) # 
+        self._condition_editor._condition_table.add_requested.connect(
+            lambda: self._switch_page(self._page_indexes.ship_manager, "Ship & data setup – add tanks and pens")
+        ) # 
 
         return pages
 
     def _on_condition_selected_from_voyage(self, voyage_id: int, condition_id: int) -> None:
+        self._ensure_pages_created()
+        if not self._condition_editor or not self._page_indexes:
+            return
         self._condition_editor.load_condition(voyage_id, condition_id)
         self._stack.setCurrentIndex(self._page_indexes.condition_editor)
         self._status_bar.showMessage("Loading Condition")
@@ -319,7 +563,7 @@ class MainWindow(QMainWindow):
             [QKeySequence("F2"), QKeySequence("Ctrl+1")]
         )
         loading_view_action.triggered.connect(
-            lambda: self._switch_page(self._page_indexes.condition_editor, "Loading Condition")
+            lambda: (self._ensure_pages_created(), self._page_indexes and self._switch_page(self._page_indexes.condition_editor, "Loading Condition"))
         )
         view_menu.addAction(loading_view_action)
 
@@ -328,7 +572,7 @@ class MainWindow(QMainWindow):
             [QKeySequence("F3"), QKeySequence("Ctrl+2")]
         )
         results_view_action.triggered.connect(
-            lambda: self._switch_page(self._page_indexes.results, "Results")
+            lambda: (self._ensure_pages_created(), self._page_indexes and self._switch_page(self._page_indexes.results, "Results"))
         )
         view_menu.addAction(results_view_action)
 
@@ -337,7 +581,7 @@ class MainWindow(QMainWindow):
             [QKeySequence("Ctrl+3")]
         )
         curves_view_action.triggered.connect(
-            lambda: self._switch_page(self._page_indexes.curves, "Curves")
+            lambda: (self._ensure_pages_created(), self._page_indexes and self._switch_page(self._page_indexes.curves, "Curves"))
         )
         view_menu.addAction(curves_view_action)
         view_menu.addSeparator()
@@ -576,6 +820,7 @@ class MainWindow(QMainWindow):
         toolbar.setFloatable(False)
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.addToolBar(toolbar)
+        self._toolbar = toolbar
 
         # File actions (text-only to avoid pixmap paint device errors)
         new_action = QAction("New", self)
@@ -608,22 +853,23 @@ class MainWindow(QMainWindow):
         nav_group = QActionGroup(self)
         nav_group.setExclusive(True)
 
-        def add_nav_action(text: str, page_index: int, status: str, shortcut: str | None = None) -> None:
+        def add_nav_action(text: str, key: str, status: str, shortcut: str | None = None) -> None:
             action = QAction(text, self)
             action.setCheckable(True)
             if shortcut:
                 action.setShortcut(shortcut)
             action.triggered.connect(
-                lambda _checked=False, idx=page_index, msg=status: self._switch_page(idx, msg)
+                lambda _checked=False, k=key, msg=status: self._on_nav_triggered(k, msg)
             )
             toolbar.addAction(action)
             nav_group.addAction(action)
-            self._nav_actions[page_index] = action
+            # We don't yet know the page index; store by logical key for later
+            self._nav_actions_by_key[key] = action
 
         # Single-ship app: Loading Condition, Results, Curves in main nav
-        add_nav_action("Loading Condition", self._page_indexes.condition_editor, "Loading Condition", "F2")
-        add_nav_action("Results", self._page_indexes.results, "Results", "F3")
-        add_nav_action("Curves", self._page_indexes.curves, "Curves")
+        add_nav_action("Loading Condition", "condition_editor", "Loading Condition", "F2")
+        add_nav_action("Results", "results", "Results", "F3")
+        add_nav_action("Curves", "curves", "Curves")
 
         toolbar.addSeparator()
 
@@ -690,6 +936,34 @@ class MainWindow(QMainWindow):
         menu_bar = self.menuBar()
         menu_bar.setCornerWidget(status_widget, Qt.Corner.TopRightCorner)
 
+    def _on_nav_triggered(self, key: str, status_message: str) -> None:
+        """Handle clicks on toolbar navigation buttons, creating pages on demand."""
+        if self._page_indexes is None:
+            self._status_bar.showMessage("Loading application...")
+            self._set_loading(True)
+        self._ensure_pages_created()
+        if not self._page_indexes:
+            return
+        # Ensure shell chrome is visible once user navigates away from landing
+        self._set_shell_chrome_visible(True)
+        index = getattr(self._page_indexes, key, None)
+        if index is None:
+            return
+        self._switch_page(index, status_message)
+
+    def _set_shell_chrome_visible(self, visible: bool) -> None:
+        """Show/hide menu bar and main toolbar (used to hide them on landing screen)."""
+        mb = self.menuBar()
+        if mb is not None:
+            mb.setVisible(visible)
+        if self._toolbar is not None:
+            self._toolbar.setVisible(visible)
+
+    def _set_loading(self, loading: bool) -> None:
+        """Show or hide the indeterminate loading bar in the status bar."""
+        if hasattr(self, "_loading_bar") and self._loading_bar is not None:
+            self._loading_bar.setVisible(loading)
+
     def _on_condition_computed(
         self,
         results: object,
@@ -705,7 +979,7 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage(status_message)
 
         # When switching to Curves, refresh with last condition so curve is up to date
-        if index == self._page_indexes.curves and self._last_condition_payload is not None:
+        if self._page_indexes and index == self._page_indexes.curves and self._last_condition_payload is not None:
             self._curves_view.update_curve(*self._last_condition_payload)
 
         # Update toolbar checked state (Loading Condition / Results / Curves have nav buttons)
@@ -1071,6 +1345,8 @@ class MainWindow(QMainWindow):
             return
 
         try:
+            self._set_loading(True)
+            self._status_bar.showMessage("Loading condition from file...")
             condition = load_condition_from_file(Path(file_path))
 
             # Switch to condition editor
@@ -1162,6 +1438,8 @@ class MainWindow(QMainWindow):
                 f"Failed to open condition file:\n{str(e)}"
             )
             self._status_bar.showMessage("Failed to open file", 3000)
+        finally:
+            self._set_loading(False)
 
     def _on_save(self) -> None:
         """Handle save action from toolbar."""
@@ -1248,6 +1526,8 @@ class MainWindow(QMainWindow):
         condition.pen_loadings = pen_loadings
 
         try:
+            self._set_loading(True)
+            self._status_bar.showMessage("Saving condition...")
             save_condition_to_file(file_path, condition)
             self._current_file_path = file_path
             self.setWindowTitle(f"Sena Marine for Livestock Carriers - {file_path.name}")
@@ -1259,6 +1539,8 @@ class MainWindow(QMainWindow):
                 f"Failed to save condition file:\n{str(e)}"
             )
             self._status_bar.showMessage("Failed to save file", 3000)
+        finally:
+            self._set_loading(False)
 
     def _on_import_excel(self) -> None:
         """Handle import from Excel action."""
@@ -1660,16 +1942,21 @@ class MainWindow(QMainWindow):
 
         current_widget = self._stack.currentWidget()
         if isinstance(current_widget, ConditionEditorView):
-            if current_widget.compute_condition():
-                self._status_bar.showMessage("Computation completed", 3000)
-                # If user started from Curves, return to Curves so the refreshed
-                # GZ plot is shown immediately; otherwise go to Results as before.
-                if previous_was_curves:
-                    self._switch_page(self._page_indexes.curves, "Curves")
+            self._set_loading(True)
+            self._status_bar.showMessage("Computing...")
+            try:
+                if current_widget.compute_condition():
+                    self._status_bar.showMessage("Computation completed", 3000)
+                    # If user started from Curves, return to Curves so the refreshed
+                    # GZ plot is shown immediately; otherwise go to Results as before.
+                    if previous_was_curves:
+                        self._switch_page(self._page_indexes.curves, "Curves")
+                    else:
+                        self._switch_page(self._page_indexes.results, "Results")
                 else:
-                    self._switch_page(self._page_indexes.results, "Results")
-            else:
-                self._status_bar.showMessage("Computation failed - check inputs", 3000)
+                    self._status_bar.showMessage("Computation failed - check inputs", 3000)
+            finally:
+                self._set_loading(False)
         else:
             self._status_bar.showMessage("Switch to Loading Condition view first")
 

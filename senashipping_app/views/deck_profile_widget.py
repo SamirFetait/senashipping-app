@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
     QGraphicsRectItem,
     QGraphicsTextItem,
     QGraphicsPolygonItem,
+    QMenu,
 )
 
 from senashipping_app.views.graphics_views import ShipGraphicsView
@@ -1015,6 +1016,52 @@ class DeckView(ShipGraphicsView):
         """Fit deck drawing to view (same as resize/load)."""
         self._fit_scene_to_view()
 
+    def mousePressEvent(self, event) -> None:
+        """
+        When clicking where multiple pens/tanks overlap, show a small menu to choose
+        which item to select instead of always taking the topmost one.
+        """
+        if not self._scene:
+            super().mousePressEvent(event)
+            return
+
+        # Map click to scene and collect all overlapping pen/tank items
+        scene_pos = self.mapToScene(event.position().toPoint())
+        clicked_items = self._scene.items(scene_pos)
+        selectable_items: list[QGraphicsItem] = [
+            it for it in clicked_items if isinstance(it, (TankPolygonItem, PenMarkerItem))
+        ]
+
+        if len(selectable_items) <= 1:
+            # Default selection behaviour when zero or one item under cursor
+            super().mousePressEvent(event)
+            return
+
+        # Build a context menu listing all overlapping pens/tanks
+        menu = QMenu(self)
+        action_to_item: dict[object, QGraphicsItem] = {}
+        for it in selectable_items:
+            tooltip = it.toolTip() if hasattr(it, "toolTip") else ""
+            first_line = (tooltip or "").splitlines()[0].strip()
+            if not first_line:
+                if isinstance(it, PenMarkerItem):
+                    first_line = f"Pen {getattr(it, 'pen_id', '')}"
+                elif isinstance(it, TankPolygonItem):
+                    first_line = f"Tank {getattr(it, 'tank_id', '')}"
+                else:
+                    first_line = "Item"
+            action = menu.addAction(first_line)
+            action_to_item[action] = it
+
+        chosen = menu.exec(event.globalPosition().toPoint())
+        if not chosen:
+            return
+
+        chosen_item = action_to_item.get(chosen)
+        if chosen_item is not None:
+            self._scene.clearSelection()
+            chosen_item.setSelected(True)
+
     def _on_selection_changed(self) -> None:
         """Emit full selected tank/pen sets (multi-selection)."""
         if self._syncing_selection:
@@ -1292,6 +1339,9 @@ class DeckProfileWidget(QWidget):
 
         # Bottom: deck tabs (plan/tank view) — fixed proportion (~35% height), not resizable
         self._deck_tabs = QTabWidget(self)
+        self._deck_tabs.setStyleSheet("""
+            QTabBar::tab { min-width: 90px; padding: 6px 12px; }
+        """)
         self._deck_tab_widgets: dict[str, DeckTabWidget] = {}
 
         for deck_letter in ["A", "B", "C", "D", "E", "F", "G", "H"]:

@@ -85,6 +85,8 @@ class ConditionEditorView(QWidget):
         self._current_ship: Optional[Ship] = None
         self._current_voyage: Optional[Voyage] = None
         self._current_condition: Optional[LoadingCondition] = None
+        # Track whether we've already refreshed from DB on first showEvent
+        self._has_refreshed_on_show: bool = False
 
         self._ship_combo = QComboBox(self)
         self._voyage_combo = QComboBox(self)
@@ -277,14 +279,22 @@ class ConditionEditorView(QWidget):
     
     def _on_cargo_type_changed(self, cargo_text: str) -> None:
         """Handle cargo type combo change - update condition table."""
-        if self._current_ship:
+        # Changing cargo type should not hit the database again; reuse cached pens/tanks
+        if not self._current_ship:
+            return
+        pens = getattr(self, "_current_pens", []) or []
+        tanks = getattr(self, "_current_tanks", []) or []
+        if not pens and not tanks and database.SessionLocal is not None:
+            # Fallback for safety if cache is empty (e.g. in unusual flows)
             with database.SessionLocal() as db:
                 cond_svc = ConditionService(db)
                 tanks = cond_svc.get_tanks_for_ship(self._current_ship.id)
                 pens = cond_svc.get_pens_for_ship(self._current_ship.id)
-            volumes = self._current_condition.tank_volumes_m3 if self._current_condition else {}
-            pen_loads = getattr(self._current_condition, "pen_loadings", {}) or {} if self._current_condition else {}
-            self._update_condition_table(pens, tanks, pen_loads, volumes)
+            self._current_pens = pens
+            self._current_tanks = tanks
+        volumes = self._current_condition.tank_volumes_m3 if self._current_condition else {}
+        pen_loads = getattr(self._current_condition, "pen_loadings", {}) or {} if self._current_condition else {}
+        self._update_condition_table(pens, tanks, pen_loads, volumes)
 
     def _load_ships(self) -> None:
         self._ship_combo.clear()
@@ -317,8 +327,13 @@ class ConditionEditorView(QWidget):
     def showEvent(self, event: QShowEvent) -> None:
         """Refresh pens and tanks from DB when view is shown (e.g. returning from Ship Manager)."""
         super().showEvent(event)
-        if self._current_ship and self._current_ship.id:
-            self._set_current_ship(self._current_ship)
+        if not self._current_ship or not self._current_ship.id:
+            return
+        # Skip the first show: _load_ships() has already called _set_current_ship() during init
+        if not self._has_refreshed_on_show:
+            self._has_refreshed_on_show = True
+            return
+        self._set_current_ship(self._current_ship)
 
     def _refresh_cargo_types(self) -> None:
         """Reload cargo type combo from library and keep list for dynamic calculations."""
