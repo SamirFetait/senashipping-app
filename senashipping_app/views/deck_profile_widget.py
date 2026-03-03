@@ -764,7 +764,7 @@ class ProfileView(ShipGraphicsView):
             self._waterline_fill_item.setZValue(Z_WATER)
 
             # Draw a finer, less dominant waterline
-            waterline_pen = QPen(QColor(0, 80, 200), 1.5)
+            waterline_pen = QPen(QColor(0, 80, 160), 1.5)
             waterline_pen.setCosmetic(True)
             self._waterline_item = self._scene.addLine(
                 x_left, y_aft, x_right, y_fwd, waterline_pen
