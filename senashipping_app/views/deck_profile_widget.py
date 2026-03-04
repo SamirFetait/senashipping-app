@@ -1054,8 +1054,15 @@ class DeckView(ShipGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        # Set white background
-        self._scene.setBackgroundBrush(QBrush(Qt.GlobalColor.white))
+        # Match profile view styling: light gray drawing area with dark surround and subtle frame
+        self._scene.setBackgroundBrush(QBrush(QColor(240, 240, 240)))
+        self.setStyleSheet("""
+            QGraphicsView {
+                background-color: #2d2d2d;
+                border: 1px solid #d0d0d0;
+                border-radius: 6px;
+            }
+        """)
 
         # Enable interaction for pen selection with multi-selection
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)  # Enable rubber band selection

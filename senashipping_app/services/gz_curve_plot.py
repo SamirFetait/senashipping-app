@@ -492,14 +492,31 @@ def _smooth_display_points(
     """Dense points for smooth curve display only; stats still from raw (x, y)."""
     if len(x) < 2 or len(x) != len(y):
         return x, y
-    # For display, stop at last positive GZ so we don't draw a flat segment on the zero axis
+    # For display, stop at the angle where GZ returns to zero so the right‑hand
+    # side of the curve tapers back cleanly instead of running flat along GZ = 0.
     x_use = np.asarray(x, dtype=float)
     y_use = np.asarray(y, dtype=float)
     if np.any(y_use > 0.0):
         pos_idx = np.where(y_use > 0.0)[0]
         last_pos = int(pos_idx[-1])
-        x_use = x_use[: last_pos + 1]
-        y_use = y_use[: last_pos + 1]
+        # If there is a point after the last positive value, interpolate the
+        # exact zero‑crossing between last_pos and last_pos + 1 and include it
+        # as the final knot so the curve visually reaches GZ = 0.
+        if last_pos < len(y_use) - 1:
+            y0, y1 = float(y_use[last_pos]), float(y_use[last_pos + 1])
+            x0, x1 = float(x_use[last_pos]), float(x_use[last_pos + 1])
+            if y0 > 0.0 and y1 <= 0.0 and x1 > x0:
+                # Linear interpolation for θ_zero where GZ crosses zero
+                t = y0 / (y0 - y1) if (y0 - y1) != 0.0 else 1.0
+                x_zero = x0 + t * (x1 - x0)
+                x_use = np.concatenate([x_use[: last_pos + 1], np.array([x_zero])])
+                y_use = np.concatenate([y_use[: last_pos + 1], np.array([0.0])])
+            else:
+                x_use = x_use[: last_pos + 1]
+                y_use = y_use[: last_pos + 1]
+        else:
+            x_use = x_use[: last_pos + 1]
+            y_use = y_use[: last_pos + 1]
     x_use, y_use = _sanitize_for_spline(x_use, y_use)
     if len(x_use) < 2:
         return x, y
@@ -512,24 +529,35 @@ def _smooth_display_points(
         from scipy.interpolate import PchipInterpolator
         interp = PchipInterpolator(x_knot, y_knot)
         y_fine = np.maximum(0.0, interp(x_fine))
+        # Force the curve to end exactly at GZ = 0 at the last angle
+        end_angle = float(x_use[-1])
+        end_idx = int(np.argmin(np.abs(x_fine - end_angle)))
+        y_fine[end_idx:] = 0.0
         _LOG.info("GZ curve: smooth interpolation (Pchip), %d knots -> %d points", len(x_knot), len(x_fine))
-        return x_fine, y_fine
+        # Trim any trailing flat segment beyond the zero-crossing for cleaner display
+        return x_fine[: end_idx + 1], y_fine[: end_idx + 1]
     except Exception as e:
         _LOG.debug("Pchip failed for GZ smooth display: %s", e)
     try:
         from scipy.interpolate import CubicSpline
         cs = CubicSpline(x_knot, y_knot)
         y_fine = np.maximum(0.0, cs(x_fine))
+        end_angle = float(x_use[-1])
+        end_idx = int(np.argmin(np.abs(x_fine - end_angle)))
+        y_fine[end_idx:] = 0.0
         _LOG.info("GZ curve: smooth interpolation (CubicSpline), %d knots -> %d points", len(x_knot), len(x_fine))
-        return x_fine, y_fine
+        return x_fine[: end_idx + 1], y_fine[: end_idx + 1]
     except Exception as e:
         _LOG.debug("CubicSpline failed for GZ smooth display: %s", e)
     try:
         from scipy.interpolate import interp1d
         f = interp1d(x_knot, y_knot, kind="cubic", bounds_error=False, fill_value=(y_knot[0], y_knot[-1]))
         y_fine = np.maximum(0.0, f(x_fine))
+        end_angle = float(x_use[-1])
+        end_idx = int(np.argmin(np.abs(x_fine - end_angle)))
+        y_fine[end_idx:] = 0.0
         _LOG.info("GZ curve: smooth interpolation (cubic interp1d), %d knots -> %d points", len(x_knot), len(x_fine))
-        return x_fine, y_fine
+        return x_fine[: end_idx + 1], y_fine[: end_idx + 1]
     except Exception as e:
         _LOG.debug("interp1d cubic failed for GZ smooth display: %s", e)
     # Fallback: dense linear; install scipy for a smooth curve
@@ -537,7 +565,10 @@ def _smooth_display_points(
         "GZ curve: piecewise linear (no scipy). Install scipy for smooth curve: pip install scipy"
     )
     y_fine = np.maximum(0.0, np.interp(x_fine, x_use, y_use))
-    return x_fine, y_fine
+    end_angle = float(x_use[-1])
+    end_idx = int(np.argmin(np.abs(x_fine - end_angle)))
+    y_fine[end_idx:] = 0.0
+    return x_fine[: end_idx + 1], y_fine[: end_idx + 1]
 
 
 def plot_gz_curve(
@@ -579,13 +610,20 @@ def plot_gz_curve(
     # Points used for drawing (smooth curve for display only; stats stay from raw)
     x_plot, y_plot = _smooth_display_points(x, y) if smooth_display and len(x) >= 2 else (x, y)
 
-    # Shade positive area
+    # Shade positive area (up to the vanishing-stability angle where GZ returns to zero).
     if show_area_shade and len(x_plot) > 0 and np.any(y_plot > 0):
         end_deg = range_positive_deg if range_positive_deg is not None else float(x_plot[-1])
         mask = x_plot <= end_deg
         x_shade = x_plot[mask]
         y_shade = np.maximum(0.0, y_plot[mask])
-        ax.fill_between(x_shade, 0, y_shade, color="steelblue", alpha=0.25, label="Stability energy")
+        ax.fill_between(
+            x_shade,
+            0.0,
+            y_shade,
+            color="lightblue",  # light blue fill as requested
+            alpha=0.5,
+            label="Stability energy",
+        )
 
     # Curve (smooth line for display when requested; antialiased, rounded joins)
     ax.plot(
