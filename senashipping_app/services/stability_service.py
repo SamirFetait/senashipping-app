@@ -114,9 +114,13 @@ def compute_condition(
     L = max(1e-6, L)
 
     # Lightship (empty ship) mass and CoG.
-    # If the ship has a stored lightship displacement, use that; otherwise
-    # fall back to the manual reference lightship from stability_manual_ref.
-    lightship_mass_t = max(0.0, getattr(ship, "lightship_displacement_t", 0.0)) or REF_LIGHTSHIP_DISPLACEMENT_T
+    # If the ship has a stored lightship displacement, include it in the mass
+    # balance; otherwise treat tests / ad‑hoc ships as hull‑only so that an
+    # "empty" condition really has zero displacement. The Loading Manual
+    # reference lightship (REF_LIGHTSHIP_*) is still used for hydrostatic
+    # alignment, but not added to displacement unless explicitly configured
+    # on the Ship.
+    lightship_mass_t = max(0.0, getattr(ship, "lightship_displacement_t", 0.0))
     total_mass_t = lightship_mass_t
     total_lcg_moment = lightship_mass_t * REF_LIGHTSHIP_LCG_NORM
     total_vcg_moment = lightship_mass_t * REF_LIGHTSHIP_KG_M
