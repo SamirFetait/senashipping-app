@@ -555,12 +555,15 @@ def export_condition_to_pdf(
     title_style = ParagraphStyle(
         "CustomTitle",
         parent=styles["Heading1"],
-        fontSize=16,
-        leading=20,
-        spaceAfter=6,
+        fontSize=18,
+        leading=22,
+        spaceAfter=8,
     )
-    styles["Heading3"].spaceBefore = 6
-    styles["Heading3"].spaceAfter = 2
+    # Make section headers larger and with a bit more spacing
+    styles["Heading3"].fontSize = 13
+    styles["Heading3"].leading = 16
+    styles["Heading3"].spaceBefore = 8
+    styles["Heading3"].spaceAfter = 4
     styles["Normal"].spaceAfter = 2
 
     def _draw_page_frame(canvas, _doc) -> None:
@@ -610,7 +613,7 @@ def export_condition_to_pdf(
     doc.addPageTemplates([portrait_template, landscape_template])
 
     story = []
-    story.append(Paragraph("senashipping - Loading Condition Report", title_style))
+    story.append(Paragraph("SenaShipping - Loading Condition Report", title_style))
     story.append(Spacer(1, 0.3 * cm))
 
     # Header info (ship / condition)
@@ -621,6 +624,11 @@ def export_condition_to_pdf(
         )
     )
     story.append(Paragraph(f"Voyage: {voyage.name} {voyage.departure_port} -> {voyage.arrival_port}", styles["Normal"]))
+    story.append(Paragraph(f"Date: {condition.created_at.strftime('%Y-%m-%d')}", styles["Normal"]))
+    # Use estimated voyage time from the loading condition instead of a Voyage.eta field.
+    est_days = getattr(condition, "estimated_time_days", 0.0) or 0.0
+    if est_days > 0:
+        story.append(Paragraph(f"Est. time: {est_days:.2f} days", styles["Normal"]))
     story.append(Paragraph(f"Condition: {condition.name}", styles["Normal"]))
     story.append(Spacer(1, 0.5 * cm))
 
@@ -670,17 +678,17 @@ def export_condition_to_pdf(
                 ("BACKGROUND", (0, 0), (-1, 0), "#4472C4"),
                 ("TEXTCOLOR", (0, 0), (-1, 0), "white"),
                 ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, 0), 10),
-                ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+                ("FONTSIZE", (0, 0), (-1, 0), 12),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 10),
                 ("BACKGROUND", (0, 1), (-1, -1), "#F5F5F5"),
                 ("GRID", (0, 0), (-1, -1), 0.4, "#BBBBBB"),
                 ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("FONTSIZE", (0, 0), (-1, -1), 10),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 6),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
             ]
         )
     )
@@ -728,17 +736,17 @@ def export_condition_to_pdf(
                 ("BACKGROUND", (0, 0), (-1, 0), "#4472C4"),
                 ("TEXTCOLOR", (0, 0), (-1, 0), "white"),
                 ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, 0), 10),
-                ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+                ("FONTSIZE", (0, 0), (-1, 0), 12),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 10),
                 ("BACKGROUND", (0, 1), (-1, -1), "#F5F5F5"),
                 ("GRID", (0, 0), (-1, -1), 0.4, "#BBBBBB"),
                 ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("FONTSIZE", (0, 0), (-1, -1), 10),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 6),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
             ]
         )
     )
@@ -755,8 +763,8 @@ def export_condition_to_pdf(
         items_header_style = ParagraphStyle(
             "ItemsHeader",
             parent=styles["Heading4"],
-            fontSize=8,
-            leading=9,
+            fontSize=10,
+            leading=12,
             alignment=1,  # center
             spaceBefore=0,
             spaceAfter=0,
@@ -764,8 +772,8 @@ def export_condition_to_pdf(
         items_cell_style = ParagraphStyle(
             "ItemsCell",
             parent=styles["Normal"],
-            fontSize=7,
-            leading=8,
+            fontSize=8.5,
+            leading=10,
             spaceBefore=0,
             spaceAfter=0,
         )
@@ -793,17 +801,17 @@ def export_condition_to_pdf(
                     ("BACKGROUND", (0, 0), (-1, 0), "#4472C4"),
                     ("TEXTCOLOR", (0, 0), (-1, 0), "white"),
                     ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, 0), 9),
-                    ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+                    ("FONTSIZE", (0, 0), (-1, 0), 11),
+                    ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
                     ("BACKGROUND", (0, 1), (-1, -1), "#FFFFFF"),
                     ("GRID", (0, 0), (-1, -1), 0.4, "#BBBBBB"),
                     ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9.5),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                     ("LEFTPADDING", (0, 0), (-1, -1), 4),
                     ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-                    ("TOPPADDING", (0, 0), (-1, -1), 2),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
                     ("WORDWRAP", (0, 0), (-1, -1), "CJK"),
                 ]
             )
@@ -819,7 +827,9 @@ def export_condition_to_pdf(
         # Move to a dedicated landscape page for the criteria table.
         story.append(NextPageTemplate("Landscape"))
         story.append(PageBreak())
-
+        # Add extra top spacing so the criteria block sits closer to
+        # the vertical middle of the landscape page.
+        story.append(Spacer(1, 2.5 * cm))
         story.append(_section_title("IMO / Livestock / Ancillary Criteria", styles))
         story.append(Spacer(1, 0.2 * cm))
 
@@ -862,8 +872,8 @@ def export_condition_to_pdf(
         crit_header_style = ParagraphStyle(
             "CriteriaHeader",
             parent=styles["Heading4"],
-            fontSize=8,
-            leading=9,
+            fontSize=10,
+            leading=12,
             alignment=1,  # center
             spaceBefore=0,
             spaceAfter=0,
@@ -871,8 +881,8 @@ def export_condition_to_pdf(
         crit_cell_style = ParagraphStyle(
             "CriteriaCell",
             parent=styles["Normal"],
-            fontSize=7,
-            leading=8,
+            fontSize=9,
+            leading=11,
             spaceBefore=0,
             spaceAfter=0,
         )
@@ -904,7 +914,7 @@ def export_condition_to_pdf(
             ("BACKGROUND", (0, 0), (-1, 0), "#4472C4"),
             ("TEXTCOLOR", (0, 0), (-1, 0), "white"),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), 8),
+            ("FONTSIZE", (0, 0), (-1, 0), 11),
             ("ALIGN", (0, 0), (-1, 0), "CENTER"),
             ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),
             ("TOPPADDING", (0, 0), (-1, 0), 3),
@@ -912,7 +922,7 @@ def export_condition_to_pdf(
             ("BACKGROUND", (0, 1), (-1, -1), "#FFFFFF"),
             ("GRID", (0, 0), (-1, -1), 0.4, "#BBBBBB"),
             ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-            ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("WORDWRAP", (0, 0), (-1, -1), "CJK"),
         ]
