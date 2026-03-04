@@ -32,6 +32,8 @@ from senashipping_app.repositories.livestock_pen_repository import LivestockPenR
 from senashipping_app.services.gz_curve_plot import (
     compute_gz_curve_stats,
     get_kn_table_dict,
+    prepare_gz_curve_display_points,
+    estimate_gm_from_gz_curve,
 )
 
 if TYPE_CHECKING:
@@ -262,11 +264,14 @@ def _compute_gz_curve_from_kn(
     Returns (angles_deg, gz_values, max_gz, angle_at_max, area_m_rad, range_positive_deg).
     When data is missing or invalid, returns empty curves and zeros.
     """
-    kg_m = float(getattr(results, "kg_m", 0.0) or 0.0)
     displacement_t = float(getattr(results, "displacement_t", 0.0) or 0.0)
     trim_m = float(getattr(results, "trim_m", 0.0) or 0.0)
 
-    if kg_m <= 0.0 or displacement_t <= 0.0:
+    if displacement_t <= 0.0:
+        return [], [], 0.0, 0.0, 0.0, 0.0
+
+    kg_m = float(getattr(results, "kg_m", 0.0) or 0.0)
+    if kg_m <= 0.0:
         return [], [], 0.0, 0.0, 0.0, 0.0
 
     kn_table = get_kn_table_dict(displacement_t, trim_m)
@@ -304,45 +309,32 @@ def _build_gz_curve_drawing(results, width: float = 16 * cm, height: float = 9 *
         )
         return d
 
-    gm_eff = float(getattr(results, "gm_m", 0.0) or 0.0)
-    # Match Curves view: scale Y based on max GZ, not GM
-    max_gz = max(gz_values)
-    value_max = max_gz * 1.2 if max_gz > 0.0 else 1.0
+    # GM for plotting: prefer the graphical value inferred from the GZ curve
+    # (tangent at the origin, matching the manual construction). Fall back to
+    # the raw GM from the condition only if we cannot infer it from the curve.
+    gm_graph = estimate_gm_from_gz_curve(angles_deg, gz_values)
+    gm_raw = float(getattr(results, "gm_m", 0.0) or 0.0)
+    gm_plot = gm_graph if gm_graph is not None and gm_graph > 0.0 else gm_raw
 
-    # Match Curves view: X axis and curve stop at last positive GZ (range of positive stability)
-    # Build plotting arrays truncated at the last positive GZ, including an interpolated zero-crossing.
-    if range_positive > 0.0:
-        x_max = range_positive
-    else:
-        x_max = max(angles_deg) if angles_deg else 90.0
-
-    plot_angles: list[float] = []
-    plot_gz: list[float] = []
-    for i, (a, g) in enumerate(zip(angles_deg, gz_values)):
-        a_f = float(a)
-        g_f = float(g)
-        if a_f < x_max:
-            plot_angles.append(a_f)
-            plot_gz.append(g_f)
-            continue
-        if a_f == x_max:
-            plot_angles.append(a_f)
-            plot_gz.append(max(0.0, g_f))
-            break
-        # a_f > x_max: interpolate between previous point and this one to get GZ at x_max
-        if not plot_angles:
-            break
-        a0 = plot_angles[-1]
-        g0 = plot_gz[-1]
-        span = a_f - a0
-        t = 0.0 if span == 0.0 else (x_max - a0) / span
-        g_x = g0 + t * (g_f - g0)
-        plot_angles.append(x_max)
-        plot_gz.append(max(0.0, g_x))
-        break
-    if not plot_angles:
+    # Match Curves view display: use the same smoothing and zero-cross handling
+    # as the on-screen Matplotlib plot so the PDF curve has the same shape.
+    plot_angles, plot_gz = prepare_gz_curve_display_points(angles_deg, gz_values)
+    if not plot_angles or not plot_gz:
+        # Fallback to raw data if smoothing could not be applied.
         plot_angles = [float(a) for a in angles_deg]
         plot_gz = [float(g) for g in gz_values]
+
+    x_max = max(plot_angles) if plot_angles else (max(angles_deg) if angles_deg else 90.0)
+
+    # Match Curves view Y‑scaling: base it on the plotted GZ values, then
+    # ensure the GM level is comfortably inside the range.
+    if plot_gz:
+        y_max_val = max(plot_gz)
+    else:
+        y_max_val = max(gz_values) if gz_values else 1.0
+    value_max = max(0.5, y_max_val * 1.20)
+    if gm_plot > 0.0:
+        value_max = max(value_max, gm_plot * 1.25)
 
     def map_point(angle_deg: float, gz: float) -> tuple[float, float]:
         x = left + (angle_deg / x_max) * plot_width
@@ -354,8 +346,10 @@ def _build_gz_curve_drawing(results, width: float = 16 * cm, height: float = 9 *
     d.add(Line(left, bottom, right, bottom, strokeColor=axis_color, strokeWidth=1))
     d.add(Line(left, bottom, left, top, strokeColor=axis_color, strokeWidth=1))
 
-    # X-axis ticks and labels (angle of heel)
-    for angle in (0, 10, 20, 30, 40, 50, 60, 75, 90):
+    # X-axis ticks and labels (angle of heel) – cover the full range of the curve,
+    # aligned with the KN table angles (10° spacing, capped at 180°).
+    max_tick_angle = min(180, int(math.ceil(x_max / 10.0)) * 10)
+    for angle in range(0, max_tick_angle + 1, 10):
         if angle > x_max:
             continue
         x = left + (angle / x_max) * plot_width
@@ -412,7 +406,7 @@ def _build_gz_curve_drawing(results, width: float = 16 * cm, height: float = 9 *
     )
 
     # GM horizontal guide (clamped into plot area)
-    gm_clamped = max(0.0, min(gm_eff, value_max))
+    gm_clamped = max(0.0, min(gm_plot, value_max))
     gm_y = bottom + (gm_clamped / value_max) * plot_height
     gm_color = colors.HexColor("#808080")
     d.add(
@@ -503,6 +497,83 @@ def _build_gz_curve_drawing(results, width: float = 16 * cm, height: float = 9 *
             fillColor=guide_color,
         )
     )
+
+    # Additional geometric guides (GM and φ = 1 radian) to mirror the Curves view,
+    # using the GM derived from the GZ curve where possible.
+    # Use the plot rectangle so these guides align with the displayed GZ curve.
+    if x_max > 0:
+        # Vertical guide at φ = 1 radian (≈57.3°), clamped into the plot area.
+        angle_guide = min(math.degrees(1.0), x_max)
+        x_guide = left + (angle_guide / x_max) * plot_width
+
+        # GM level, clamped into the visible Y‑range
+        gm_clamped = max(0.0, min(gm_plot, value_max))
+        if gm_clamped > 0.0:
+            gm_y = bottom + (gm_clamped / value_max) * plot_height
+            guide_color2 = colors.HexColor("#AAAAAA")
+
+            # Vertical dotted line from GZ = 0 up to GM at φ = 1 radian (or to the right edge).
+            d.add(
+                Line(
+                    x_guide,
+                    bottom,
+                    x_guide,
+                    gm_y,
+                    strokeColor=guide_color2,
+                    strokeWidth=0.7,
+                    strokeDashArray=[2, 2],
+                )
+            )
+
+            # Horizontal GM line from heel = 0 to the 1‑radian guide.
+            d.add(
+                Line(
+                    left,
+                    gm_y,
+                    x_guide,
+                    gm_y,
+                    strokeColor=guide_color2,
+                    strokeWidth=0.7,
+                    strokeDashArray=[2, 2],
+                )
+            )
+
+            # Diagonal from origin (0, 0) to the intersection of the vertical and GM lines.
+            d.add(
+                Line(
+                    left,
+                    bottom,
+                    x_guide,
+                    gm_y,
+                    strokeColor=guide_color2,
+                    strokeWidth=0.7,
+                    strokeDashArray=[2, 2],
+                )
+            )
+
+            # Label GM just above the horizontal GM line near the guide.
+            d.add(
+                String(
+                    x_guide - 2,
+                    gm_y + 4,
+                    "GM",
+                    textAnchor="end",
+                    fontSize=8,
+                    fillColor=guide_color2,
+                )
+            )
+
+            # Label φ = 1 radian on the X‑axis directly under the guide.
+            d.add(
+                String(
+                    x_guide,
+                    bottom - 14,
+                    "φ = 1 radian",
+                    textAnchor="middle",
+                    fontSize=8,
+                    fillColor=guide_color2,
+                )
+            )
 
     # Main GZ curve (truncated at last positive GZ)
     points = []

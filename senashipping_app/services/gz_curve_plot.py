@@ -142,8 +142,8 @@ def compute_gz_curve(
     kg: float,
     kn_table: dict[float, float],
     *,
-    angle_step_deg: float = 0.25,
-    angle_max_deg: float = 90.0,
+    angle_step_deg: float = 0.3,
+    angle_max_deg: float = 180.0,
 ) -> tuple[list[float], list[float]]:
     """
     Compute GZ curve from KG and KN table.
@@ -151,8 +151,8 @@ def compute_gz_curve(
     Args:
         kg: Centre of gravity height (m).
         kn_table: Dictionary mapping heel angle (deg) → KN (m).
-        angle_step_deg: Heel angle step (default 0.25° for smooth curve from table).
-        angle_max_deg: Maximum heel angle (default 90°).
+        angle_step_deg: Heel angle step.
+        angle_max_deg: Maximum heel angle (default 180° so tables with angles > 90° are used).
 
     Returns:
         (angles, gz_values): angles in degrees, GZ in metres.
@@ -178,8 +178,8 @@ def compute_gz_curve_stats(
     kg: float,
     kn_table: dict[float, float],
     *,
-    angle_step_deg: float = 0.25,
-    angle_max_deg: float = 90.0,
+    angle_step_deg: float = 0.3,
+    angle_max_deg: float = 180.0,
 ) -> tuple[list[float], list[float], float, float, float, float]:
     """
     Compute GZ curve and stability statistics.
@@ -220,7 +220,7 @@ def compute_gz_curve_stats(
     return angles, gz_values, max_gz, angle_at_max_gz, area_m_rad, range_positive_deg
 
 
-# ---- KN table from Excel (self-contained, no kn_curves dependency) ----
+# ---- KN tables from Excel (self-contained, no kn_curves dependency) ----
 
 # sheet_name -> ((disp, heel, kz_matrix), file_mtime) so we reload when Excel is edited
 _KN_TABLE_CACHE: dict[str, tuple[tuple[np.ndarray, np.ndarray, np.ndarray], float]] = {}
@@ -305,11 +305,20 @@ def _load_kn_matrix(sheet_name: str, path: Path) -> tuple[np.ndarray, np.ndarray
             ang = float(digits) if digits else None
         except (TypeError, ValueError):
             ang = None
-        if ang is None or not (0 <= ang <= 90):
+        # Accept KN columns for a wider range of heel angles (0–180°) so
+        # the curve can extend beyond 90° when the Excel file provides it.
+        if ang is None or not (0 <= ang <= 180):
             continue
         has_kn_kz = "kn" in norm_name or "kz" in norm_name
         has_angle_hint = "deg" in norm_name or "degree" in norm_name or "°" in norm_name
-        if has_kn_kz or has_angle_hint or (digits == norm_name.strip()):
+        # Be tolerant of headers like "0.0°" or "3.0�": accept when the
+        # name starts with the numeric part even if extra symbols follow.
+        if (
+            has_kn_kz
+            or has_angle_hint
+            or digits == norm_name.strip()
+            or norm_name.strip().startswith(digits)
+        ):
             angle_cols.append(norm_name)
             angle_vals.append(float(ang))
 
@@ -332,11 +341,17 @@ def _load_kn_matrix(sheet_name: str, path: Path) -> tuple[np.ndarray, np.ndarray
                 ang = float(digits) if digits else None
             except (TypeError, ValueError):
                 ang = None
-            if ang is None or not (0 <= ang <= 90):
+            # Same widened 0–180° acceptance for the header-row+1 fallback.
+            if ang is None or not (0 <= ang <= 180):
                 continue
             has_kn_kz = "kn" in norm_name or "kz" in norm_name
             has_angle_hint = "deg" in norm_name or "degree" in norm_name or "°" in norm_name
-            if has_kn_kz or has_angle_hint or (digits == norm_name.strip()):
+            if (
+                has_kn_kz
+                or has_angle_hint
+                or digits == norm_name.strip()
+                or norm_name.strip().startswith(digits)
+            ):
                 angle_cols.append(norm_name)
                 angle_vals.append(float(ang))
     if not angle_cols:
@@ -571,6 +586,70 @@ def _smooth_display_points(
     return x_fine[: end_idx + 1], y_fine[: end_idx + 1]
 
 
+def prepare_gz_curve_display_points(
+    angles: list[float],
+    gz_values: list[float],
+) -> tuple[list[float], list[float]]:
+    """
+    Public helper for display-only GZ curves.
+
+    Uses the same smoothing and zero-cross handling as the Curves view so that
+    other outputs (e.g. PDF reports) can render a visually identical curve
+    without duplicating the interpolation logic.
+    """
+    x = np.asarray(angles, dtype=float)
+    y = np.asarray(gz_values, dtype=float)
+    if x.size == 0 or y.size == 0:
+        return [], []
+    x_plot, y_plot = _smooth_display_points(x, y)
+    return [float(a) for a in x_plot], [float(g) for g in y_plot]
+
+
+def estimate_gm_from_gz_curve(
+    angles_deg: list[float] | np.ndarray,
+    gz_values: list[float] | np.ndarray,
+    *,
+    max_angle_deg: float = 10.0,
+) -> float | None:
+    """
+    Estimate GM (m) from the initial slope of the GZ curve, using the
+    standard graphical construction where GM ≈ dGZ/dφ at φ = 0 (φ in radians).
+
+    The fit is performed in (φ_rad, GZ) space over small heel angles so
+    the result matches what you would obtain by drawing a tangent at
+    the origin and reading off GZ at 1 radian.
+    """
+    x = np.asarray(angles_deg, dtype=float)
+    y = np.asarray(gz_values, dtype=float)
+    if x.size < 2 or x.size != y.size:
+        return None
+
+    phi = np.radians(x)
+    mask = (phi > 0.0) & (x <= float(max_angle_deg)) & np.isfinite(y)
+    if not np.any(mask):
+        return None
+
+    phi_small = phi[mask]
+    gz_small = y[mask]
+    if phi_small.size == 0 or not np.all(np.isfinite(phi_small)) or not np.all(np.isfinite(gz_small)):
+        return None
+
+    # Prefer a least‑squares fit through all small‑angle points; fall back
+    # to a simple ratio GZ/φ when only one point is available.
+    try:
+        if phi_small.size >= 3:
+            coeffs = np.polyfit(phi_small, gz_small, 1)
+            gm = float(coeffs[0])
+        else:
+            gm = float(gz_small[0] / phi_small[0]) if phi_small[0] > 0.0 else float("nan")
+    except Exception:
+        return None
+
+    if not np.isfinite(gm) or gm <= 0.0:
+        return None
+    return gm
+
+
 def plot_gz_curve(
     angles: list[float],
     gz_values: list[float],
@@ -589,6 +668,7 @@ def plot_gz_curve(
     range_positive_deg: float | None = None,
     area_m_rad: float | None = None,
     show_stats: bool = True,
+    gm_value: float | None = None,
 ) -> Any:
     """
     Plot GZ curve. Underlying data and stats are from the given (angles, gz_values).
@@ -601,6 +681,18 @@ def plot_gz_curve(
 
     x = np.asarray(angles, dtype=float)
     y = np.asarray(gz_values, dtype=float)
+
+    # GM for graphical construction: estimate from the curve's initial slope
+    # (tangent at origin). Fall back to the caller‑provided gm_value only
+    # when we cannot infer it from the GZ data.
+    gm_from_curve = estimate_gm_from_gz_curve(x, y)
+    gm_for_display: float | None
+    if gm_from_curve is not None and gm_from_curve > 0.0:
+        gm_for_display = gm_from_curve
+    elif gm_value is not None and gm_value > 0.0:
+        gm_for_display = float(gm_value)
+    else:
+        gm_for_display = None
 
     # Range of positive stability for shading
     if range_positive_deg is None and len(y) > 0 and np.any(y > 0.02):
@@ -620,16 +712,17 @@ def plot_gz_curve(
             x_shade,
             0.0,
             y_shade,
-            color="lightblue",  # light blue fill as requested
-            alpha=0.5,
+            color="#cbe7ff",  # slightly softer light blue fill
+            alpha=0.55,
             label="Stability energy",
         )
 
     # Curve (smooth line for display when requested; antialiased, rounded joins)
     ax.plot(
-        x_plot, y_plot,
-        color="#2c3e50",
-        linewidth=2,
+        x_plot,
+        y_plot,
+        color="#1f2a44",
+        linewidth=2.0,
         label="GZ",
         antialiased=True,
         solid_capstyle="round",
@@ -669,15 +762,110 @@ def plot_gz_curve(
         ax.text(0.02, 0.98, text, transform=ax.transAxes, fontsize=8, verticalalignment="top",
                 bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8))
 
+    # Axes, labels, and grid styling
+    ax.set_facecolor("#f8fafc")
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.set_title(title)
     if show_grid:
-        ax.grid(True, linestyle="--", alpha=0.7)
+        ax.grid(True, linestyle="--", alpha=0.5, color="#d0d7e2", linewidth=0.8)
     if show_zero_line:
-        ax.axhline(0.0, color="gray", linestyle="-", linewidth=0.8)
-    ax.set_xlim(left=0)
-    ax.set_ylim(bottom=0)
+        ax.axhline(0.0, color="#9ca3af", linestyle="-", linewidth=0.9)
+
+    # Slight zoom‑out so the curve, GM guides, and labels do not touch the frame
+    try:
+        x_max_val = float(x_plot[-1]) if len(x_plot) else 90.0
+        y_max_val = float(np.max(y_plot)) if len(y_plot) else 1.0
+        # Give more headroom so the GM line, its label, and all ticks are clearly visible.
+        x_right = max(10.0, x_max_val * 1.05)
+        y_top = max(0.5, y_max_val * 1.20)
+        # Ensure the GM value itself is comfortably inside the Y‑range when provided.
+        if gm_for_display is not None and gm_for_display > 0.0:
+            y_top = max(y_top, float(gm_for_display) * 1.25)
+        ax.set_xlim(left=0.0, right=x_right)
+        ax.set_ylim(bottom=0.0, top=y_top)
+    except Exception:
+        ax.set_xlim(left=0.0)
+        ax.set_ylim(bottom=0.0)
+
+    # Geometric guides at 90° heel: vertical, horizontal, and diagonal dotted lines
+    try:
+        # Use current axis limits so guides stay within the visible frame.
+        x_min, x_max_ax = ax.get_xlim()
+        y_min, y_max_ax = ax.get_ylim()
+        if x_max_ax > x_min and y_max_ax > y_min:
+            # Vertical guide at φ = 1 radian (≈57.3°), clamped to the visible X‑range.
+            import math as _math
+            one_rad_deg = _math.degrees(1.0)
+            x_guide = min(one_rad_deg, x_max_ax)
+            # Use the GM inferred from the curve whenever available so the
+            # guides match the standard graphical construction.
+            if gm_for_display is not None and gm_for_display > 0.0:
+                y_gm = min(float(gm_for_display), y_max_ax)
+            else:
+                y_gm = y_max_ax
+            guide_color = "#9ca3af"
+            # Vertical dotted line at φ = 1 radian (≈57.3°) or at the right edge if < 90,
+            # drawn only up to the GM level so it matches the reference diagram.
+            ax.vlines(
+                x_guide,
+                0.0,
+                y_gm,
+                colors=guide_color,
+                linestyles=":",
+                linewidth=1.6,
+            )
+            # Horizontal GM line from heel = 0 up to the 1‑radian guide.
+            ax.hlines(
+                y_gm,
+                0.0,
+                x_guide,
+                colors=guide_color,
+                linestyles=":",
+                linewidth=1.0,
+            )
+            # Dotted diagonal from origin (0, 0) to the intersection of the two guides.
+            ax.plot(
+                [0.0, x_guide],
+                [0.0, y_gm],
+                color=guide_color,
+                linestyle=":",
+                linewidth=1.0,
+            )
+            # Label the 1 radian heel angle on the X‑axis directly under the guide.
+            ax.annotate(
+                "ϕ = 1 rad",
+                xy=(x_guide, 0.0),
+                xycoords="data",
+                xytext=(0, -14),
+                textcoords="offset points",
+                ha="center",
+                va="top",
+                fontsize=8,
+                color="#4b5563",
+            )
+            # Label GM near the horizontal GM line, if a GM value is provided.
+            if gm_for_display is not None and y_gm > 0.0:
+                ax.text(
+                    x_guide,
+                    y_gm * 1.02,
+                    f"GM = {gm_for_display:.2f} m",
+                    rotation=0,
+                    ha="right",
+                    va="bottom",
+                    fontsize=8,
+                    color="#4b5563",
+                    bbox=dict(
+                        boxstyle="round,pad=0.2",
+                        facecolor="white",
+                        edgecolor="none",
+                        alpha=0.8,
+                    ),
+                )
+    except Exception:
+        # If anything goes wrong while drawing guides, skip them silently.
+        pass
+
     return ax
 
 

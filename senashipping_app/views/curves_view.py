@@ -75,7 +75,7 @@ class CurvesView(QWidget):
         displacement_t = getattr(results, "displacement_t", 0.0)
         trim_m = getattr(results, "trim_m", 0.0)
 
-        if kg_m <= 0 or displacement_t <= 0:
+        if displacement_t <= 0 or kg_m <= 0:
             self._draw_placeholder()
             return
 
@@ -85,9 +85,15 @@ class CurvesView(QWidget):
             self._ax.set_xlabel("Heel Angle (deg)")
             self._ax.set_ylabel("GZ (m)")
             self._ax.set_title("GZ curve")
-            self._ax.text(0.5, 0.5,
-                          "No KN table for this trim/displacement.\nPut KN tables.xlsx in assets.",
-                          transform=self._ax.transAxes, ha="center", va="center", fontsize=10)
+            self._ax.text(
+                0.5,
+                0.5,
+                "No KN table for this trim/displacement.\nPut KN tables.xlsx in assets.",
+                transform=self._ax.transAxes,
+                ha="center",
+                va="center",
+                fontsize=10,
+            )
             self._figure.tight_layout(pad=1.0)
             self._canvas.draw_idle()
             return
@@ -100,6 +106,7 @@ class CurvesView(QWidget):
             len(angles), kg_m, getattr(results, "displacement_t", 0),
         )
         self._ax.clear()
+        gm_m = getattr(results, "gm_m", None)
         plot_gz_curve(
             angles,
             gz_values,
@@ -117,6 +124,7 @@ class CurvesView(QWidget):
             range_positive_deg=range_positive,
             area_m_rad=area_m_rad,
             show_stats=True,
+            gm_value=gm_m,
         )
         self._figure.tight_layout(pad=1.0)
         self._canvas.draw_idle()

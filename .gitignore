@@ -10,3 +10,4 @@ dist/
 build/
 SenaShipping.spec
 .tests/
+senashipping_app_data/

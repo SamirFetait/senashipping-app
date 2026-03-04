@@ -569,10 +569,35 @@ def export_condition_to_excel(
             results
         )
         if angles_deg and gz_values:
+            # Truncate numeric points at the vanishing‑stability zero‑crossing so the
+            # exported curve matches the Curves view shape rather than including a
+            # long flat tail where GZ has already returned to zero.
+            import numpy as np
+
+            x_arr = np.asarray([float(a) for a in angles_deg], dtype=float)
+            y_arr = np.asarray([float(g) for g in gz_values], dtype=float)
+            if x_arr.size >= 2 and x_arr.size == y_arr.size and np.any(y_arr > 0.0):
+                pos_idx = np.where(y_arr > 0.0)[0]
+                last_pos = int(pos_idx[-1])
+                if last_pos < len(y_arr) - 1:
+                    y0, y1 = float(y_arr[last_pos]), float(y_arr[last_pos + 1])
+                    x0, x1 = float(x_arr[last_pos]), float(x_arr[last_pos + 1])
+                    if y0 > 0.0 and y1 <= 0.0 and x1 > x0:
+                        t = y0 / (y0 - y1) if (y0 - y1) != 0.0 else 1.0
+                        x_zero = x0 + t * (x1 - x0)
+                        x_arr = np.concatenate([x_arr[: last_pos + 1], np.array([x_zero])])
+                        y_arr = np.concatenate([y_arr[: last_pos + 1], np.array([0.0])])
+                    else:
+                        x_arr = x_arr[: last_pos + 1]
+                        y_arr = y_arr[: last_pos + 1]
+                else:
+                    x_arr = x_arr[: last_pos + 1]
+                    y_arr = y_arr[: last_pos + 1]
+
             df_curve = pd.DataFrame(
                 {
-                    "Angle (deg)": [float(a) for a in angles_deg],
-                    "GZ (m)": [float(g) for g in gz_values],
+                    "Angle (deg)": [float(a) for a in x_arr],
+                    "GZ (m)": [float(g) for g in y_arr],
                 }
             )
             df_curve.to_excel(writer, sheet_name="GZ Curve", index=False)
