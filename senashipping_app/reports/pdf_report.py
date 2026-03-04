@@ -405,32 +405,6 @@ def _build_gz_curve_drawing(results, width: float = 16 * cm, height: float = 9 *
         )
     )
 
-    # GM horizontal guide (clamped into plot area)
-    gm_clamped = max(0.0, min(gm_plot, value_max))
-    gm_y = bottom + (gm_clamped / value_max) * plot_height
-    gm_color = colors.HexColor("#808080")
-    d.add(
-        Line(
-            left,
-            gm_y,
-            right,
-            gm_y,
-            strokeColor=gm_color,
-            strokeWidth=0.8,
-            strokeDashArray=[3, 2],
-        )
-    )
-    d.add(
-        String(
-            right - 4,
-            gm_y + 4,
-            "GM",
-            textAnchor="end",
-            fontSize=8,
-            fillColor=gm_color,
-        )
-    )
-
     # GZmax guides
     max_index = max(range(len(gz_values)), key=lambda i: gz_values[i])
     gz_max = gz_values[max_index]
@@ -551,12 +525,12 @@ def _build_gz_curve_drawing(results, width: float = 16 * cm, height: float = 9 *
                 )
             )
 
-            # Label GM just above the horizontal GM line near the guide.
+            # Label GM just above the horizontal GM line near the guide, including its value.
             d.add(
                 String(
                     x_guide - 2,
                     gm_y + 4,
-                    "GM",
+                    f"GM = {gm_plot:.3f} m",
                     textAnchor="end",
                     fontSize=8,
                     fillColor=guide_color2,
