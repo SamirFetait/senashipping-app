@@ -134,19 +134,20 @@ class ConditionTableWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._tabs)
         
-        # Bottom bar: totals label + Add button (like SenaShipping reference)
+        # Bottom bar: totals label (+ optional Add button)
         bottom = QHBoxLayout()
         self._totals_label = QLabel("Totals", self)
         self._totals_label.setStyleSheet("color: #555; font-weight: bold;")
         bottom.addWidget(self._totals_label)
         bottom.addStretch()
 
-        # TODO: Add button to add tank or pen
+        # Add button to add tank or pen – currently hidden/disabled
         self._add_btn = QPushButton("+", self)
         self._add_btn.setFixedSize(32, 28)
-        self._add_btn.setToolTip("Add tank or pen ΓÇô define in Tools ΓåÆ Ship & data setup, then they appear here")
+        self._add_btn.setToolTip("Add tank or pen – define in Tools → Ship & data setup, then they appear here") 
         self._add_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-size: 16px; font-weight: bold; border: none; border-radius: 3px; } QPushButton:hover { background-color: #45a049; }")
         self._add_btn.clicked.connect(self._on_add_clicked)
+        self._add_btn.setVisible(False)  # Hide Ship Manager '+' button for now #TODO: change to visible when ship manager is implemented
         bottom.addWidget(self._add_btn)
         layout.addLayout(bottom)
         
