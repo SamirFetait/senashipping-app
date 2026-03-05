@@ -1029,8 +1029,9 @@ class MainWindow(QMainWindow):
         if editor:
             editor.add_new_item()
         else:
-            # Fallback: open Ship & data setup so user can define new items
-            self._switch_page(self._page_indexes.ship_manager, "Ship & data setup – add tanks and pens")
+            #TODO: ship manager button
+            # Fallback Ship & data setup navigation temporarily disabled
+            # self._switch_page(self._page_indexes.ship_manager, "Ship & data setup – add tanks and pens")
 
     def _on_empty_spaces(self) -> None:
         editor = self._get_condition_editor()
