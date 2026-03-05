@@ -318,7 +318,7 @@ So **“FAILED”** = one or more **validation errors** (limits exceeded); the u
   For the criteria line, GM_effective is compared to the IMO minimum (0.15 m); where validation is not available it falls back to a simple GM/heel check.
 - **Prop immersion** ≥ e.g. **60%**.
 - **Visibility** ≥ e.g. **1.0 m**.
-- **Air draft** ≥ e.g. **5.0 m**.
+- **Air draft**: optional **maximum** clearance above waterline (route-/bridge-specific) when `MAX_AIR_DRAFT_M` is set in `limits.py`.
 
 All numeric limits are in **`senashipping_app/config/limits.py`**. Results appear in the **Criteria** tab with pass/fail and margin per line.
 

@@ -38,8 +38,12 @@ MIN_PROP_IMMERSION_PCT = 60.0
 # Phase 3: Minimum visibility (m) – bridge to bow waterline
 MIN_VISIBILITY_M = 1.0
 
-# Phase 3: Minimum air draft (m) – clearance above waterline
-MIN_AIR_DRAFT_M = 5.0
+# Phase 3: Maximum air draft (m) – clearance above waterline (route/bridge limit).
+# Air draft here is the distance from waterline to highest point; exceeding this
+# limit means the ship is too tall for an overhead restriction.
+# Set to None to disable the check when no overhead restriction applies; override
+# per voyage/route when bridge or cable clearances are known.
+MAX_AIR_DRAFT_M = 28.0 
 
 # Free surface correction factor for slack tanks (reduces effective GM)
 # I_small_square / disp for typical tank; simplified multiplier

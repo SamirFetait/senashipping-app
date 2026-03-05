@@ -16,7 +16,7 @@ from senashipping_app.config.limits import (
     EPS,
     MAX_DRAFT_FRACTION,
     MAX_TRIM_FRACTION,
-    MIN_AIR_DRAFT_M,
+    MAX_AIR_DRAFT_M,
     MIN_FREEBORD_M,
     MIN_GM_LIVESTOCK_M,
     MIN_GM_M,
@@ -302,19 +302,32 @@ def evaluate_gz_and_ancillary_criteria(
         message=f"Visibility {vis:.1f} m, min {MIN_VISIBILITY_M} m",
     ))
 
-    # Air draft
+    # Air draft (maximum allowable clearance to satisfy overhead restriction).
+    # Only evaluate when a route-specific limit is configured; otherwise mark N/A.
     air = getattr(ancillary, "air_draft_m", 0.0)
-    margin_air = air - MIN_AIR_DRAFT_M
-    lines.append(CriterionLine(
-        code="AIR_DRAFT",
-        name="Air draft",
-        reference="Operational",
-        result=CriterionResult.PASS if margin_air >= 0 else CriterionResult.FAIL,
-        value=air,
-        limit=MIN_AIR_DRAFT_M,
-        margin=margin_air,
-        message=f"Air draft {air:.1f} m, min {MIN_AIR_DRAFT_M} m",
-    ))
+    if MAX_AIR_DRAFT_M is not None:
+        margin_air = MAX_AIR_DRAFT_M - air
+        lines.append(CriterionLine(
+            code="AIR_DRAFT",
+            name="Air draft",
+            reference="Operational",
+            result=CriterionResult.PASS if margin_air >= 0 else CriterionResult.FAIL,
+            value=air,
+            limit=MAX_AIR_DRAFT_M,
+            margin=margin_air,
+            message=f"Air draft {air:.1f} m, max {MAX_AIR_DRAFT_M} m",
+        ))
+    else:
+        lines.append(CriterionLine(
+            code="AIR_DRAFT",
+            name="Air draft",
+            reference="Operational",
+            result=CriterionResult.N_A,
+            value=air,
+            limit=None,
+            margin=None,
+            message="N/A (no route air-draft limit configured)",
+        ))
 
     return lines
 

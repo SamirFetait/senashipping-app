@@ -752,12 +752,32 @@ def plot_gz_curve(
     # Only fall back to estimating GM from the GZ curve when no positive GM
     # was provided.
     gm_for_display: float | None = None
+    gm_from_curve = estimate_gm_from_gz_curve(x, y)
     if gm_value is not None and gm_value > 0.0:
         gm_for_display = float(gm_value)
-    else:
-        gm_from_curve = estimate_gm_from_gz_curve(x, y)
-        if gm_from_curve is not None and gm_from_curve > 0.0:
-            gm_for_display = gm_from_curve
+    elif gm_from_curve is not None and gm_from_curve > 0.0:
+        gm_for_display = gm_from_curve
+
+    # Optional quality diagnostic: compare the small-angle slope of the GZ curve
+    # against the GM from the condition. Large discrepancies can indicate issues
+    # with the KN tables (e.g. wrong draft/trim slice or inconsistent data).
+    gm_quality_warning = False
+    gm_quality_delta: float | None = None
+    if (
+        gm_value is not None
+        and gm_value > 0.0
+        and gm_from_curve is not None
+        and gm_from_curve > 0.0
+    ):
+        gm_quality_delta = abs(float(gm_from_curve) - float(gm_value))
+        if gm_quality_delta > 0.05:
+            gm_quality_warning = True
+            _LOG.warning(
+                "GZ curve GM consistency warning: GM(condition)=%.4f, GM(from GZ slope)=%.4f, Δ=%.4f m",
+                float(gm_value),
+                float(gm_from_curve),
+                gm_quality_delta,
+            )
 
     # Range of positive stability for shading
     if range_positive_deg is None and len(y) > 0 and np.any(y > 0.02):
@@ -823,7 +843,14 @@ def plot_gz_curve(
             _range_deg = range_positive_deg
         if area_m_rad is not None:
             _area = area_m_rad
-        text = f"Max GZ = {_max_gz:.3f} m\nAngle at max GZ = {_angle_max:.1f}°\nArea = {_area:.4f} m·rad\nRange of positive stability = {_range_deg:.1f}°"
+        text = (
+            f"Max GZ = {_max_gz:.3f} m\n"
+            f"Angle at max GZ = {_angle_max:.1f}°\n"
+            f"Area = {_area:.4f} m·rad\n"
+            f"Range of positive stability = {_range_deg:.1f}°"
+        )
+        if gm_quality_warning and gm_quality_delta is not None:
+            text += f"\nGM/GZ slope mismatch > 0.05 m (Δ = {gm_quality_delta:.3f} m)"
         ax.text(0.02, 0.98, text, transform=ax.transAxes, fontsize=8, verticalalignment="top",
                 bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8))
 
