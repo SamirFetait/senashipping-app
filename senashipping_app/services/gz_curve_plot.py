@@ -7,7 +7,8 @@ old name assets/KZ tables.xlsx is also accepted if the KN file is absent.
 Sheet = trim (m), rows = displacement (t), columns = heel angle (deg).
 KN and GZ in metres; angles in degrees.
 Bilinear interpolation: displacement (rows), then heel angle (columns).
-For θ < 10°: KN ≈ KN(10°) × (θ / 10°); no extrapolation below 10°.
+All heel angles (including small angles) are taken directly from the KN table
+via interpolation; there is no special 10° scaling rule.
 """
 from __future__ import annotations
 
@@ -22,9 +23,6 @@ _LOG = logging.getLogger(__name__)
 
 # NumPy 2.0+ removed np.trapz; use np.trapezoid when available
 _trapz = getattr(np, "trapezoid", getattr(np, "trapz", None))
-
-# Do not use table for heel angles below this (use KN(10°)*(θ/10) instead)
-_KN_ANGLE_MIN_DEG = 10.0
 
 
 def _angle_to_column_name(angle_deg: float) -> str:
@@ -70,14 +68,10 @@ def get_kn_bilinear(
 ) -> float:
     """
     Bilinear interpolation of KN: displacement rows, then angle columns.
-    Do not extrapolate below 10°: for θ < 10° use KN ≈ KN(10°) × (θ / 10°).
+    All angles are taken directly from the KN table by interpolation.
     """
     if disp.size == 0 or heel.size == 0 or kz.shape != (disp.size, heel.size):
         return 0.0
-
-    if angle_deg < _KN_ANGLE_MIN_DEG:
-        kn_10 = get_kn_bilinear(disp, heel, kz, displacement_t, _KN_ANGLE_MIN_DEG)
-        return kn_10 * (angle_deg / _KN_ANGLE_MIN_DEG)
 
     # 1) Find bounding displacement rows
     if displacement_t <= disp[0]:
@@ -113,14 +107,11 @@ def get_kn_bilinear(
 def _interp_kn(angle_deg: float, kn_table: dict[float, float]) -> float:
     """
     Interpolate KN at heel angle from table (table already bilinear in displacement).
-    Do not extrapolate below 10°: for θ < 10° use KN ≈ KN(10°) × (θ / 10°).
+    All angles are taken directly from the KN table by interpolation.
     """
     keys = sorted(kn_table.keys())
     if not keys:
         return 0.0
-    if angle_deg < _KN_ANGLE_MIN_DEG:
-        kn_10 = _interp_kn(_KN_ANGLE_MIN_DEG, kn_table)
-        return kn_10 * (angle_deg / _KN_ANGLE_MIN_DEG)
     if angle_deg <= keys[0]:
         return float(kn_table[keys[0]])
     if angle_deg >= keys[-1]:
@@ -566,7 +557,7 @@ def get_kn_table_dict(displacement_t: float, draft_m: float = 0.0, trim_m: float
 def make_kn_function(kn_table: dict[float, float]) -> Callable[[float], float]:
     """
     Return KN as a function of angle: callable theta_deg -> KN (m).
-    Interpolates between nearest angle columns; for θ < 10° uses KN(10°)×(θ/10).
+    Interpolates between nearest angle columns using only table values.
     """
     return lambda angle_deg: _interp_kn(angle_deg, kn_table)
 

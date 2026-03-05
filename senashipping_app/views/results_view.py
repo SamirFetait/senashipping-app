@@ -44,6 +44,7 @@ from senashipping_app.config.stability_manual_ref import (
     MANUAL_REF,
     MANUAL_SOURCE,
     OPERATING_RESTRICTIONS,
+    REF_LIGHTSHIP_DISPLACEMENT_T,
 )
 from senashipping_app.reports import (
     build_condition_summary_text,
@@ -492,17 +493,31 @@ class ResultsView(QWidget):
             f"Calculated: {ts_str} | Ship: {ship} | Condition: {cond} | {summary}"
         )
 
-    def _populate_weights_tab(self, results: ConditionResults, condition: Any) -> None:
-        """Fill Weights tab: displacement and optional breakdown (livestock, tanks & other)."""
+    def _populate_weights_tab(self, results: ConditionResults, ship: Any, condition: Any) -> None:
+        """Fill Weights tab: breakdown into lightship, livestock, tanks and total displacement."""
         self._weights_table.setRowCount(0)
-        disp = results.displacement_t
+        disp = max(0.0, float(getattr(results, "displacement_t", 0.0)))
+
+        # Lightship displacement: use ship-specific value when set, otherwise manual reference.
+        lightship_mass_t = max(0.0, float(getattr(ship, "lightship_displacement_t", 0.0))) or REF_LIGHTSHIP_DISPLACEMENT_T
+
+        # Livestock weight from pen head counts (using default mass per head for stability).
         pen_loadings = getattr(condition, "pen_loadings", None) or {}
-        livestock_t = sum(h * MASS_PER_HEAD_T for h in pen_loadings.values())
-        tank_other = disp - livestock_t if disp >= 0 else 0.0
+        livestock_t = sum(max(0, int(h)) * MASS_PER_HEAD_T for h in pen_loadings.values())
+
+        # Tank weights: prefer explicit per-tank weights captured from the condition table;
+        # fall back to residual (total - lightship - livestock) when not available.
+        tank_weights = getattr(condition, "tank_weights_mt", None) or {}
+        if tank_weights:
+            tanks_t = sum(max(0.0, float(w)) for w in tank_weights.values())
+        else:
+            tanks_t = max(0.0, disp - lightship_mass_t - livestock_t)
+
         rows = [
+            ("Lightship weight", f"{lightship_mass_t:,.1f}"),
+            ("Livestock weight", f"{livestock_t:,.1f}" if pen_loadings else "—"),
+            ("Tanks weight", f"{tanks_t:,.1f}" if disp > 0.0 else "—"),
             ("Total displacement", f"{disp:,.1f}"),
-            ("Livestock (from head count)", f"{livestock_t:,.1f}" if pen_loadings else "—"),
-            ("Tanks & other", f"{tank_other:,.1f}"),
         ]
         for i, (item, weight) in enumerate(rows):
             self._weights_table.insertRow(i)
@@ -679,7 +694,7 @@ class ResultsView(QWidget):
         self._populate_alarms_table(results, validation, getattr(results, "criteria", None))
 
         # Populate Weights, Trim & Stability, Strength, Cargo tabs
-        self._populate_weights_tab(results, condition)
+        self._populate_weights_tab(results, ship, condition)
         self._populate_trim_stability_tab(results, validation)
         self._populate_strength_tab(results)
         self._populate_cargo_tab(condition, ship)

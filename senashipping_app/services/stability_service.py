@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+import logging
+
 from senashipping_app.models import Ship, Tank, LoadingCondition, LivestockPen
 
 from senashipping_app.services.hydrostatics import (
@@ -20,6 +22,11 @@ from senashipping_app.services.hydrostatics import (
     get_kb_for_draft,
     get_bm_t_from_curves,
     get_bm_l_from_curves,
+)
+from senashipping_app.services.gz_curve_plot import (
+    get_kn_table_dict,
+    compute_gz_curve,
+    estimate_gm_from_gz_curve,
 )
 from senashipping_app.services.hydrostatic_curves import (
     build_curves_from_formulas,
@@ -39,6 +46,9 @@ from senashipping_app.config.stability_manual_ref import (
 )
 from senashipping_app.services.longitudinal_strength import compute_strength, StrengthResult
 from senashipping_app.services.ancillary_calculations import compute_ancillary, AncillaryResults
+
+
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -209,11 +219,41 @@ def compute_condition(
     # KG = total VCG moment / total mass (lightship + tanks + pens)
     kg_m = total_vcg_moment / total_mass_t
 
-    # KB, BM, KM, GM (from curves when available)
+    # KB, BM, KM, GM (from curves when available – initial hydrostatic estimate)
     kb_m = get_kb_for_draft(draft_m, curves)
     bm_t = get_bm_t_from_curves(displacement_t, draft_m, L, B, RHO_SEA, curves)
     km_m = kb_m + bm_t
     gm_m = compute_gm(km_m, kg_m)
+
+    # Optional refinement: when KN cross-curves are available, align GM with the
+    # small‑angle slope of the GZ curve so that the single GM used throughout
+    # the app matches the cross curves from the Loading Manual.
+    try:
+        kn_table = get_kn_table_dict(displacement_t, draft_m, trim_m)
+    except Exception as e:  # pragma: no cover - defensive logging
+        _LOG.debug("GM refinement: KN table lookup failed: %s", e)
+        kn_table = None
+
+    if kn_table:
+        try:
+            angles, gz_vals = compute_gz_curve(kg_m, kn_table)
+            gm_from_gz = estimate_gm_from_gz_curve(angles, gz_vals)
+        except Exception as e:  # pragma: no cover - defensive logging
+            _LOG.debug("GM refinement: failed to estimate GM from GZ curve: %s", e)
+            gm_from_gz = None
+
+        if gm_from_gz is not None and gm_from_gz > 0.0:
+            old_gm = gm_m
+            gm_m = float(gm_from_gz)
+            km_m = kg_m + gm_m
+            _LOG.info(
+                "GM refinement: using GM from KN cross-curves (%.4f m) "
+                "instead of hydrostatic estimate (%.4f m) for disp=%.1f t, draft=%.3f m",
+                gm_m,
+                old_gm,
+                displacement_t,
+                draft_m,
+            )
 
     # Debug trace disabled: was previously printing KG/KB/BM/KM/GM to stdout.
 

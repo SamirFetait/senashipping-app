@@ -99,9 +99,10 @@ The **Results** view shows:
 - **Tabs (left side)**
   - **Alarms** – table of pass / fail / warning messages for criteria, with thresholds and attained values.
   - **Weights** – breakdown of total displacement into:
+    - Lightship weight.
+    - Livestock weight (from pen head counts).
+    - Tanks weight.
     - Total displacement.
-    - Livestock (from pen head counts).
-    - Tanks & other.
   - **Trim & Stability** – key hydrostatic parameters (drafts, trim, heel, GM, KG, KM).
   - **Strength** – still water BM, shear forces and percentage of allowable where applicable.
   - **Cargo** – livestock per pen (name, deck, head count, weight per pen and totals).
