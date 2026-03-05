@@ -1032,6 +1032,7 @@ class MainWindow(QMainWindow):
             #TODO: ship manager button
             # Fallback Ship & data setup navigation temporarily disabled
             # self._switch_page(self._page_indexes.ship_manager, "Ship & data setup – add tanks and pens")
+            self._status_bar.showMessage("Ship & data setup is temporarily disabled.", 4000) #TODO: remove this message
 
     def _on_empty_spaces(self) -> None:
         editor = self._get_condition_editor()
