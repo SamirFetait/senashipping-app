@@ -14,6 +14,7 @@ from senashipping_app.services.gz_curve_plot import (
     compute_gz_curve_stats,
     get_kn_table_dict,
     plot_gz_curve,
+    debug_log_kn_samples_for_condition,
 )
 
 _LOG = logging.getLogger(__name__)
@@ -76,6 +77,29 @@ class CurvesView(QWidget):
         draft_m = getattr(results, "draft_m", 0.0)
         trim_m = getattr(results, "trim_m", 0.0)
 
+        # Do not plot a GZ curve when the condition has failed validation
+        # (e.g. excessive trim, draft over limit, GM below minimum). This keeps
+        # the UI consistent with the FAILED status in the Results panel.
+        validation = getattr(results, "validation", None)
+        has_errors = getattr(validation, "has_errors", False) if validation is not None else False
+        if has_errors:
+            self._ax.clear()
+            self._ax.set_xlabel("Heel Angle (deg)")
+            self._ax.set_ylabel("GZ (m)")
+            self._ax.set_title("GZ curve")
+            self._ax.text(
+                0.5,
+                0.5,
+                "Condition FAILED validation (GM/trim/draft).\nGZ curve suppressed.\nSee Alarms / Criteria.",
+                transform=self._ax.transAxes,
+                ha="center",
+                va="center",
+                fontsize=10,
+            )
+            self._figure.tight_layout(pad=1.0)
+            self._canvas.draw_idle()
+            return
+
         # Debug trace disabled: previously compared the KG used for GZ with
         # the KG from the stability solver by printing to stdout.
 
@@ -101,6 +125,12 @@ class CurvesView(QWidget):
             self._figure.tight_layout(pad=1.0)
             self._canvas.draw_idle()
             return
+
+        # Debug: log KN(3°) and KN(6°) used for this condition vs raw table values
+        try:
+            debug_log_kn_samples_for_condition(displacement_t, draft_m, trim_m, angles_deg=(3.0, 6.0))
+        except Exception as e:
+            _LOG.debug("KN debug logging failed: %s", e)
 
         angles, gz_values, max_gz, angle_at_max, area_m_rad, range_positive = compute_gz_curve_stats(
             kg_m, kn_table
