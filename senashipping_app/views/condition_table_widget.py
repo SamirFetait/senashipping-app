@@ -457,6 +457,86 @@ class ConditionTableWidget(QWidget):
                 out[int(pen_id)] = heads
         return out
 
+    def get_pen_mass_per_head_from_tables(self) -> Dict[int, float]:
+        """Read current mass per head (MT) per pen from Livestock-DK1..DK8.
+        DK1–DK7: AvW/Head MT (col 8); DK8: Weight (MT per head) (col 2)."""
+        out: Dict[int, float] = {}
+        for deck_num in range(1, 9):
+            tab_name = f"Livestock-DK{deck_num}"
+            table = self._table_widgets.get(tab_name)
+            if not table:
+                continue
+            is_deck8 = deck_num == 8
+            mass_col = 2 if is_deck8 else 8
+            for row in range(table.rowCount()):
+                name_item = table.item(row, 0)
+                if not name_item or "Totals" in (name_item.text() or ""):
+                    continue
+                pen_id = name_item.data(Qt.ItemDataRole.UserRole)
+                if pen_id is None:
+                    continue
+                mass_item = table.item(row, mass_col)
+                if not mass_item:
+                    continue
+                try:
+                    mass = float((mass_item.text() or "0").strip())
+                except (TypeError, ValueError):
+                    mass = 0.0
+                if mass > 0.0:
+                    out[int(pen_id)] = mass
+        return out
+
+    def get_tank_weights_from_tables(self) -> Dict[int, float]:
+        """Read current Weight (MT) per tank from all tank category tabs."""
+        out: Dict[int, float] = {}
+        for cat in TANK_CATEGORY_NAMES:
+            table = self._table_widgets.get(cat)
+            if not table:
+                continue
+            for row in range(table.rowCount()):
+                name_item = table.item(row, self.TANK_COL_NAME)
+                if not name_item:
+                    continue
+                tank_id = name_item.data(Qt.ItemDataRole.UserRole)
+                if tank_id is None:
+                    continue
+                weight_item = table.item(row, self.TANK_COL_WEIGHT)
+                if not weight_item:
+                    continue
+                try:
+                    weight = float((weight_item.text() or "0").strip())
+                except (TypeError, ValueError):
+                    weight = 0.0
+                if weight > 0.0:
+                    out[int(tank_id)] = weight
+        return out
+
+    def reset_all_tank_tables_to_zero(self) -> None:
+        """Set %Full, Volume and Weight to 0 for all tanks in all tank category tabs."""
+        for cat in TANK_CATEGORY_NAMES:
+            table = self._table_widgets.get(cat)
+            if not table:
+                continue
+            for row in range(table.rowCount()):
+                name_item = table.item(row, self.TANK_COL_NAME)
+                if not name_item:
+                    continue
+                # Skip any totals rows if present
+                if "Totals" in (name_item.text() or ""):
+                    continue
+                # %Full
+                pct_item = table.item(row, self.TANK_COL_PCT_FULL)
+                if pct_item:
+                    pct_item.setText("0.000")
+                # Volume
+                vol_item = table.item(row, self.TANK_COL_VOLUME)
+                if vol_item:
+                    vol_item.setText("0.000")
+                # Weight
+                w_item = table.item(row, self.TANK_COL_WEIGHT)
+                if w_item:
+                    w_item.setText("0.000")
+
     # ------------------------------------------------------------------
     # Public helpers for Edit menu operations (via ConditionEditorView)
     # ------------------------------------------------------------------
@@ -923,6 +1003,8 @@ class ConditionTableWidget(QWidget):
         ship_id: Optional[int] = None,
         default_cargo_name: Optional[str] = None,
         tank_ullage_fsm: Optional[Dict[int, Tuple[float, float]]] = None,
+        pen_mass_per_head: Optional[Dict[int, float]] = None,
+        initial_tank_weights: Optional[Dict[int, float]] = None,
     ) -> None:
         """
         Update all tables with current pens and tanks data.
@@ -941,11 +1023,14 @@ class ConditionTableWidget(QWidget):
         for table in tables:
             table.setUpdatesEnabled(False)
         
-        # Preserve all editable data from tables before clearing (so Compute does not reset any column)
+        # Preserve all editable data from tables before clearing (so Compute/load does not reset any column).
+        # Start with any externally provided state (e.g. from a saved condition) and then layer on top what is
+        # currently visible in the tables for this session.
         preserved_cargo_selections: Dict[int, str] = {}  # pen_id -> cargo_name
         preserved_head_counts: Dict[int, int] = {}  # pen_id -> head_count
         preserved_pen_rows: Dict[int, Dict[int, str]] = {}  # pen_id -> {col_index: cell_text} for cols 2,3,4,5,7,8,9,10,11,12,13
-        preserved_tank_weights: Dict[int, float] = {}  # tank_id -> weight_mt
+        preserved_pen_mass_per_head: Dict[int, float] = dict(pen_mass_per_head or {})  # pen_id -> mass/head (t)
+        preserved_tank_weights: Dict[int, float] = dict(initial_tank_weights or {})  # tank_id -> weight_mt
         
         # Preserve livestock pen data (cargo, head counts, and full row for decks 1-7)
         for deck_num in range(1, 9):
@@ -981,7 +1066,21 @@ class ConditionTableWidget(QWidget):
                                 preserved_head_counts[pen_id] = head_count
                         except (ValueError, TypeError):
                             pass
-                    
+
+                    # Preserve per‑head mass: DK1–DK7 AvW/Head MT (col 8); DK8 Weight per head MT (col 2)
+                    if deck_num == 8:
+                        mass_col = 2
+                    else:
+                        mass_col = 8
+                    mass_item = table.item(row, mass_col)
+                    if mass_item:
+                        try:
+                            mass_val = float((mass_item.text() or "0").strip())
+                            if mass_val > 0.0:
+                                preserved_pen_mass_per_head[int(pen_id)] = mass_val
+                        except (ValueError, TypeError):
+                            pass
+
                     # Preserve all data columns for decks 1-7 (2,3,4,5,7,8,9,10,11,12,13) so Compute does not reset them
                     if deck_num != 8 and table.columnCount() >= 14:
                         row_data: Dict[int, str] = {}
@@ -990,11 +1089,16 @@ class ConditionTableWidget(QWidget):
                             row_data[col] = (item.text() or "0").strip() if item else "0"
                         preserved_pen_rows[pen_id] = row_data
         
-        # On "New condition" (empty loadings and volumes), do not restore previous state
-        if not pen_loadings and not tank_volumes:
+        # On "New condition" (no cargo yet): if both pen loadings and tank volumes
+        # are effectively zero, do NOT restore any preserved state. This ensures
+        # all tank tab volumes/weights and livestock weights start from 0.0.
+        pen_all_zero = (not pen_loadings) or all((v or 0) <= 0 for v in pen_loadings.values())
+        tank_all_zero = (not tank_volumes) or all((v or 0.0) <= 0.0 for v in tank_volumes.values())
+        if pen_all_zero and tank_all_zero:
             preserved_cargo_selections.clear()
             preserved_head_counts.clear()
             preserved_pen_rows.clear()
+            preserved_pen_mass_per_head.clear()
             preserved_tank_weights.clear()
         
         # Preserve tank weights from all tank category tables
@@ -1052,7 +1156,10 @@ class ConditionTableWidget(QWidget):
             deck_letter = chr(ord('A') + deck_num - 1)  # A-H
             if deck_num == 8:
                 self._populate_deck8_tab(
-                    tab_name, pens, pen_loadings, deck_letter,
+                    tab_name,
+                    pens,
+                    pen_loadings,
+                    deck_letter,
                     mass_per_head_t=mass_per_head_t,
                     area_per_head_from_cargo=area_per_head_from_cargo,
                     cargo_name=cargo_name,
@@ -1060,10 +1167,14 @@ class ConditionTableWidget(QWidget):
                     cargo_types=self._current_cargo_types,
                     preserved_cargo_selections=preserved_cargo_selections,
                     preserved_head_counts=preserved_head_counts,
+                    pen_mass_per_head_overrides=preserved_pen_mass_per_head,
                 )
             else:
                 self._populate_livestock_tab(
-                    tab_name, pens, pen_loadings, deck_letter,
+                    tab_name,
+                    pens,
+                    pen_loadings,
+                    deck_letter,
                     mass_per_head_t=mass_per_head_t,
                     area_per_head_from_cargo=area_per_head_from_cargo,
                     cargo_name=cargo_name,
@@ -1072,6 +1183,7 @@ class ConditionTableWidget(QWidget):
                     preserved_cargo_selections=preserved_cargo_selections,
                     preserved_head_counts=preserved_head_counts,
                     preserved_pen_rows=preserved_pen_rows,
+                    pen_mass_per_head_overrides=preserved_pen_mass_per_head,
                 )
             
         # Update tank category tabs (store ullage/FSM so row recalc can re-apply when weight changes)
@@ -1117,6 +1229,7 @@ class ConditionTableWidget(QWidget):
         preserved_cargo_selections: Optional[Dict[int, str]] = None,
         preserved_head_counts: Optional[Dict[int, int]] = None,
         preserved_pen_rows: Optional[Dict[int, Dict[int, str]]] = None,
+        pen_mass_per_head_overrides: Optional[Dict[int, float]] = None,
     ) -> None:
         """Populate a livestock deck tab with pens for that deck. Cargo dropdown + dynamic recalc when Cargo or # Head changes."""
         table = self._table_widgets.get(tab_name)
@@ -1171,7 +1284,7 @@ class ConditionTableWidget(QWidget):
                 total_area_used += area_used
                 total_area += pen.area_m2
             else:
-                # Calculate from cargo/loadings
+                # Calculate from cargo/loadings (with optional per-pen mass overrides loaded from a saved condition)
                 if preserved_head_counts and pen_id in preserved_head_counts:
                     initial_heads = preserved_head_counts[pen_id]
                 else:
@@ -1218,8 +1331,13 @@ class ConditionTableWidget(QWidget):
                     head_capacity = int(round(pen.area_m2 / area_per_head)) if area_per_head > 0 else 0
                 
                 head_pct = (heads / head_capacity * 100.0) if head_capacity > 0 else 0.0
-                weight_mt = heads * mass_per_head_t
-                display_avw = mass_per_head_t
+                # If we have a per-pen mass override (from a previously saved condition),
+                # use it instead of the global cargo mass per head.
+                per_head_mass = (
+                    (pen_mass_per_head_overrides or {}).get(pen_id, mass_per_head_t)
+                )
+                weight_mt = heads * per_head_mass
+                display_avw = per_head_mass
                 display_weight = weight_mt
                 total_weight += display_weight
                 total_area_used += area_used
@@ -1346,6 +1464,7 @@ class ConditionTableWidget(QWidget):
         cargo_types: Optional[List[Any]] = None,
         preserved_cargo_selections: Optional[Dict[int, str]] = None,
         preserved_head_counts: Optional[Dict[int, int]] = None,
+        pen_mass_per_head_overrides: Optional[Dict[int, float]] = None,
     ) -> None:
         """Populate deck 8 (H) tab with columns: Name, Quantity, Weight (MT), Total Weight (MT), LCG, VCG, TCG, LS Moment m-MT, Delete."""
         table = self._table_widgets.get(tab_name)
@@ -1372,7 +1491,8 @@ class ConditionTableWidget(QWidget):
                 heads = pen_loadings.get(pen_id, 0)
             else:
                 heads = pen.capacity_head if pen.capacity_head > 0 else 0
-            weight_mt = heads * mass_per_head_t
+            per_head_mass = (pen_mass_per_head_overrides or {}).get(pen_id, mass_per_head_t)
+            weight_mt = heads * per_head_mass
             vcg_display = pen.vcg_m + vcg_from_deck
             lcg_moment = weight_mt * pen.lcg_m
             total_weight += weight_mt
@@ -1384,7 +1504,7 @@ class ConditionTableWidget(QWidget):
             qty_item = QTableWidgetItem(str(heads))
             table.setItem(row, 1, qty_item)
             # Weight in MT per head - editable so user can override
-            weight_item = QTableWidgetItem(f"{mass_per_head_t:.2f}")
+            weight_item = QTableWidgetItem(f"{per_head_mass:.2f}")
             table.setItem(row, 2, weight_item)
             # Total Weight in MT (auto-calculated, read-only)
             total_weight_item = QTableWidgetItem(f"{weight_mt:.2f}")
@@ -1796,6 +1916,41 @@ class ConditionTableWidget(QWidget):
         for deck_num in range(1, 8):
             tab_name = f"Livestock-DK{deck_num}"
             self._on_header_cargo_changed(tab_name, cargo_name)
+        # Deck 8 (Deck H) does not have a cargo dropdown, but its per‑head
+        # weight should still follow the selected cargo so that Total Weight
+        # and LS Moment stay consistent with decks DK1–DK7.
+        tab_name_h = "Livestock-DK8"
+        table_h = self._table_widgets.get(tab_name_h)
+        if table_h and table_h.columnCount() == self.DECK8_COLUMNS:
+            ct_sel = next(
+                (c for c in self._current_cargo_types if (getattr(c, "name", "") or "").strip() == cargo_name),
+                None,
+            )
+            if ct_sel:
+                mass_per_head_t = (getattr(ct_sel, "avg_weight_per_head_kg", 520.0) or 520.0) / 1000.0
+            else:
+                mass_per_head_t = MASS_PER_HEAD_T
+            last_row = table_h.rowCount() - 1
+            self._skip_item_changed = True
+            try:
+                for row in range(table_h.rowCount()):
+                    name_item = table_h.item(row, 0)
+                    # Skip totals row and the last blank row used for new entries
+                    if (
+                        row == last_row
+                        or not name_item
+                        or "Totals" in (name_item.text() or "")
+                    ):
+                        continue
+                    weight_item = table_h.item(row, 2)
+                    if weight_item is None:
+                        weight_item = QTableWidgetItem()
+                        table_h.setItem(row, 2, weight_item)
+                    weight_item.setText(f"{mass_per_head_t:.2f}")
+                    # Recalculate Total Weight and LS Moment for this row
+                    self._recalculate_deck8_row_total_weight(table_h, row)
+            finally:
+                self._skip_item_changed = False
     
     def _on_header_cargo_changed(self, tab_name: str, cargo: str) -> None:
         """Handle cargo selection from header combo - apply to all rows in the table."""

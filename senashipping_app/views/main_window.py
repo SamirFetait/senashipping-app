@@ -1522,14 +1522,22 @@ class MainWindow(QMainWindow):
 
         # Overlay volumes from condition table so Volume/Weight-driven edits win
         if hasattr(condition_widget, "_condition_table"):
-            ct_vols = condition_widget._condition_table.get_tank_volumes_from_tables()
+            ct = condition_widget._condition_table
+            ct_vols = ct.get_tank_volumes_from_tables()
             for tid, vol in ct_vols.items():
                 tank_volumes[tid] = vol
 
             # Pen loadings: prefer condition table (livestock decks)
-            ct_pen_loads = condition_widget._condition_table.get_pen_loadings_from_tables()
+            ct_pen_loads = ct.get_pen_loadings_from_tables()
             if ct_pen_loads:
                 pen_loadings = {pid: h for pid, h in ct_pen_loads.items() if h > 0}
+
+            # Also capture detailed weights so that on load the UI can restore
+            # pen and tank weights exactly as the user entered them.
+            pen_mass_per_head = ct.get_pen_mass_per_head_from_tables()
+            tank_weights = ct.get_tank_weights_from_tables()
+            condition.pen_mass_per_head_t = pen_mass_per_head
+            condition.tank_weights_mt = tank_weights
 
         # Fallback to legacy pen table if condition table has no loads
         if not pen_loadings:

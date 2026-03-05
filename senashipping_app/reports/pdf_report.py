@@ -265,7 +265,7 @@ def _compute_gz_curve_from_kn(
     When data is missing or invalid, returns empty curves and zeros.
     """
     displacement_t = float(getattr(results, "displacement_t", 0.0) or 0.0)
-    trim_m = float(getattr(results, "trim_m", 0.0) or 0.0)
+    draft_m = float(getattr(results, "draft_m", 0.0) or 0.0)
 
     if displacement_t <= 0.0:
         return [], [], 0.0, 0.0, 0.0, 0.0
@@ -274,7 +274,7 @@ def _compute_gz_curve_from_kn(
     if kg_m <= 0.0:
         return [], [], 0.0, 0.0, 0.0, 0.0
 
-    kn_table = get_kn_table_dict(displacement_t, trim_m)
+    kn_table = get_kn_table_dict(displacement_t, draft_m)
     if not kn_table:
         return [], [], 0.0, 0.0, 0.0, 0.0
 
@@ -309,12 +309,16 @@ def _build_gz_curve_drawing(results, width: float = 16 * cm, height: float = 9 *
         )
         return d
 
-    # GM for plotting: prefer the graphical value inferred from the GZ curve
-    # (tangent at the origin, matching the manual construction). Fall back to
-    # the raw GM from the condition only if we cannot infer it from the curve.
-    gm_graph = estimate_gm_from_gz_curve(angles_deg, gz_values)
+    # GM for plotting: prefer the GM from the condition (same value shown in
+    # the Results view) so the graphical construction lines up with the GMt
+    # reported elsewhere. Only fall back to the graphical GM estimated from
+    # the GZ curve when the condition has no positive GM.
     gm_raw = float(getattr(results, "gm_m", 0.0) or 0.0)
-    gm_plot = gm_graph if gm_graph is not None and gm_graph > 0.0 else gm_raw
+    gm_graph = estimate_gm_from_gz_curve(angles_deg, gz_values)
+    if gm_raw > 0.0:
+        gm_plot = gm_raw
+    else:
+        gm_plot = gm_graph if gm_graph is not None and gm_graph > 0.0 else 0.0
 
     # Match Curves view display: use the same smoothing and zero-cross handling
     # as the on-screen Matplotlib plot so the PDF curve has the same shape.

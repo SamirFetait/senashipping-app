@@ -23,6 +23,11 @@ class LoadingCondition:
     # Mapping: pen_id -> head count (Phase 2 livestock)
     pen_loadings: Dict[int, int] = field(default_factory=dict)
 
+    # Optional detailed weights for UI/state persistence:
+    # per-pen mass per head (t/head) and per-tank weight (t).
+    pen_mass_per_head_t: Dict[int, float] = field(default_factory=dict)
+    tank_weights_mt: Dict[int, float] = field(default_factory=dict)
+
     # Estimated voyage time in days (used together with cargo type dung weight %/day)
     estimated_time_days: float = 0.0
 

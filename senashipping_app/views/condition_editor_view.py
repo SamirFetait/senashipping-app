@@ -93,9 +93,10 @@ class ConditionEditorView(QWidget):
         self._condition_combo = QComboBox(self)
         self._ship_label = QLabel(self)  # read-only ship name (single-ship mode)
         self._cargo_type_combo = QComboBox(self)  # from cargo library
-        self._cargo_type_combo.setEditable(True)  # allow typing if not in library
+        self._cargo_type_combo.setEditable(False)  # allow only selection from library
         self._cargo_type_combo.setMinimumWidth(180)
         self._cargo_library_btn = QPushButton("Edit library...", self)
+        self._fill_all_tanks_btn = QPushButton("Fill all tanks", self)
 
         # Top-bar text inputs
         self._voyage_name_edit = QLineEdit(self)
@@ -253,6 +254,7 @@ class ConditionEditorView(QWidget):
         self._cargo_type_combo.setMaximumWidth(220)
         top.addWidget(self._cargo_type_combo)
         top.addWidget(self._cargo_library_btn)
+        top.addWidget(self._fill_all_tanks_btn)
         top.addStretch()
         root.addLayout(top)
         # Hide ship/voyage/condition combos (still used internally for load_condition from file)
@@ -300,6 +302,7 @@ class ConditionEditorView(QWidget):
         self._compute_btn.clicked.connect(self._on_compute)
         self._save_condition_btn.clicked.connect(self._on_save_condition)
         self._cargo_library_btn.clicked.connect(self._on_edit_cargo_library)
+        self._fill_all_tanks_btn.clicked.connect(self._on_fill_all_tanks_clicked)
         self._deck_profile_widget.tank_selected.connect(self._on_tank_selected_from_view)
 
         # Connect table changes for real-time updates
@@ -398,6 +401,29 @@ class ConditionEditorView(QWidget):
         # Update cargo types in condition table widget to sync all dropdowns
         if hasattr(self, '_condition_table') and hasattr(self._condition_table, 'update_cargo_types'):
             self._condition_table.update_cargo_types(self._cargo_types)
+
+    def _on_fill_all_tanks_clicked(self) -> None:
+        """Set all tanks to 100% full in one click (simple tank table + condition table)."""
+        if not getattr(self, "_current_tanks", None):
+            return
+        # 1) Update simple tank table Fill % to 100 for every tank row
+        self._tank_table.blockSignals(True)
+        try:
+            for row in range(self._tank_table.rowCount()):
+                fill_item = self._tank_table.item(row, 2)
+                if not fill_item:
+                    continue
+                fill_item.setText("100.0")
+        finally:
+            self._tank_table.blockSignals(False)
+
+        # 2) Rebuild tank_volumes from the updated Fill % values
+        tank_volumes = self._tank_volumes_from_simple_table()
+        # Keep existing pen loadings so livestock is unchanged
+        pen_loads = self._pen_loadings_from_pen_table()
+
+        # 3) Refresh the detailed condition table so all tank tabs show full volume/weight
+        self._update_condition_table(self._current_pens, self._current_tanks, pen_loads, tank_volumes)
 
     def _on_tank_selected_from_view(self, tank_id: int) -> None:
         """When user selects a tank polygon in deck view, focus that tank row in data (for calculation)."""
@@ -1078,14 +1104,22 @@ class ConditionEditorView(QWidget):
         tank_ullage_fsm = {}
         if self._current_ship and self._current_ship.id and self._current_ship.id in self._ullage_fsm_cache:
             tank_ullage_fsm = self._ullage_fsm_cache[self._current_ship.id]
+        # Optional per-pen mass-per-head and per-tank weight overrides loaded from saved conditions
+        pen_mass_per_head = getattr(self._current_condition, "pen_mass_per_head_t", {}) or {}
+        tank_weights = getattr(self._current_condition, "tank_weights_mt", {}) or {}
         self._condition_table.update_data(
-            pens, tanks, pen_loadings, tank_volumes,
+            pens,
+            tanks,
+            pen_loadings,
+            tank_volumes,
             cargo_type=selected_cargo,
             cargo_type_names=cargo_type_names,
             cargo_types=self._cargo_types,
             ship_id=self._current_ship.id if self._current_ship else None,
             default_cargo_name=default_cargo_name,
             tank_ullage_fsm=tank_ullage_fsm,
+            pen_mass_per_head=pen_mass_per_head,
+            initial_tank_weights=tank_weights,
         )
         
     # Public methods for toolbar access
@@ -1140,7 +1174,26 @@ class ConditionEditorView(QWidget):
 
         # Reload pens/tanks for the current ship with empty loadings/volumes
         if self._current_ship:
+            # Reset DB-backed pens/tanks first
             self._set_current_ship(self._current_ship)
+            # Then explicitly zero all tank volumes in both the simple tank table
+            # and the detailed condition table so the UI starts from a clean slate.
+            # 1) Simple tank table: set Fill % to 0 for every row.
+            self._tank_table.blockSignals(True)
+            try:
+                for row in range(self._tank_table.rowCount()):
+                    fill_item = self._tank_table.item(row, 2)
+                    if fill_item:
+                        fill_item.setText("0.0")
+            finally:
+                self._tank_table.blockSignals(False)
+            # 2) Rebuild condition table with zero tank volumes and pen loadings.
+            tank_volumes: Dict[int, float] = {}
+            pen_loadings: Dict[int, int] = {}
+            self._update_condition_table(self._current_pens, self._current_tanks, pen_loadings, tank_volumes)
+            # Ensure all bottom tank tables visually show zeros as well.
+            if hasattr(self, "_condition_table") and hasattr(self._condition_table, "reset_all_tank_tables_to_zero"):
+                self._condition_table.reset_all_tank_tables_to_zero()
 
         # Clear any previously computed results and graphical overlays
         if hasattr(self, "_results_panel") and hasattr(self._results_panel, "_clear_all"):

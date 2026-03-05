@@ -73,13 +73,21 @@ class CurvesView(QWidget):
         """Refresh plot when loading condition updates (condition_computed)."""
         kg_m = getattr(results, "kg_m", 0.0)
         displacement_t = getattr(results, "displacement_t", 0.0)
-        trim_m = getattr(results, "trim_m", 0.0)
+        draft_m = getattr(results, "draft_m", 0.0)
+
+        # Debug trace: compare the KG used for GZ with the KG from the
+        # stability solver (printed in stability_service.compute_condition).
+        try:
+            print(f"[GZ debug - curves_view] kg_m={kg_m:.3f} m")
+        except Exception:
+            # Never let logging break the UI if stdout is unavailable.
+            pass
 
         if displacement_t <= 0 or kg_m <= 0:
             self._draw_placeholder()
             return
 
-        kn_table = get_kn_table_dict(displacement_t, trim_m)
+        kn_table = get_kn_table_dict(displacement_t, draft_m)
         if not kn_table:
             self._ax.clear()
             self._ax.set_xlabel("Heel Angle (deg)")

@@ -222,8 +222,8 @@ def compute_gz_curve_stats(
 
 # ---- KN tables from Excel (self-contained, no kn_curves dependency) ----
 
-# sheet_name -> ((disp, heel, kz_matrix), file_mtime) so we reload when Excel is edited
-_KN_TABLE_CACHE: dict[str, tuple[tuple[np.ndarray, np.ndarray, np.ndarray], float]] = {}
+# Cache keyed by Excel path string; value is (draft->(disp, heel, kz_matrix), file_mtime)
+_KN_TABLE_CACHE: dict[str, tuple[dict[float, tuple[np.ndarray, np.ndarray, np.ndarray]], float]] = {}
 
 
 def _get_kz_tables_path() -> Path | None:
@@ -245,27 +245,27 @@ def _normalize_header(name: str) -> str:
     return str(name).replace("\n", " ").strip().lower()
 
 
-def _sheet_name_for_trim(path: Path, trim_m: float) -> str | None:
-    """Return the sheet name that best matches trim (sheet names = trim numbers)."""
+def _iter_numeric_draft_sheets(path: Path) -> dict[float, str]:
+    """
+    Return mapping draft_m -> sheet_name for all sheets whose name parses as a float.
+
+    In typical KN tables, each sheet is labelled by mean draft (m), e.g. '3.5', '4.0'.
+    """
     import pandas as pd
+
     try:
         xl = pd.ExcelFile(path)
     except Exception:
-        return None
-    names = xl.sheet_names
-    if not names:
-        return None
-    best_name, best_diff = names[0], float("inf")
-    for name in names:
+        return {}
+    out: dict[float, str] = {}
+    for name in xl.sheet_names:
         s = str(name).strip()
         try:
-            sheet_trim = float(s)
+            draft_val = float(s)
         except ValueError:
             continue
-        diff = abs(sheet_trim - trim_m)
-        if diff < best_diff:
-            best_diff, best_name = diff, name
-    return best_name
+        out[draft_val] = name
+    return out
 
 
 def _load_kn_matrix(sheet_name: str, path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
@@ -400,50 +400,96 @@ def _load_kn_matrix(sheet_name: str, path: Path) -> tuple[np.ndarray, np.ndarray
     return disp_values, heel, kz_matrix
 
 
-def get_kn_table_dict(displacement_t: float, trim_m: float = 0.0) -> dict[float, float] | None:
+def get_kn_table_dict(displacement_t: float, draft_m: float = 0.0) -> dict[float, float] | None:
     """
-    For a given displacement: identify two bounding displacement rows; for EACH angle
-    column (10°, 20°, 30°, …), interpolate KN between those two rows. Return the full
-    angle→KN dictionary. When computing GZ at angle θ, use _interp_kn(θ, this_dict)
-    to interpolate between nearest angle columns.
+    Return angle→KN dictionary for the given condition using 2D interpolation:
+
+    - Sheets are treated as KN slices at different **mean drafts** (sheet name = draft).
+    - Within each sheet, rows are at different **displacements**.
+    - We interpolate first in displacement within each sheet, then in draft between sheets.
     """
     path = _get_kz_tables_path()
     if path is None:
         return None
-    sheet_name = _sheet_name_for_trim(path, trim_m)
-    if sheet_name is None:
-        return None
+
     try:
         current_mtime = path.stat().st_mtime
     except OSError:
         current_mtime = 0.0
-    cached = _KN_TABLE_CACHE.get(sheet_name)
+
+    cache_key = str(path)
+    cached = _KN_TABLE_CACHE.get(cache_key)
     if cached is None or cached[1] != current_mtime:
-        data = _load_kn_matrix(sheet_name, path)
-        if data is None:
+        # Load all numeric draft sheets into the cache
+        draft_to_sheet = _iter_numeric_draft_sheets(path)
+        if not draft_to_sheet:
             return None
-        _KN_TABLE_CACHE[sheet_name] = (data, current_mtime)
-        disp, heel, kz = data
+        data_by_draft: dict[float, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+        for draft_val, sheet_name in draft_to_sheet.items():
+            data = _load_kn_matrix(sheet_name, path)
+            if data is None:
+                continue
+            data_by_draft[draft_val] = data
+        if not data_by_draft:
+            return None
+        _KN_TABLE_CACHE[cache_key] = (data_by_draft, current_mtime)
+        draft_map = data_by_draft
     else:
-        disp, heel, kz = cached[0]
-    if disp.size == 0 or heel.size == 0:
+        draft_map = cached[0]
+
+    if not draft_map:
         return None
 
-    # 1) Identify two bounding displacement rows
-    if displacement_t <= disp[0]:
-        row = kz[0, :]
-    elif displacement_t >= disp[-1]:
-        row = kz[-1, :]
-    else:
+    # Sorted available drafts from the KN file
+    available_drafts = sorted(draft_map.keys())
+
+    # Helper: interpolate KN row in one sheet at given displacement
+    def _row_at_disp(disp: np.ndarray, kz: np.ndarray) -> np.ndarray:
+        if disp.size == 0 or kz.size == 0:
+            return np.zeros((kz.shape[1],), dtype=float)
+        if displacement_t <= disp[0]:
+            return kz[0, :].astype(float)
+        if displacement_t >= disp[-1]:
+            return kz[-1, :].astype(float)
         idx = int(np.searchsorted(disp, displacement_t))
         i0 = max(0, idx - 1)
         i1 = min(len(disp) - 1, idx)
         if i0 == i1:
-            row = kz[i0, :]
+            return kz[i0, :].astype(float)
+        d0, d1 = float(disp[i0]), float(disp[i1])
+        t_loc = (displacement_t - d0) / (d1 - d0) if d1 > d0 else 0.0
+        return ((1.0 - t_loc) * kz[i0, :] + t_loc * kz[i1, :]).astype(float)
+
+    # Below/above table range: clamp to nearest draft slice
+    if draft_m <= available_drafts[0]:
+        disp, heel, kz = draft_map[available_drafts[0]]
+        row = _row_at_disp(disp, kz)
+    elif draft_m >= available_drafts[-1]:
+        disp, heel, kz = draft_map[available_drafts[-1]]
+        row = _row_at_disp(disp, kz)
+    else:
+        # Find bracketing drafts
+        lower_draft = max(d for d in available_drafts if d <= draft_m)
+        upper_draft = min(d for d in available_drafts if d >= draft_m)
+        if abs(upper_draft - lower_draft) < 1e-6:
+            disp, heel, kz = draft_map[lower_draft]
+            row = _row_at_disp(disp, kz)
         else:
-            d0, d1 = float(disp[i0]), float(disp[i1])
-            t = (displacement_t - d0) / (d1 - d0) if d1 > d0 else 0.0
-            row = (1.0 - t) * kz[i0, :] + t * kz[i1, :]
+            disp_lo, heel_lo, kz_lo = draft_map[lower_draft]
+            disp_hi, heel_hi, kz_hi = draft_map[upper_draft]
+            # Assume same heel grid across sheets; if not, bail out to lower sheet only.
+            if heel_lo.shape != heel_hi.shape or not np.allclose(heel_lo, heel_hi, equal_nan=False):
+                disp, heel, kz = disp_lo, heel_lo, kz_lo
+                row = _row_at_disp(disp, kz)
+            else:
+                row_lo = _row_at_disp(disp_lo, kz_lo)
+                row_hi = _row_at_disp(disp_hi, kz_hi)
+                t = (draft_m - lower_draft) / (upper_draft - lower_draft)
+                row = (1.0 - t) * row_lo + t * row_hi
+                heel = heel_lo
+
+    if row.size == 0:
+        return None
 
     # 2) Column names and interpolated row: select by column name dynamically (no fixed index).
     column_names = [_angle_to_column_name(float(heel[j])) for j in range(len(heel))]
@@ -682,17 +728,17 @@ def plot_gz_curve(
     x = np.asarray(angles, dtype=float)
     y = np.asarray(gz_values, dtype=float)
 
-    # GM for graphical construction: estimate from the curve's initial slope
-    # (tangent at origin). Fall back to the caller‑provided gm_value only
-    # when we cannot infer it from the GZ data.
-    gm_from_curve = estimate_gm_from_gz_curve(x, y)
-    gm_for_display: float | None
-    if gm_from_curve is not None and gm_from_curve > 0.0:
-        gm_for_display = gm_from_curve
-    elif gm_value is not None and gm_value > 0.0:
+    # GM for graphical construction: prefer the condition's GM value (from the
+    # stability solver / Results view) so all views and reports stay aligned.
+    # Only fall back to estimating GM from the GZ curve when no positive GM
+    # was provided.
+    gm_for_display: float | None = None
+    if gm_value is not None and gm_value > 0.0:
         gm_for_display = float(gm_value)
     else:
-        gm_for_display = None
+        gm_from_curve = estimate_gm_from_gz_curve(x, y)
+        if gm_from_curve is not None and gm_from_curve > 0.0:
+            gm_for_display = gm_from_curve
 
     # Range of positive stability for shading
     if range_positive_deg is None and len(y) > 0 and np.any(y > 0.02):
@@ -788,7 +834,7 @@ def plot_gz_curve(
         ax.set_xlim(left=0.0)
         ax.set_ylim(bottom=0.0)
 
-    # Geometric guides at 90° heel: vertical, horizontal, and diagonal dotted lines
+    # Geometric guides at 90° heel: GM-based reference using GZ = GM·sin(φ)
     try:
         # Use current axis limits so guides stay within the visible frame.
         x_min, x_max_ax = ax.get_xlim()
@@ -798,40 +844,47 @@ def plot_gz_curve(
             import math as _math
             one_rad_deg = _math.degrees(1.0)
             x_guide = min(one_rad_deg, x_max_ax)
-            # Use the GM inferred from the curve whenever available so the
-            # guides match the standard graphical construction.
-            if gm_for_display is not None and gm_for_display > 0.0:
-                y_gm = min(float(gm_for_display), y_max_ax)
-            else:
-                y_gm = y_max_ax
             guide_color = "#9ca3af"
-            # Vertical dotted line at φ = 1 radian (≈57.3°) or at the right edge if < 90,
-            # drawn only up to the GM level so it matches the reference diagram.
+            # Vertical dotted line at φ = 1 radian (≈57.3°) or at the right edge if < 90.
             ax.vlines(
                 x_guide,
                 0.0,
-                y_gm,
+                y_max_ax,
                 colors=guide_color,
                 linestyles=":",
                 linewidth=1.6,
             )
-            # Horizontal GM line from heel = 0 up to the 1‑radian guide.
-            ax.hlines(
-                y_gm,
-                0.0,
-                x_guide,
-                colors=guide_color,
-                linestyles=":",
-                linewidth=1.0,
-            )
-            # Dotted diagonal from origin (0, 0) to the intersection of the two guides.
-            ax.plot(
-                [0.0, x_guide],
-                [0.0, y_gm],
-                color=guide_color,
-                linestyle=":",
-                linewidth=1.0,
-            )
+
+            # GM-based reference curve: GZ_ref(φ) = GM · sin(φ), using the GM passed in
+            # from the condition/results so the initial slope and values match GMt.
+            if gm_for_display is not None and gm_for_display > 0.0:
+                import numpy as _np
+
+                angles_ref = _np.linspace(0.0, x_guide, 180)
+                phi_rad = _np.radians(angles_ref)
+                gz_ref = _np.asarray(gm_for_display, dtype=float) * _np.sin(phi_rad)
+                # Clip to visible Y-range.
+                gz_ref = _np.clip(gz_ref, 0.0, y_max_ax)
+                ax.plot(
+                    angles_ref,
+                    gz_ref,
+                    color=guide_color,
+                    linestyle=":",
+                    linewidth=1.1,
+                    label=None,
+                )
+
+                # Mark and label the GM-based reference value at φ = 1 radian.
+                gz_at_one_rad = float(gm_for_display * _math.sin(1.0))
+                gz_at_one_rad = max(0.0, min(gz_at_one_rad, y_max_ax))
+                ax.plot(
+                    [x_guide],
+                    [gz_at_one_rad],
+                    marker="o",
+                    markersize=4,
+                    color=guide_color,
+                )
+
             # Label the 1 radian heel angle on the X‑axis directly under the guide.
             ax.annotate(
                 "ϕ = 1 rad",
@@ -848,7 +901,7 @@ def plot_gz_curve(
             if gm_for_display is not None and y_gm > 0.0:
                 ax.text(
                     x_guide,
-                    y_gm * 1.02,
+                    gz_at_one_rad * 1.05,
                     f"GM = {gm_for_display:.2f} m",
                     rotation=0,
                     ha="right",
