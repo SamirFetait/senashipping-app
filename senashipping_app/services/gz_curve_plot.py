@@ -247,9 +247,9 @@ def _normalize_header(name: str) -> str:
 
 def _iter_numeric_draft_sheets(path: Path) -> dict[float, str]:
     """
-    Return mapping draft_m -> sheet_name for all sheets whose name parses as a float.
+    Return mapping trim_m -> sheet_name for all sheets whose name parses as a float.
 
-    In typical KN tables, each sheet is labelled by mean draft (m), e.g. '3.5', '4.0'.
+    In these KN tables, each sheet is labelled by **trim** in metres, e.g. '0.00', '0.50'.
     """
     import pandas as pd
 
@@ -261,15 +261,20 @@ def _iter_numeric_draft_sheets(path: Path) -> dict[float, str]:
     for name in xl.sheet_names:
         s = str(name).strip()
         try:
-            draft_val = float(s)
+            trim_val = float(s)
         except ValueError:
             continue
-        out[draft_val] = name
+        out[trim_val] = name
     return out
 
 
 def _load_kn_matrix(sheet_name: str, path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-    """Load one sheet: (displacements_t, heel_deg, kz_matrix). Returns None on failure."""
+    """
+    Load one sheet: (primary_axis, heel_deg, kz_matrix). Returns None on failure.
+
+    The primary axis is taken from the **draft** column when present (per‑row drafts),
+    and only falls back to the displacement column when no draft column exists.
+    """
     import pandas as pd
     try:
         df = pd.read_excel(path, sheet_name=sheet_name)
@@ -281,24 +286,25 @@ def _load_kn_matrix(sheet_name: str, path: Path) -> tuple[np.ndarray, np.ndarray
     original_columns = list(df.columns)
     df.columns = [_normalize_header(c) for c in df.columns]
 
+    # Prefer a dedicated draft column for the primary axis; ignore displacement
+    # when per‑row drafts are available. This matches KN tables where rows are
+    # tabulated by draft rather than displacement.
     disp_col = None
     for c in df.columns:
         if "displac" in c:
             disp_col = c
             break
-    if disp_col is None:
-        disp_col = df.columns[0]
-
     draft_col = None
     for c in df.columns:
-        if c != disp_col and "draft" in c:
+        if "draft" in c:
             draft_col = c
             break
+    primary_col = draft_col or disp_col or df.columns[0]
 
     angle_cols: list[str] = []
     angle_vals: list[float] = []
     for norm_name in df.columns:
-        if norm_name == disp_col or norm_name == draft_col:
+        if norm_name == primary_col or norm_name == draft_col:
             continue
         digits = "".join(ch for ch in norm_name if (ch.isdigit() or ch in ".-"))
         try:
@@ -330,11 +336,12 @@ def _load_kn_matrix(sheet_name: str, path: Path) -> tuple[np.ndarray, np.ndarray
         if df.empty:
             return None
         df.columns = [_normalize_header(c) for c in df.columns]
-        disp_col = next((c for c in df.columns if "displac" in c), df.columns[0])
-        draft_col = next((c for c in df.columns if c != disp_col and "draft" in c), None)
+        disp_col = next((c for c in df.columns if "displac" in c), None)
+        draft_col = next((c for c in df.columns if "draft" in c), None)
+        primary_col = draft_col or disp_col or df.columns[0]
         angle_cols, angle_vals = [], []
         for norm_name in df.columns:
-            if norm_name == disp_col or norm_name == draft_col:
+            if norm_name == primary_col or norm_name == draft_col:
                 continue
             digits = "".join(ch for ch in norm_name if (ch.isdigit() or ch in ".-"))
             try:
@@ -357,12 +364,13 @@ def _load_kn_matrix(sheet_name: str, path: Path) -> tuple[np.ndarray, np.ndarray
     if not angle_cols:
         return None
 
-    disp_series = pd.to_numeric(df[disp_col], errors="coerce")
-    disp_values = np.asarray(disp_series, dtype=float)
-    valid = np.isfinite(disp_values)
-    disp_values = disp_values[valid]
+    # Primary axis values: use draft when available, otherwise displacement.
+    primary_series = pd.to_numeric(df[primary_col], errors="coerce")
+    primary_values = np.asarray(primary_series, dtype=float)
+    valid = np.isfinite(primary_values)
+    primary_values = primary_values[valid]
 
-    # Keep KN columns aligned with displacement rows (same row index = same condition)
+    # Keep KN columns aligned with primary-axis rows (same row index = same condition)
     kz_cols: list[np.ndarray] = []
     used_angle_vals: list[float] = []
     for c, ang in zip(angle_cols, angle_vals):
@@ -376,15 +384,15 @@ def _load_kn_matrix(sheet_name: str, path: Path) -> tuple[np.ndarray, np.ndarray
         return None
     kz_matrix = np.stack(kz_cols, axis=1)
     row_ok = np.isfinite(kz_matrix).any(axis=1)
-    disp_values = disp_values[row_ok]
+    primary_values = primary_values[row_ok]
     kz_matrix = kz_matrix[row_ok, :]
     for j in range(kz_matrix.shape[1]):
         col = kz_matrix[:, j]
         mask = np.isfinite(col)
         if mask.any() and not mask.all():
-            kz_matrix[:, j] = np.interp(disp_values, disp_values[mask], col[mask])
-    disp_order = np.argsort(disp_values)
-    disp_values = disp_values[disp_order]
+            kz_matrix[:, j] = np.interp(primary_values, primary_values[mask], col[mask])
+    disp_order = np.argsort(primary_values)
+    primary_values = primary_values[disp_order]
     kz_matrix = kz_matrix[disp_order, :]
     heel = np.asarray(used_angle_vals, dtype=float)
     ang_order = np.argsort(heel)
@@ -397,16 +405,18 @@ def _load_kn_matrix(sheet_name: str, path: Path) -> tuple[np.ndarray, np.ndarray
     if heel.size > 0 and heel[0] > 0.0:
         heel = np.concatenate(([0.0], heel))
         kz_matrix = np.concatenate([np.zeros((kz_matrix.shape[0], 1)), kz_matrix], axis=1)
-    return disp_values, heel, kz_matrix
+    return primary_values, heel, kz_matrix
 
 
-def get_kn_table_dict(displacement_t: float, draft_m: float = 0.0) -> dict[float, float] | None:
+def get_kn_table_dict(displacement_t: float, draft_m: float = 0.0, trim_m: float = 0.0) -> dict[float, float] | None:
     """
     Return angle→KN dictionary for the given condition using 2D interpolation:
 
-    - Sheets are treated as KN slices at different **mean drafts** (sheet name = draft).
-    - Within each sheet, rows are at different **displacements**.
-    - We interpolate first in displacement within each sheet, then in draft between sheets.
+    - Sheets are treated as KN slices at different **trims** (sheet name = trim in m).
+    - Within each sheet, rows are at different **drafts** when a draft column exists
+      (preferred), otherwise different displacements.
+    - We interpolate first in draft (preferred) or displacement within each sheet,
+      then in mean draft between sheets.
     """
     path = _get_kz_tables_path()
     if path is None:
@@ -440,43 +450,52 @@ def get_kn_table_dict(displacement_t: float, draft_m: float = 0.0) -> dict[float
     if not draft_map:
         return None
 
-    # Sorted available drafts from the KN file
-    available_drafts = sorted(draft_map.keys())
+    # Sorted available trims from the KN file
+    available_trims = sorted(draft_map.keys())
 
-    # Helper: interpolate KN row in one sheet at given displacement
-    def _row_at_disp(disp: np.ndarray, kz: np.ndarray) -> np.ndarray:
-        if disp.size == 0 or kz.size == 0:
+    # Helper: interpolate KN row in one sheet at the condition draft
+    def _row_at_disp(primary_axis: np.ndarray, kz: np.ndarray) -> np.ndarray:
+        """
+        Interpolate along the sheet's primary axis, which is draft when available.
+
+        We deliberately use the condition's draft_m instead of displacement_t so that
+        KN selection follows the per‑row draft values from the table.
+        """
+        if primary_axis.size == 0 or kz.size == 0:
             return np.zeros((kz.shape[1],), dtype=float)
-        if displacement_t <= disp[0]:
+        # Inner interpolation follows **draft** along the sheet's primary axis.
+        target = draft_m
+        if target <= primary_axis[0]:
             return kz[0, :].astype(float)
-        if displacement_t >= disp[-1]:
+        if target >= primary_axis[-1]:
             return kz[-1, :].astype(float)
-        idx = int(np.searchsorted(disp, displacement_t))
+        idx = int(np.searchsorted(primary_axis, target))
         i0 = max(0, idx - 1)
-        i1 = min(len(disp) - 1, idx)
+        i1 = min(len(primary_axis) - 1, idx)
         if i0 == i1:
             return kz[i0, :].astype(float)
-        d0, d1 = float(disp[i0]), float(disp[i1])
-        t_loc = (displacement_t - d0) / (d1 - d0) if d1 > d0 else 0.0
+        d0, d1 = float(primary_axis[i0]), float(primary_axis[i1])
+        t_loc = (target - d0) / (d1 - d0) if d1 > d0 else 0.0
         return ((1.0 - t_loc) * kz[i0, :] + t_loc * kz[i1, :]).astype(float)
 
-    # Below/above table range: clamp to nearest draft slice
-    if draft_m <= available_drafts[0]:
-        disp, heel, kz = draft_map[available_drafts[0]]
+    # Below/above table range: clamp to nearest trim slice (outer interpolation in trim)
+    trim_val = trim_m
+    if trim_val <= available_trims[0]:
+        disp, heel, kz = draft_map[available_trims[0]]
         row = _row_at_disp(disp, kz)
-    elif draft_m >= available_drafts[-1]:
-        disp, heel, kz = draft_map[available_drafts[-1]]
+    elif trim_val >= available_trims[-1]:
+        disp, heel, kz = draft_map[available_trims[-1]]
         row = _row_at_disp(disp, kz)
     else:
-        # Find bracketing drafts
-        lower_draft = max(d for d in available_drafts if d <= draft_m)
-        upper_draft = min(d for d in available_drafts if d >= draft_m)
-        if abs(upper_draft - lower_draft) < 1e-6:
-            disp, heel, kz = draft_map[lower_draft]
+        # Find bracketing trims
+        lower_trim = max(d for d in available_trims if d <= trim_val)
+        upper_trim = min(d for d in available_trims if d >= trim_val)
+        if abs(upper_trim - lower_trim) < 1e-6:
+            disp, heel, kz = draft_map[lower_trim]
             row = _row_at_disp(disp, kz)
         else:
-            disp_lo, heel_lo, kz_lo = draft_map[lower_draft]
-            disp_hi, heel_hi, kz_hi = draft_map[upper_draft]
+            disp_lo, heel_lo, kz_lo = draft_map[lower_trim]
+            disp_hi, heel_hi, kz_hi = draft_map[upper_trim]
             # Assume same heel grid across sheets; if not, bail out to lower sheet only.
             if heel_lo.shape != heel_hi.shape or not np.allclose(heel_lo, heel_hi, equal_nan=False):
                 disp, heel, kz = disp_lo, heel_lo, kz_lo
@@ -484,7 +503,7 @@ def get_kn_table_dict(displacement_t: float, draft_m: float = 0.0) -> dict[float
             else:
                 row_lo = _row_at_disp(disp_lo, kz_lo)
                 row_hi = _row_at_disp(disp_hi, kz_hi)
-                t = (draft_m - lower_draft) / (upper_draft - lower_draft)
+                t = (trim_val - lower_trim) / (upper_trim - lower_trim)
                 row = (1.0 - t) * row_lo + t * row_hi
                 heel = heel_lo
 
@@ -834,7 +853,8 @@ def plot_gz_curve(
         ax.set_xlim(left=0.0)
         ax.set_ylim(bottom=0.0)
 
-    # Geometric guides at 90° heel: GM-based reference using GZ = GM·sin(φ)
+    # Geometric guides at 90° heel: GM-based reference using the small-angle
+    # tangent GZ ≈ GM·φ (φ in radians).
     try:
         # Use current axis limits so guides stay within the visible frame.
         x_min, x_max_ax = ax.get_xlim()
@@ -855,14 +875,23 @@ def plot_gz_curve(
                 linewidth=1.6,
             )
 
-            # GM-based reference curve: GZ_ref(φ) = GM · sin(φ), using the GM passed in
-            # from the condition/results so the initial slope and values match GMt.
+            # GM-based reference curve and horizontal GM line: small-angle tangent
+            # GZ_ref(φ) = GM · φ, using the GM passed in from the condition/results
+            # so the initial slope at the origin is exactly GM (φ in radians).
             if gm_for_display is not None and gm_for_display > 0.0:
                 import numpy as _np
 
+                # Horizontal line at GZ = GM for quick visual reference.
+                ax.axhline(
+                    gm_for_display,
+                    color=guide_color,
+                    linestyle="--",
+                    linewidth=1.0,
+                )
+
                 angles_ref = _np.linspace(0.0, x_guide, 180)
                 phi_rad = _np.radians(angles_ref)
-                gz_ref = _np.asarray(gm_for_display, dtype=float) * _np.sin(phi_rad)
+                gz_ref = _np.asarray(gm_for_display, dtype=float) * phi_rad
                 # Clip to visible Y-range.
                 gz_ref = _np.clip(gz_ref, 0.0, y_max_ax)
                 ax.plot(
@@ -874,8 +903,9 @@ def plot_gz_curve(
                     label=None,
                 )
 
-                # Mark and label the GM-based reference value at φ = 1 radian.
-                gz_at_one_rad = float(gm_for_display * _math.sin(1.0))
+                # Mark and label the GM-based reference value at φ = 1 radian,
+                # where the tangent gives GZ(1 rad) = GM.
+                gz_at_one_rad = float(gm_for_display)
                 gz_at_one_rad = max(0.0, min(gz_at_one_rad, y_max_ax))
                 ax.plot(
                     [x_guide],
@@ -897,8 +927,8 @@ def plot_gz_curve(
                 fontsize=8,
                 color="#4b5563",
             )
-            # Label GM near the horizontal GM line, if a GM value is provided.
-            if gm_for_display is not None and y_gm > 0.0:
+            # Label GM near the tangent reference point at φ = 1 rad, if GM is provided.
+            if gm_for_display is not None and gz_at_one_rad > 0.0:
                 ax.text(
                     x_guide,
                     gz_at_one_rad * 1.05,

@@ -215,16 +215,7 @@ def compute_condition(
     km_m = kb_m + bm_t
     gm_m = compute_gm(km_m, kg_m)
 
-    # Debug trace: report KG, KB, BM each time a condition is computed.
-    # This prints to the console/terminal where the app was started.
-    try:
-        print(
-            f"[Stability debug] KG={kg_m:.3f} m, KB={kb_m:.3f} m, BMt={bm_t:.3f} m, "
-            f"KM={km_m:.3f} m, GM={gm_m:.3f} m"
-        )
-    except Exception:
-        # Never let logging break the solver if stdout is unavailable.
-        pass
+    # Debug trace disabled: was previously printing KG/KB/BM/KM/GM to stdout.
 
     # Longitudinal strength (lightship + tanks + pens)
     strength = compute_strength(

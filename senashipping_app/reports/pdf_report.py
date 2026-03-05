@@ -266,6 +266,7 @@ def _compute_gz_curve_from_kn(
     """
     displacement_t = float(getattr(results, "displacement_t", 0.0) or 0.0)
     draft_m = float(getattr(results, "draft_m", 0.0) or 0.0)
+    trim_m = float(getattr(results, "trim_m", 0.0) or 0.0)
 
     if displacement_t <= 0.0:
         return [], [], 0.0, 0.0, 0.0, 0.0
@@ -274,7 +275,7 @@ def _compute_gz_curve_from_kn(
     if kg_m <= 0.0:
         return [], [], 0.0, 0.0, 0.0, 0.0
 
-    kn_table = get_kn_table_dict(displacement_t, draft_m)
+    kn_table = get_kn_table_dict(displacement_t, draft_m, trim_m)
     if not kn_table:
         return [], [], 0.0, 0.0, 0.0, 0.0
 
