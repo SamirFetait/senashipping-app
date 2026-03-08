@@ -27,6 +27,7 @@ REF_DESIGN_DRAFT_M = 7.60
 REF_LIGHTSHIP_DRAFT_M = 4.188
 REF_LIGHTSHIP_DISPLACEMENT_T = 5076.0
 REF_LIGHTSHIP_KG_M = 7.79  # VCG (m) for lightship from manual
+REF_LIGHTSHIP_GM_M = 1.34  # GMt (m) for lightship from manual equilibrium data
 # Longitudinal arm 47.72 m from AP. For consistency with the rest of the code,
 # which uses LOA as the longitudinal reference length (e.g. tank.longitudinal_pos
 # and trim solver), we normalise this by REF_LOA_M, not LBP.
@@ -46,6 +47,10 @@ FLUID_DENSITY_SLOP = 0.913
 # Displacement 0.01 %, Trim (LCG-LCB) 0.01 % of LBP, Heel (TCG-TCB) 0.01 % of LBP
 TOLERANCE_DISPLACEMENT_PCT = 0.01
 TOLERANCE_TRIM_HEEL_PCT_LBP = 0.01
+
+# Waterplane coefficient from Osama Bey stability booklet.
+# I_T = Cwp² × L × B³/12 (transverse waterplane inertia)
+CWP = 0.775
 
 # --- IMO general intact stability criteria (PDF p.13, IS Code Ch.3) ---
 # 3.1.2.1 Area under GZ: not less than 0.055 m·rad up to 30°, 0.09 m·rad up to 40° (or θf);

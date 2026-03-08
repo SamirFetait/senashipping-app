@@ -1429,6 +1429,9 @@ class MainWindow(QMainWindow):
                         condition.tank_volumes_m3 or {}
                     )
 
+                    # Run compute so GM and other results are correct (e.g. lightship GM=1.34)
+                    current_widget.compute_condition()
+
                 self._status_bar.showMessage(f"Loaded condition from {Path(file_path).name}", 3000)
             else:
                 self._status_bar.showMessage("Failed to load condition")

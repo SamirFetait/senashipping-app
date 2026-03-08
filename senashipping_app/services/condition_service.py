@@ -52,6 +52,7 @@ class ConditionService:
         cargo_type: Optional[CargoType] = None,
         tank_cog_override: Optional[Dict[int, Tuple[float, float, float]]] = None,
         tank_fsm_mt: Optional[Dict[int, float]] = None,
+        pen_mass_per_head: Optional[Dict[int, float]] = None,
     ) -> ConditionResults:
         """
         Validate the condition and run the stability calculation.
@@ -88,6 +89,7 @@ class ConditionService:
             mass_per_head_t=mass_per_head_t,
             vcg_from_deck_m=vcg_from_deck_m,
             tank_cog_override=tank_cog_override,
+            pen_mass_per_head=pen_mass_per_head,
         )
 
         # Run validation (negative GM, extreme trim, over-limit BM, etc.)

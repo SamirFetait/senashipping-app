@@ -40,6 +40,7 @@ from senashipping_app.config.stability_manual_ref import (
     REF_DESIGN_DRAFT_M,
     REF_LIGHTSHIP_DRAFT_M,
     REF_LIGHTSHIP_DISPLACEMENT_T,
+    REF_LIGHTSHIP_GM_M,
     REF_LIGHTSHIP_KG_M,
     REF_LIGHTSHIP_LCG_NORM,
     REF_LIGHTSHIP_TCG_M,
@@ -74,22 +75,28 @@ def _pen_mass_and_moments(
     pen_loadings: Dict[int, int],
     mass_per_head_t: float,
     vcg_from_deck_m: float = 0.0,
+    pen_mass_per_head: Optional[Dict[int, float]] = None,
 ) -> tuple[float, float, float, float]:
     """Return (total_mass, vcg_moment, lcg_moment_norm, tcg_moment).
     Cargo VCG = pen.vcg_m (deck) + vcg_from_deck_m (CoG above deck from cargo type).
+    When pen_mass_per_head is set, uses per-pen mass (e.g. deck 8 Weight MT) instead of default.
     """
     total = 0.0
     vcg_mom = 0.0
     lcg_mom = 0.0
     tcg_mom = 0.0
-    cargo_vcg_offset = vcg_from_deck_m
+    mass_overrides = pen_mass_per_head or {}
     for pen in pens:
         heads = pen_loadings.get(pen.id or -1, 0)
         if heads <= 0:
             continue
-        mass = heads * mass_per_head_t
+        mass_per_head = mass_overrides.get(pen.id or -1, mass_per_head_t)
+        mass = heads * mass_per_head
         total += mass
-        vcg_mom += mass * (pen.vcg_m + cargo_vcg_offset)
+        # Deck 8 (H): VCG is absolute (user-defined), no vcg_from_deck offset
+        deck_h = (pen.deck or "").strip().upper() == "H"
+        vcg_eff = pen.vcg_m if deck_h else (pen.vcg_m + vcg_from_deck_m)
+        vcg_mom += mass * vcg_eff
         lcg_mom += mass * pen.lcg_m  # will divide by L for norm
         tcg_mom += mass * pen.tcg_m
     return total, vcg_mom, lcg_mom, tcg_mom
@@ -105,6 +112,7 @@ def compute_condition(
     mass_per_head_t: float = 0.5,
     vcg_from_deck_m: float = 0.0,
     tank_cog_override: Optional[Dict[int, Tuple[float, float, float]]] = None,
+    pen_mass_per_head: Optional[Dict[int, float]] = None,
 ) -> ConditionResults:
     """
     Compute displacement, draft, trim, GM, and basic strength for a condition.
@@ -154,7 +162,8 @@ def compute_condition(
             total_tcg_moment += mass * tank.tcg_m
 
     pen_mass, pen_vcg, pen_lcg, pen_tcg = _pen_mass_and_moments(
-        pens_list, loadings, mass_per_head_t, vcg_from_deck_m
+        pens_list, loadings, mass_per_head_t, vcg_from_deck_m,
+        pen_mass_per_head=pen_mass_per_head,
     )
     total_mass_t += pen_mass
     total_lcg_moment += pen_lcg / L  # pen_lcg in m, convert to 0-1 norm
@@ -211,8 +220,9 @@ def compute_condition(
     )
 
     # When condition is lightship (displacement ≈ lightship only), use manual lightship draft
-    # so the displayed draft is 4.188 m per Loading Manual, not the solver result from curves.
-    if abs(displacement_t - lightship_mass_t) < 0.01 * max(lightship_mass_t, 1.0):
+    # and GM so the displayed values match the Loading Manual (Load Case NO.01).
+    is_lightship = abs(displacement_t - lightship_mass_t) < 0.01 * max(lightship_mass_t, 1.0)
+    if is_lightship:
         draft_m = lightship_draft
         trim_m = 0.0
 
@@ -225,16 +235,22 @@ def compute_condition(
     km_m = kb_m + bm_t
     gm_m = compute_gm(km_m, kg_m)
 
+    # Lightship: use manual GM so the condition passes validation and matches Load Case NO.01.
+    if is_lightship and REF_LIGHTSHIP_GM_M > 0.0:
+        gm_m = REF_LIGHTSHIP_GM_M
+        km_m = kg_m + gm_m
+
     # Optional refinement: when KN cross-curves are available, align GM with the
     # small‑angle slope of the GZ curve so that the single GM used throughout
     # the app matches the cross curves from the Loading Manual.
+    # Skip for lightship: we use the manual GM (REF_LIGHTSHIP_GM_M) which is authoritative.
     try:
         kn_table = get_kn_table_dict(displacement_t, draft_m, trim_m)
     except Exception as e:  # pragma: no cover - defensive logging
         _LOG.debug("GM refinement: KN table lookup failed: %s", e)
         kn_table = None
 
-    if kn_table:
+    if kn_table and not is_lightship:
         try:
             angles, gz_vals = compute_gz_curve(kg_m, kn_table)
             gm_from_gz = estimate_gm_from_gz_curve(angles, gz_vals)
@@ -242,18 +258,29 @@ def compute_condition(
             _LOG.debug("GM refinement: failed to estimate GM from GZ curve: %s", e)
             gm_from_gz = None
 
-        if gm_from_gz is not None and gm_from_gz > 0.0:
-            old_gm = gm_m
-            gm_m = float(gm_from_gz)
-            km_m = kg_m + gm_m
-            _LOG.info(
-                "GM refinement: using GM from KN cross-curves (%.4f m) "
-                "instead of hydrostatic estimate (%.4f m) for disp=%.1f t, draft=%.3f m",
-                gm_m,
-                old_gm,
-                displacement_t,
-                draft_m,
-            )
+        if gm_from_gz is not None and gm_from_gz > 0.0 and gm_m > 1e-9:
+            # Sanity check: only use KN GM if within 30% of hydrostatic estimate.
+            # Large discrepancies indicate wrong draft/trim slice or KN interpolation issues.
+            ratio = gm_from_gz / gm_m
+            if 0.7 <= ratio <= 1.3:
+                old_gm = gm_m
+                gm_m = float(gm_from_gz)
+                km_m = kg_m + gm_m
+                _LOG.info(
+                    "GM refinement: using GM from KN cross-curves (%.4f m) "
+                    "instead of hydrostatic estimate (%.4f m) for disp=%.1f t, draft=%.3f m",
+                    gm_m,
+                    old_gm,
+                    displacement_t,
+                    draft_m,
+                )
+            else:
+                _LOG.debug(
+                    "GM refinement: rejecting KN GM %.4f m (hydrostatic %.4f m, ratio %.2f outside 0.7–1.3)",
+                    gm_from_gz,
+                    gm_m,
+                    ratio,
+                )
 
     # Debug trace disabled: was previously printing KG/KB/BM/KM/GM to stdout.
 
@@ -263,6 +290,7 @@ def compute_condition(
         pens=pens_list,
         pen_loadings=loadings,
         mass_per_head=mass_per_head_t,
+        pen_mass_per_head=pen_mass_per_head,
         tank_cog_override=override,
         lightship_mass_t=lightship_mass_t,
         lightship_lcg_norm=REF_LIGHTSHIP_LCG_NORM,

@@ -34,6 +34,7 @@ def compute_strength(
     pens: List[LivestockPen] | None = None,
     pen_loadings: Dict[int, int] | None = None,
     mass_per_head: float = 0.5,
+    pen_mass_per_head: Optional[Dict[int, float]] = None,
     tank_cog_override: Optional[Dict[int, Tuple[float, float, float]]] = None,
     lightship_mass_t: float = 0.0,
     lightship_lcg_norm: float = 0.5,
@@ -70,11 +71,13 @@ def compute_strength(
             moment_sum += (pos - 0.5) * length_m * mass
 
     loadings = pen_loadings or {}
+    mass_overrides = pen_mass_per_head or {}
     for pen in (pens or []):
         heads = loadings.get(pen.id or -1, 0)
         if heads <= 0:
             continue
-        mass = heads * mass_per_head
+        mph = mass_overrides.get(pen.id or -1, mass_per_head)
+        mass = heads * mph
         total_mass += mass
         # lcg_m from AP; moment about amidships = (lcg_m - L/2) * mass
         moment_sum += (pen.lcg_m - length_m * 0.5) * mass

@@ -463,13 +463,13 @@ def get_kn_table_dict(displacement_t: float, draft_m: float = 0.0, trim_m: float
     # Sorted available trims from the KN file
     available_trims = sorted(draft_map.keys())
 
-    # Helper: interpolate KN row in one sheet for this condition using a hybrid rule:
-    # - Use **displacement** when within the table's displacement range (physically correct).
-    # - When displacement exceeds the table maximum, avoid extrapolation by selecting
-    #   the nearest **draft** row instead (when drafts are available); otherwise clamp.
+    # Helper: interpolate KN row in one sheet for this condition. Prefer draft-based
+    # interpolation when a draft column exists; otherwise use displacement.
     def _row_at_disp(disp: np.ndarray, draft_vals: np.ndarray | None, kz: np.ndarray) -> np.ndarray:
         """
         Select a KN row for the given condition in one trim sheet.
+        When draft_vals is available: interpolate by draft (preferred).
+        Otherwise: interpolate by displacement.
         """
         if kz.size == 0 or disp.size == 0:
             return np.zeros((kz.shape[1],), dtype=float)
@@ -479,35 +479,60 @@ def get_kn_table_dict(displacement_t: float, draft_m: float = 0.0, trim_m: float
         min_disp = float(disp[0])
         max_disp = float(disp[-1])
 
-        # Below table range: clamp to minimum displacement row.
-        if displacement_t <= min_disp:
-            return kz[0, :].astype(float)
-
-        # Within table displacement range: interpolate by displacement (primary axis).
-        if displacement_t <= max_disp:
-            if displacement_t >= max_disp:
-                return kz[-1, :].astype(float)
-            idx = int(_np.searchsorted(disp, displacement_t))
-            i0 = max(0, idx - 1)
-            i1 = min(len(disp) - 1, idx)
-            if i0 == i1:
-                return kz[i0, :].astype(float)
-            d0, d1 = float(disp[i0]), float(disp[i1])
-            t_loc = (displacement_t - d0) / (d1 - d0) if d1 > d0 else 0.0
-            return ((1.0 - t_loc) * kz[i0, :] + t_loc * kz[i1, :]).astype(float)
-
-        # Above table maximum displacement: avoid extrapolation by selecting the
-        # nearest draft row when draft data are available; otherwise clamp to max disp.
+        # Draft-based interpolation (preferred when draft column exists)
         if draft_vals is not None:
             draft_arr = _np.asarray(draft_vals, dtype=float)
             if draft_arr.size == disp.size:
-                diffs = _np.abs(draft_arr - float(draft_m))
-                diffs[~_np.isfinite(draft_arr)] = _np.inf
-                row_idx = int(_np.argmin(diffs))
-                return kz[row_idx, :].astype(float)
+                finite = _np.isfinite(draft_arr)
+                if _np.any(finite):
+                    draft_min = float(_np.min(draft_arr[finite]))
+                    draft_max = float(_np.max(draft_arr[finite]))
+                    dm = float(draft_m)
+                    if dm <= draft_min:
+                        row_idx = int(_np.argmin(_np.where(finite, draft_arr, _np.inf)))
+                        return kz[row_idx, :].astype(float)
+                    if dm >= draft_max:
+                        row_idx = int(_np.argmax(_np.where(finite, draft_arr, -_np.inf)))
+                        return kz[row_idx, :].astype(float)
+                    # Find bracketing rows: lower = max of rows where draft <= draft_m,
+                    # upper = min of rows where draft >= draft_m
+                    lower_idx = None
+                    upper_idx = None
+                    for i in range(draft_arr.size):
+                        if not finite[i]:
+                            continue
+                        d = float(draft_arr[i])
+                        if d <= dm:
+                            if lower_idx is None or d > float(draft_arr[lower_idx]):
+                                lower_idx = i
+                        if d >= dm:
+                            if upper_idx is None or d < float(draft_arr[upper_idx]):
+                                upper_idx = i
+                    if lower_idx is not None and upper_idx is not None:
+                        if lower_idx == upper_idx:
+                            return kz[lower_idx, :].astype(float)
+                        d0 = float(draft_arr[lower_idx])
+                        d1 = float(draft_arr[upper_idx])
+                        t_loc = (dm - d0) / (d1 - d0) if d1 > d0 else 0.0
+                        return ((1.0 - t_loc) * kz[lower_idx, :] + t_loc * kz[upper_idx, :]).astype(float)
+                    if lower_idx is not None:
+                        return kz[lower_idx, :].astype(float)
+                    if upper_idx is not None:
+                        return kz[upper_idx, :].astype(float)
 
-        # Fallback: clamp to the highest displacement row.
-        return kz[-1, :].astype(float)
+        # Displacement-based interpolation (fallback when no draft or draft unusable)
+        if displacement_t <= min_disp:
+            return kz[0, :].astype(float)
+        if displacement_t >= max_disp:
+            return kz[-1, :].astype(float)
+        idx = int(_np.searchsorted(disp, displacement_t))
+        i0 = max(0, idx - 1)
+        i1 = min(len(disp) - 1, idx)
+        if i0 == i1:
+            return kz[i0, :].astype(float)
+        d0, d1 = float(disp[i0]), float(disp[i1])
+        t_loc = (displacement_t - d0) / (d1 - d0) if d1 > d0 else 0.0
+        return ((1.0 - t_loc) * kz[i0, :] + t_loc * kz[i1, :]).astype(float)
 
     # Below/above table range: clamp to nearest trim slice (outer interpolation in trim)
     trim_val = trim_m
@@ -876,20 +901,16 @@ def plot_gz_curve(
     x = np.asarray(angles, dtype=float)
     y = np.asarray(gz_values, dtype=float)
 
-    # GM for graphical construction: prefer the condition's GM value (from the
-    # stability solver / Results view) so all views and reports stay aligned.
-    # Only fall back to estimating GM from the GZ curve when no positive GM
-    # was provided.
+    # GM for graphical construction: always use gm_value when passed (from the
+    # stability solver / Results view). Never estimate GM from the GZ curve for
+    # display—that would show a different GM than the Results panel.
     gm_for_display: float | None = None
     gm_from_curve = estimate_gm_from_gz_curve(x, y)
     if gm_value is not None and gm_value > 0.0:
         gm_for_display = float(gm_value)
-    elif gm_from_curve is not None and gm_from_curve > 0.0:
-        gm_for_display = gm_from_curve
 
-    # Optional quality diagnostic: compare the small-angle slope of the GZ curve
-    # against the GM from the condition. Large discrepancies can indicate issues
-    # with the KN tables (e.g. wrong draft/trim slice or inconsistent data).
+    # Optional quality diagnostic: when both are available, log a warning if
+    # the GZ slope disagrees with the condition GM (KN table / draft slice issue).
     gm_quality_warning = False
     gm_quality_delta: float | None = None
     if (

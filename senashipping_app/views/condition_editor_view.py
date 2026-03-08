@@ -674,6 +674,8 @@ class ConditionEditorView(QWidget):
             self._deck_profile_widget.update_tables(pens, tanks)
             # Update condition table
             self._update_condition_table(pens, tanks, pen_loads, condition.tank_volumes_m3)
+            # Run compute so GM and other results are correct (e.g. lightship GM=1.34)
+            self.compute_condition()
 
     def _on_ship_changed(self, index: int) -> None:
         if index < 0 or index >= len(self._ships):
@@ -850,6 +852,8 @@ class ConditionEditorView(QWidget):
 
         condition.tank_volumes_m3 = tank_volumes
         condition.pen_loadings = pen_loadings
+        # Per-pen mass overrides (e.g. deck 8 Weight MT) so custom weights affect calculations
+        condition.pen_mass_per_head_t = self._condition_table.get_pen_mass_per_head_from_tables()
 
         selected_cargo = next(
             (c for c in self._cargo_types if c.name == self._cargo_type_combo.currentText().strip()),
@@ -865,6 +869,7 @@ class ConditionEditorView(QWidget):
                 cargo_type=selected_cargo,
                 tank_cog_override=tank_cog_override if tank_cog_override else None,
                 tank_fsm_mt=tank_fsm_map if tank_fsm_map else None,
+                pen_mass_per_head=condition.pen_mass_per_head_t or None,
             )
         except ConditionValidationError as exc:
             QMessageBox.warning(self, "Validation", str(exc))
@@ -1025,12 +1030,14 @@ class ConditionEditorView(QWidget):
         except (TypeError, ValueError):
             est_time_days = 0.0
 
+        pen_mass_per_head = self._condition_table.get_pen_mass_per_head_from_tables()
         condition = LoadingCondition(
             id=self._current_condition.id if self._current_condition else None,
             voyage_id=self._current_voyage.id,
             name=condition_name,
             tank_volumes_m3=tank_volumes,
             pen_loadings=pen_loadings,
+            pen_mass_per_head_t=pen_mass_per_head,
             estimated_time_days=est_time_days,
         )
 
@@ -1051,6 +1058,7 @@ class ConditionEditorView(QWidget):
                     cargo_type=selected_cargo,
                     tank_cog_override=tank_cog_override if tank_cog_override else None,
                     tank_fsm_mt=tank_fsm_map if tank_fsm_map else None,
+                    pen_mass_per_head=pen_mass_per_head or None,
                 )
                 condition.displacement_t = results.displacement_t
                 condition.draft_m = results.draft_m

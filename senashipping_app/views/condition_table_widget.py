@@ -111,6 +111,7 @@ class ConditionTableWidget(QWidget):
         self._table_widgets: Dict[str, QTableWidget] = {}
         self._cargo_header_combos: Dict[str, QComboBox] = {}  # tab_name -> cargo header combo
         self._current_pens: List[LivestockPen] = []
+        self._current_tanks: list = []
         self._current_cargo_types: List[Any] = []
         self._current_ship_id: Optional[int] = None
         self._skip_item_changed = False
@@ -1015,6 +1016,7 @@ class ConditionTableWidget(QWidget):
         default_cargo_name: Default cargo name to use (defaults to "-- Blank --" if not provided and no cargo_type).
         """
         self._current_pens = pens
+        self._current_tanks = tanks
         self._current_cargo_types = cargo_types or []
         self._current_ship_id = ship_id
         
@@ -1478,8 +1480,7 @@ class ConditionTableWidget(QWidget):
         deck_pens = sorted(deck_pens, key=get_pen_sort_key)
         total_weight = 0.0
         total_ls_moment = 0.0
-        ct_sel = next((c for c in (cargo_types or []) if (getattr(c, "name", "") or "").strip() == cargo_name), None)
-        vcg_from_deck = (getattr(ct_sel, "vcg_from_deck_m", 0) or 0) if ct_sel else 0.0
+        # Deck 8 (H): VCG is absolute (user-defined), do NOT add vcg_from_deck
         for pen in deck_pens:
             row = table.rowCount()
             table.insertRow(row)
@@ -1493,7 +1494,7 @@ class ConditionTableWidget(QWidget):
                 heads = pen.capacity_head if pen.capacity_head > 0 else 0
             per_head_mass = (pen_mass_per_head_overrides or {}).get(pen_id, mass_per_head_t)
             weight_mt = heads * per_head_mass
-            vcg_display = pen.vcg_m + vcg_from_deck
+            vcg_display = pen.vcg_m  # Deck 8: absolute VCG, no cargo offset
             lcg_moment = weight_mt * pen.lcg_m
             total_weight += weight_mt
             total_ls_moment += lcg_moment
@@ -1625,7 +1626,8 @@ class ConditionTableWidget(QWidget):
                 # Also recalc Total Weight and LS Moment if Quantity, Weight, or LCG changed
                 if item.column() in (1, 2, 5):
                     self._recalculate_deck8_row_total_weight(table, row)
-                    # If row already has a pen ID, update it in database
+                # If row already has a pen ID, save to database (incl. VCG/LCG/TCG when cols 4,5,6 change)
+                if item.column() in (1, 2, 4, 5, 6):
                     name_item = table.item(row, 0)
                     if name_item and name_item.data(Qt.ItemDataRole.UserRole):
                         self._save_deck8_row_to_database(table, row)
@@ -1633,7 +1635,8 @@ class ConditionTableWidget(QWidget):
             # Auto-calculate Total Weight and LS Moment when Quantity (col 1), Weight (col 2), or LCG (col 5) changes
             if item.column() in (1, 2, 5):
                 self._recalculate_deck8_row_total_weight(table, row)
-                # If row has a pen ID (user-entered row), update it in database
+            # Save VCG/LCG/TCG to database when user edits CG columns (4, 5, 6)
+            if item.column() in (1, 2, 4, 5, 6):
                 name_item = table.item(row, 0)
                 if name_item and name_item.data(Qt.ItemDataRole.UserRole):
                     self._save_deck8_row_to_database(table, row)
@@ -1702,6 +1705,18 @@ class ConditionTableWidget(QWidget):
                 else:
                     # Update existing pen
                     repo.update(pen)
+                    # Update in-memory pen so deck profile and next Compute use new CG
+                    for p in self._current_pens:
+                        if (p.id or -1) == pen_id:
+                            p.vcg_m = vcg
+                            p.lcg_m = lcg
+                            p.tcg_m = tcg
+                            p.capacity_head = qty
+                            p.name = name
+                            break
+                # Refresh deck profile so CG changes appear in the drawing
+                if self._deck_profile_widget:
+                    self._deck_profile_widget.update_tables(self._current_pens, self._current_tanks or [])
         except Exception as e:
             # Silently fail - user can retry by editing again
             pass

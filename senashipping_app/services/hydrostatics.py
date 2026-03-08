@@ -37,10 +37,9 @@ def _safe_div(a: float, b: float, default: float = 0.0) -> float:
     return a / b
 
 # Typical block coefficient for this vessel (OSAMA BEY).
-# From stability manual hydrostatics at design draft:
-#   Draft T = 7.60 m, Disp ≈ 10451 t, LBP = 110.04 m, B = 19.40 m, ρ = 1.025 t/m³
-#   Cb = Disp / (ρ * LBP * B * T) ≈ 0.63
-DEFAULT_CB = 0.63
+DEFAULT_CB = 0.55
+
+from senashipping_app.config.stability_manual_ref import CWP
 
 
 @dataclass(slots=True)
@@ -140,11 +139,11 @@ def compute_bm_t(
     breadth_m: float,
     rho: float = RHO_SEA,
 ) -> float:
-    """Transverse BM = I_T / V. I_T = L * B³/12 for rectangular WP."""
+    """Transverse BM = I_T / V. I_T = Cwp² × L × B³/12 (Osama Bey stability booklet)."""
     if displacement_t <= 0:
         return 0.0
     v = displacement_t / rho
-    i_t = length_m * (breadth_m ** 3) / 12
+    i_t = (CWP ** 2) * length_m * (breadth_m ** 3) / 12
     return i_t / v
 
 
@@ -154,11 +153,11 @@ def compute_bm_l(
     breadth_m: float,
     rho: float = RHO_SEA,
 ) -> float:
-    """Longitudinal BM = I_L / V."""
+    """Longitudinal BM = I_L / V. I_L = Cwp² × B × L³/12 (Osama Bey stability booklet)."""
     if displacement_t <= 0:
         return 0.0
     v = displacement_t / rho
-    i_l = breadth_m * (length_m ** 3) / 12
+    i_l = (CWP ** 2) * breadth_m * (length_m ** 3) / 12
     return i_l / v
 
 

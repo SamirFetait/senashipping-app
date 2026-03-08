@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Tuple
 
+from senashipping_app.config.stability_manual_ref import CWP
+
 # Default seawater density t/m³
 RHO_SEA = 1.025
 EPS = 1e-9
@@ -131,13 +133,14 @@ def build_curves_from_formulas(
     length_m: float,
     breadth_m: float,
     design_draft_m: float,
-    cb: float = 0.78,
+    cb: float = 0.55,
     rho: float = RHO_SEA,
     num_points: int = 25,
 ) -> HydrostaticCurves:
     """
     Generate hydrostatic curves from principal dimensions and formulas (Path B).
-    Uses draft_to_displacement, KB = f(Cb,T), LCB ≈ constant, I_T/I_L rectangular WP.
+    Uses draft_to_displacement, KB = f(Cb,T), LCB ≈ constant.
+    I_T/I_L use waterplane coefficient Cwp from stability booklet: I = Cwp² × L × B³/12.
     """
     if length_m <= 0 or breadth_m <= 0 or design_draft_m <= 0 or num_points < 2:
         return HydrostaticCurves()
@@ -147,6 +150,7 @@ def build_curves_from_formulas(
     lcb_list: List[float] = []
     i_t_list: List[float] = []
     i_l_list: List[float] = []
+    cwp2 = CWP ** 2
     for i in range(num_points):
         t = design_draft_m * (i / (num_points - 1))
         draft_list.append(t)
@@ -156,8 +160,9 @@ def build_curves_from_formulas(
         kb_t_ratio = 0.535 - 0.055 * cb
         kb_list.append(kb_t_ratio * t)
         lcb_list.append(0.5)  # amidships
-        i_t = length_m * (breadth_m ** 3) / 12
-        i_l = breadth_m * (length_m ** 3) / 12
+        # I_T, I_L: Osama Bey waterplane coefficient from stability booklet
+        i_t = cwp2 * length_m * (breadth_m ** 3) / 12
+        i_l = cwp2 * breadth_m * (length_m ** 3) / 12
         i_t_list.append(i_t)
         i_l_list.append(i_l)
     return HydrostaticCurves(
