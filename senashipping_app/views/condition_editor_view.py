@@ -474,7 +474,7 @@ class ConditionEditorView(QWidget):
         self._condition_combo.setCurrentIndex(0)
         self._on_condition_changed(0)
 
-    def _set_current_ship(self, ship: Ship) -> None:
+    def _set_current_ship(self, ship: Ship, *, skip_preserve: bool = False) -> None:
         self._current_ship = ship
         self._load_sounding_for_ship(ship)
         if database.SessionLocal is None:
@@ -502,7 +502,7 @@ class ConditionEditorView(QWidget):
         # If no condition is selected, use empty pen_loadings and volumes to show blank values
         volumes = self._current_condition.tank_volumes_m3 if self._current_condition else {}
         pen_loads = getattr(self._current_condition, "pen_loadings", {}) or {} if self._current_condition else {}
-        self._update_condition_table(pens, tanks, pen_loads, volumes)
+        self._update_condition_table(pens, tanks, pen_loads, volumes, skip_preserve=skip_preserve)
 
     def _populate_tanks_table(
         self, tanks: List[Tank], volumes: Dict[int, float] | None = None
@@ -672,8 +672,8 @@ class ConditionEditorView(QWidget):
             self._populate_pens_table(pens, pen_loads)
             # Update deck tabs
             self._deck_profile_widget.update_tables(pens, tanks)
-            # Update condition table
-            self._update_condition_table(pens, tanks, pen_loads, condition.tank_volumes_m3)
+            # Update condition table (skip_preserve so loaded condition overrides previous table state)
+            self._update_condition_table(pens, tanks, pen_loads, condition.tank_volumes_m3, skip_preserve=True)
             # Run compute so GM and other results are correct (e.g. lightship GM=1.34)
             self.compute_condition()
 
@@ -1031,12 +1031,14 @@ class ConditionEditorView(QWidget):
             est_time_days = 0.0
 
         pen_mass_per_head = self._condition_table.get_pen_mass_per_head_from_tables()
+        pen_cargo = self._condition_table.get_cargo_selections_from_tables()
         condition = LoadingCondition(
             id=self._current_condition.id if self._current_condition else None,
             voyage_id=self._current_voyage.id,
             name=condition_name,
             tank_volumes_m3=tank_volumes,
             pen_loadings=pen_loadings,
+            pen_cargo=pen_cargo,
             pen_mass_per_head_t=pen_mass_per_head,
             estimated_time_days=est_time_days,
         )
@@ -1088,6 +1090,8 @@ class ConditionEditorView(QWidget):
         tanks: list,
         pen_loadings: Dict[int, int],
         tank_volumes: Dict[int, float],
+        *,
+        skip_preserve: bool = False,
     ) -> None:
         """Helper to update the condition table widget (uses selected cargo type for dynamic AvW/Area; Cargo column dropdown from library)."""
         self._current_pens = pens
@@ -1115,6 +1119,7 @@ class ConditionEditorView(QWidget):
         # Optional per-pen mass-per-head and per-tank weight overrides loaded from saved conditions
         pen_mass_per_head = getattr(self._current_condition, "pen_mass_per_head_t", {}) or {}
         tank_weights = getattr(self._current_condition, "tank_weights_mt", {}) or {}
+        initial_cargo = getattr(self._current_condition, "pen_cargo", {}) or {}
         self._condition_table.update_data(
             pens,
             tanks,
@@ -1128,6 +1133,9 @@ class ConditionEditorView(QWidget):
             tank_ullage_fsm=tank_ullage_fsm,
             pen_mass_per_head=pen_mass_per_head,
             initial_tank_weights=tank_weights,
+            skip_preserve=skip_preserve,
+            initial_cargo_selections=initial_cargo,
+            initial_head_counts=pen_loadings,
         )
         
     # Public methods for toolbar access
@@ -1171,14 +1179,17 @@ class ConditionEditorView(QWidget):
         # Drop reference to any previously saved/loaded condition
         self._current_condition = None
 
-        # Reset condition-specific header inputs
+        # Reset condition-specific header inputs (voyage, ports, est. time, cargo type)
+        self._voyage_name_edit.clear()
+        self._departure_port_edit.clear()
+        self._arrival_port_edit.clear()
+        self._estimated_time_days_edit.clear()
+        self._condition_name_edit.clear()
         if self._cargo_type_combo.count() > 0:
             # Index 0 is kept as "-- Blank --"
             self._cargo_type_combo.setCurrentIndex(0)
         else:
             self._cargo_type_combo.setCurrentText("")
-        self._condition_name_edit.clear()
-        self._estimated_time_days_edit.clear()
 
         # Reload pens/tanks for the current ship with empty loadings/volumes
         if self._current_ship:
@@ -1195,13 +1206,20 @@ class ConditionEditorView(QWidget):
                         fill_item.setText("0.0")
             finally:
                 self._tank_table.blockSignals(False)
-            # 2) Rebuild condition table with zero tank volumes and pen loadings.
+            # 2) Rebuild condition table with zero tank volumes, pen loadings, and Deck 8 weights.
             tank_volumes: Dict[int, float] = {}
             pen_loadings: Dict[int, int] = {}
-            self._update_condition_table(self._current_pens, self._current_tanks, pen_loadings, tank_volumes)
-            # Ensure all bottom tank tables visually show zeros as well.
-            if hasattr(self, "_condition_table") and hasattr(self._condition_table, "reset_all_tank_tables_to_zero"):
-                self._condition_table.reset_all_tank_tables_to_zero()
+            self._update_condition_table(
+                self._current_pens, self._current_tanks, pen_loadings, tank_volumes,
+                skip_preserve=True,
+            )
+            # Ensure all bottom tank tables and Deck 8 weights show zeros.
+            if hasattr(self, "_condition_table"):
+                ct = self._condition_table
+                if hasattr(ct, "reset_all_tank_tables_to_zero"):
+                    ct.reset_all_tank_tables_to_zero()
+                if hasattr(ct, "reset_deck8_weights_to_zero"):
+                    ct.reset_deck8_weights_to_zero()
 
         # Clear any previously computed results and graphical overlays
         if hasattr(self, "_results_panel") and hasattr(self._results_panel, "_clear_all"):

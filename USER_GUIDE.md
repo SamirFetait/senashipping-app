@@ -175,10 +175,6 @@ Some menu items are present for future expansion or specialist workflows:
   - Opens a dialog to manage **cargo types** used for loading conditions.
   - After closing, cargo types are refreshed in the Loading Condition view.
 
-- **Import tanks from STL** (`Tools → Import tanks from STL...`)
-  - Converts 3D **STL meshes** into tanks with calculated **volume and LCG/VCG/TCG**.
-  - Requires the `trimesh` library (see `requirements.txt`).
-
 - **Hydrostatic Calculator...**
   - Currently shows an informational placeholder; full calculator is not yet implemented.
 

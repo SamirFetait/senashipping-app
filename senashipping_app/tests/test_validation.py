@@ -50,10 +50,15 @@ class TestValidation:
         assert isinstance(v.gm_effective, float)
 
     def test_zero_weight(self):
+        """Validator flags ZERO_WEIGHT when displacement is zero."""
         ship = Ship(length_overall_m=150.0, breadth_m=25.0)
         tanks = []
-        cond = LoadingCondition(tank_volumes_m3={})
-        res = compute_condition(ship, tanks, cond)
+        res = ConditionResults(
+            displacement_t=0.0,
+            draft_m=0.0,
+            trim_m=0.0,
+            gm_m=0.0,
+        )
         v = validate_condition(ship, res, tanks, {})
         assert any(i.code == "ZERO_WEIGHT" for i in v.issues)
 
@@ -110,7 +115,8 @@ class TestStressScenarios:
         tanks = []
         cond = LoadingCondition(tank_volumes_m3={})
         res = compute_condition(ship, tanks, cond)
-        assert res.displacement_t == 0.0
+        # Empty tanks still has reference lightship
+        assert res.displacement_t > 5000.0
 
     def test_kg_zero_division(self):
         tanks = []

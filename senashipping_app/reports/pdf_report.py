@@ -26,6 +26,7 @@ from reportlab.platypus import (
 from reportlab.graphics.shapes import Drawing, Line, String, PolyLine
 
 from senashipping_app.config.limits import MASS_PER_HEAD_T
+from senashipping_app.reports.equilibrium_data import build_equilibrium_data
 from senashipping_app.repositories import database
 from senashipping_app.repositories.tank_repository import TankRepository
 from senashipping_app.repositories.livestock_pen_repository import LivestockPenRepository
@@ -598,9 +599,10 @@ def export_condition_to_pdf(
         topMargin=2.0 * cm,
         bottomMargin=2.0 * cm,
     )
-    # Set document-level title metadata so viewers (e.g. browsers) show "OSAMA BAY"
-    # instead of "anonymous" in their title / metadata panes.
-    doc.title = "OSAMA BAY"
+    # Set document-level title metadata from filename (e.g. "Load Case NO.01")
+    doc_title = filepath.stem or "Loading Condition Report"
+    doc.title = doc_title
+    cell_pad = 10  # Padding for report tables (except equilibrium)
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
         "CustomTitle",
@@ -618,7 +620,7 @@ def export_condition_to_pdf(
 
     def _draw_page_frame(canvas, _doc) -> None:
         # Apply document title metadata and draw a border frame on every page.
-        canvas.setTitle("OSAMA BAY")
+        canvas.setTitle(doc_title)
         # Use the actual canvas page size so the frame matches
         # both portrait and landscape templates correctly.
         width, height = canvas._pagesize
@@ -673,7 +675,7 @@ def export_condition_to_pdf(
             styles["Normal"],
         )
     )
-    story.append(Paragraph(f"Voyage: {voyage.name} {voyage.departure_port} -> {voyage.arrival_port}", styles["Normal"]))
+    story.append(Paragraph(f"Voyage: {voyage.name} ({voyage.departure_port} -> {voyage.arrival_port})", styles["Normal"]))
     story.append(Paragraph(f"Date: {condition.created_at.strftime('%Y-%m-%d')}", styles["Normal"]))
     # Use estimated voyage time from the loading condition instead of a Voyage.eta field.
     est_days = getattr(condition, "estimated_time_days", 0.0) or 0.0
@@ -726,82 +728,75 @@ def export_condition_to_pdf(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, 0), "#4472C4"),
-                ("TEXTCOLOR", (0, 0), (-1, 0), "white"),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, 0), 12),
-                ("BOTTOMPADDING", (0, 0), (-1, 0), 10),
+                ("TEXTCOLOR", (0, 0), (-1, 0), "black"),
+                ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 0), (-1, 0), 13),
+                ("FONTSIZE", (0, 1), (-1, -1), 11),
                 ("BACKGROUND", (0, 1), (-1, -1), "#F5F5F5"),
-                ("GRID", (0, 0), (-1, -1), 0.4, "#BBBBBB"),
-                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 10),
+                ("GRID", (0, 0), (-1, -1), 0.5, "#333333"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("ALIGN", (0, 0), (0, -1), "LEFT"),
+                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), cell_pad),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), cell_pad),
             ]
         )
     )
     story.append(summary_table)
     story.append(Spacer(1, 0.5 * cm))
 
-    # --- Section 2: Equilibrium / hydrostatic-style data ---
-    story.append(_section_title("Equilibrium Data", styles))
+    # --- Section 2: EQUILIBRIUM DATA on separate page (Loading Manual style) ---
+    story.append(NextPageTemplate("Portrait"))
+    story.append(PageBreak())
+    story.append(Paragraph("<b>EQUILIBRIUM DATA</b>", ParagraphStyle(
+        "EquilibriumTitle",
+        parent=styles["Heading1"],
+        fontSize=18,
+        leading=22,
+        spaceAfter=8,
+        alignment=1,  # center
+    )))
     story.append(Spacer(1, 0.2 * cm))
 
-    eq_rows = [
-        ["Parameter", "Value", "Unit"],
-        ["Displacement", _fmt(getattr(results, "displacement_t", None), ".1f"), "t"],
-        ["Draft amidships", _fmt(getattr(results, "draft_m", None), ".3f"), "m"],
-        ["Draft at AP", _fmt(getattr(results, "draft_aft_m", None), ".3f"), "m"],
-        ["Draft at FP", _fmt(getattr(results, "draft_fwd_m", None), ".3f"), "m"],
-        ["Trim (stern down)", _fmt(getattr(results, "trim_m", None), ".3f"), "m"],
-        ["Heel", _fmt(getattr(results, "heel_deg", None), ".2f"), "deg"],
-        ["GM (effective)", _fmt(gm_eff, ".3f"), "m"],
-        ["GM (raw)", _fmt(getattr(results, "gm_m", None), ".3f"), "m"],
-        ["KG", _fmt(getattr(results, "kg_m", None), ".3f"), "m"],
-        ["KM", _fmt(getattr(results, "km_m", None), ".3f"), "m"],
-    ]
-    if strength:
-        eq_rows.append(
-            ["SWBM approx.", _fmt(getattr(strength, "still_water_bm_approx_tm", None), ".0f"), "tm"]
-        )
-    if ancillary:
-        eq_rows.extend(
-            [
-                [
-                    "Propeller immersion",
-                    _fmt(getattr(ancillary, "prop_immersion_pct", None), ".1f"),
-                    "% dia",
-                ],
-                ["Visibility ahead", _fmt(getattr(ancillary, "visibility_m", None), ".1f"), "m"],
-                ["Air draft", _fmt(getattr(ancillary, "air_draft_m", None), ".2f"), "m"],
-            ]
-        )
+    eq_data = build_equilibrium_data(ship, results, gm_eff)
+    eq_rows_flat: list[list[str]] = []
+    for label1, val1, label2, val2 in eq_data:
+        eq_rows_flat.append([label1, val1, label2, val2])
 
-    eq_table = Table(eq_rows, colWidths=[7 * cm, 4 * cm, 3 * cm])
+    # Column widths: full page width, two pairs of (label, value)
+    page_width = A4[0] - doc.leftMargin - doc.rightMargin
+    col_w = page_width / 4
+    eq_table = Table(eq_rows_flat, colWidths=[col_w * 1.4, col_w * 0.6, col_w * 1.4, col_w * 0.6])
+    eq_cell_pad = 12  # Equilibrium table: generous padding to fill page
     eq_table.setStyle(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (-1, 0), "#4472C4"),
-                ("TEXTCOLOR", (0, 0), (-1, 0), "white"),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, 0), 12),
-                ("BOTTOMPADDING", (0, 0), (-1, 0), 10),
+                ("TEXTCOLOR", (0, 0), (-1, 0), "black"),
+                ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                ("FONTSIZE", (0, 0), (-1, 0), 13),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), eq_cell_pad),
+                ("TOPPADDING", (0, 0), (-1, 0), eq_cell_pad),
                 ("BACKGROUND", (0, 1), (-1, -1), "#F5F5F5"),
-                ("GRID", (0, 0), (-1, -1), 0.4, "#BBBBBB"),
-                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 10),
+                ("GRID", (0, 0), (-1, -1), 0.5, "#333333"),
+                ("FONTSIZE", (0, 1), (-1, -1), 11),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 6),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("ALIGN", (0, 0), (0, -1), "LEFT"),
+                ("ALIGN", (2, 0), (2, -1), "LEFT"),
+                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("ALIGN", (3, 0), (3, -1), "RIGHT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 1), (-1, -1), eq_cell_pad),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), eq_cell_pad),
             ]
         )
     )
     story.append(eq_table)
     story.append(Spacer(1, 0.5 * cm))
+    story.append(PageBreak())
 
     # --- Section 3: Items / FSM-style summary ---
     items_rows = _build_items_table(ship, condition, results)
@@ -813,8 +808,8 @@ def export_condition_to_pdf(
         items_header_style = ParagraphStyle(
             "ItemsHeader",
             parent=styles["Heading4"],
-            fontSize=10,
-            leading=12,
+            fontSize=11,
+            leading=13,
             alignment=1,  # center
             spaceBefore=0,
             spaceAfter=0,
@@ -822,8 +817,8 @@ def export_condition_to_pdf(
         items_cell_style = ParagraphStyle(
             "ItemsCell",
             parent=styles["Normal"],
-            fontSize=8.5,
-            leading=10,
+            fontSize=10,
+            leading=12,
             spaceBefore=0,
             spaceAfter=0,
         )
@@ -849,19 +844,17 @@ def export_condition_to_pdf(
             TableStyle(
                 [
                     ("BACKGROUND", (0, 0), (-1, 0), "#4472C4"),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), "white"),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, 0), 11),
-                    ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
-                    ("BACKGROUND", (0, 1), (-1, -1), "#FFFFFF"),
-                    ("GRID", (0, 0), (-1, -1), 0.4, "#BBBBBB"),
-                    ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), "black"),
+                    ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 13),
+                    ("FONTSIZE", (0, 1), (-1, -1), 11),
+                    ("BACKGROUND", (0, 1), (-1, -1), "#F5F5F5"),
+                    ("GRID", (0, 0), (-1, -1), 0.5, "#333333"),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-                    ("TOPPADDING", (0, 0), (-1, -1), 3),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
                     ("WORDWRAP", (0, 0), (-1, -1), "CJK"),
                 ]
             )
@@ -879,7 +872,7 @@ def export_condition_to_pdf(
         story.append(PageBreak())
         # Add extra top spacing so the criteria block sits closer to
         # the vertical middle of the landscape page.
-        story.append(Spacer(1, 2.5 * cm))
+        story.append(Spacer(1, 0.3 * cm))
         story.append(_section_title("IMO / Livestock / Ancillary Criteria", styles))
         story.append(Spacer(1, 0.2 * cm))
 
@@ -922,8 +915,8 @@ def export_condition_to_pdf(
         crit_header_style = ParagraphStyle(
             "CriteriaHeader",
             parent=styles["Heading4"],
-            fontSize=10,
-            leading=12,
+            fontSize=11,
+            leading=13,
             alignment=1,  # center
             spaceBefore=0,
             spaceAfter=0,
@@ -931,8 +924,8 @@ def export_condition_to_pdf(
         crit_cell_style = ParagraphStyle(
             "CriteriaCell",
             parent=styles["Normal"],
-            fontSize=9,
-            leading=11,
+            fontSize=10,
+            leading=12,
             spaceBefore=0,
             spaceAfter=0,
         )
@@ -950,7 +943,8 @@ def export_condition_to_pdf(
 
         # Column widths tuned to use the full landscape text width.
         available_width = landscape_size[0] - doc.leftMargin - doc.rightMargin
-        width_fractions = [0.09, 0.09, 0.28, 0.15, 0.11, 0.09, 0.09, 0.10]
+        # Group, Code, Name, Reference, Result, Value, Limit, Margin
+        width_fractions = [0.09, 0.13, 0.28, 0.15, 0.07, 0.09, 0.09, 0.10]
         col_widths = [f * available_width for f in width_fractions]
 
         crit_table = Table(
@@ -959,21 +953,21 @@ def export_condition_to_pdf(
             repeatRows=1,
             hAlign="LEFT",
         )
-        # Header and grid
+        # Header and grid (same style as equilibrium table)
         base_style = [
             ("BACKGROUND", (0, 0), (-1, 0), "#4472C4"),
-            ("TEXTCOLOR", (0, 0), (-1, 0), "white"),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), 11),
-            ("ALIGN", (0, 0), (-1, 0), "CENTER"),
-            ("VALIGN", (0, 0), (-1, 0), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, 0), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, 0), 3),
-            ("BACKGROUND", (0, 1), (-1, -1), "#FFFFFF"),
-            ("GRID", (0, 0), (-1, -1), 0.4, "#BBBBBB"),
+            ("TEXTCOLOR", (0, 0), (-1, 0), "black"),
             ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("FONTSIZE", (0, 0), (-1, 0), 13),
+            ("FONTSIZE", (0, 1), (-1, -1), 11),
+            ("ALIGN", (0, 0), (-1, 0), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("BACKGROUND", (0, 1), (-1, -1), "#F5F5F5"),
+            ("GRID", (0, 0), (-1, -1), 0.5, "#333333"),
             ("WORDWRAP", (0, 0), (-1, -1), "CJK"),
         ]
 

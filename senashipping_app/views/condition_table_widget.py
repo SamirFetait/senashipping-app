@@ -429,6 +429,28 @@ class ConditionTableWidget(QWidget):
                 out[int(tank_id)] = max(0.0, vol)
         return out
 
+    def get_cargo_selections_from_tables(self) -> Dict[int, str]:
+        """Read current cargo selection per pen from Livestock-DK1..DK7 deck tabs (Cargo combo col 1)."""
+        out: Dict[int, str] = {}
+        for deck_num in range(1, 8):  # DK1-DK7 only; DK8 has different structure
+            tab_name = f"Livestock-DK{deck_num}"
+            table = self._table_widgets.get(tab_name)
+            if not table:
+                continue
+            for row in range(table.rowCount()):
+                name_item = table.item(row, 0)
+                if not name_item or "Totals" in (name_item.text() or ""):
+                    continue
+                pen_id = name_item.data(Qt.ItemDataRole.UserRole)
+                if pen_id is None:
+                    continue
+                cargo_combo = table.cellWidget(row, 1)
+                if isinstance(cargo_combo, QComboBox):
+                    cargo_text = (cargo_combo.currentText() or "").strip()
+                    if cargo_text and cargo_text != "-- Blank --":
+                        out[int(pen_id)] = cargo_text
+        return out
+
     def get_pen_loadings_from_tables(self) -> Dict[int, int]:
         """Read current head count per pen from Livestock-DK1..DK8 deck tabs only. The All tab is UI-only and must not affect calculations (to avoid double-counting)."""
         out: Dict[int, int] = {}
@@ -483,8 +505,7 @@ class ConditionTableWidget(QWidget):
                     mass = float((mass_item.text() or "0").strip())
                 except (TypeError, ValueError):
                     mass = 0.0
-                if mass > 0.0:
-                    out[int(pen_id)] = mass
+                out[int(pen_id)] = mass
         return out
 
     def get_tank_weights_from_tables(self) -> Dict[int, float]:
@@ -511,6 +532,25 @@ class ConditionTableWidget(QWidget):
                 if weight > 0.0:
                     out[int(tank_id)] = weight
         return out
+
+    def reset_deck8_weights_to_zero(self) -> None:
+        """Set Quantity and Weight (MT) to 0 for all pens in Livestock-DK8 (Deck H)."""
+        table = self._table_widgets.get("Livestock-DK8")
+        if not table or table.columnCount() != self.DECK8_COLUMNS:
+            return
+        for row in range(table.rowCount()):
+            name_item = table.item(row, 0)
+            if not name_item or "Totals" in (name_item.text() or ""):
+                continue
+            # Quantity (col 1)
+            qty_item = table.item(row, 1)
+            if qty_item:
+                qty_item.setText("0")
+            # Weight MT per head (col 2)
+            weight_item = table.item(row, 2)
+            if weight_item:
+                weight_item.setText("0.00")
+        self._refresh_deck8_totals(table)
 
     def reset_all_tank_tables_to_zero(self) -> None:
         """Set %Full, Volume and Weight to 0 for all tanks in all tank category tabs."""
@@ -1006,9 +1046,16 @@ class ConditionTableWidget(QWidget):
         tank_ullage_fsm: Optional[Dict[int, Tuple[float, float]]] = None,
         pen_mass_per_head: Optional[Dict[int, float]] = None,
         initial_tank_weights: Optional[Dict[int, float]] = None,
+        skip_preserve: bool = False,
+        initial_cargo_selections: Optional[Dict[int, str]] = None,
+        initial_head_counts: Optional[Dict[int, int]] = None,
     ) -> None:
         """
         Update all tables with current pens and tanks data.
+        skip_preserve: When True (e.g. loading from file), do not preserve from current table;
+            use only the passed-in pen_loadings, tank_volumes, and initial_tank_weights.
+        initial_cargo_selections: When loading (e.g. from file), pen_id -> cargo_name to restore.
+        initial_head_counts: When loading (e.g. from file), pen_id -> head count to restore.
         If cargo_type is set, uses its avg_weight_per_head_kg and deck_area_per_head_m2 for dynamic pen calculations.
         If cargo_type_names is set, the Cargo column is a dropdown filled from the cargo library.
         If cargo_types (full CargoType objects) is set, changing Cargo or # Head will recalculate row and totals.
@@ -1028,68 +1075,69 @@ class ConditionTableWidget(QWidget):
         # Preserve all editable data from tables before clearing (so Compute/load does not reset any column).
         # Start with any externally provided state (e.g. from a saved condition) and then layer on top what is
         # currently visible in the tables for this session.
-        preserved_cargo_selections: Dict[int, str] = {}  # pen_id -> cargo_name
-        preserved_head_counts: Dict[int, int] = {}  # pen_id -> head_count
+        preserved_cargo_selections: Dict[int, str] = dict(initial_cargo_selections or {})  # pen_id -> cargo_name
+        preserved_head_counts: Dict[int, int] = dict(initial_head_counts or {})  # pen_id -> head_count
         preserved_pen_rows: Dict[int, Dict[int, str]] = {}  # pen_id -> {col_index: cell_text} for cols 2,3,4,5,7,8,9,10,11,12,13
         preserved_pen_mass_per_head: Dict[int, float] = dict(pen_mass_per_head or {})  # pen_id -> mass/head (t)
         preserved_tank_weights: Dict[int, float] = dict(initial_tank_weights or {})  # tank_id -> weight_mt
         
-        # Preserve livestock pen data (cargo, head counts, and full row for decks 1-7)
-        for deck_num in range(1, 9):
-            tab_name = f"Livestock-DK{deck_num}"
-            table = self._table_widgets.get(tab_name)
-            if table:
-                for row in range(table.rowCount()):
-                    name_item = table.item(row, 0)
-                    if not name_item:
-                        continue
-                    pen_id = name_item.data(Qt.ItemDataRole.UserRole)
-                    if pen_id is None:
-                        continue
-                    if "Totals" in (name_item.text() or ""):
-                        continue
-                    
-                    # Get cargo selection from combo box (column 1)
-                    cargo_combo = table.cellWidget(row, 1)
-                    if isinstance(cargo_combo, QComboBox):
-                        cargo_text = cargo_combo.currentText()
-                        if cargo_text:
-                            preserved_cargo_selections[pen_id] = cargo_text
-                    
-                    # Get head count (column 2 for decks 1-7, column 1 for deck 8)
-                    if deck_num == 8:
-                        head_item = table.item(row, 1)  # Quantity column
-                    else:
-                        head_item = table.item(row, 2)  # # Head column
-                    if head_item:
-                        try:
-                            head_count = int(float(head_item.text()))
-                            if head_count > 0:
-                                preserved_head_counts[pen_id] = head_count
-                        except (ValueError, TypeError):
-                            pass
+        if not skip_preserve:
+            # Preserve livestock pen data (cargo, head counts, and full row for decks 1-7)
+            for deck_num in range(1, 9):
+                tab_name = f"Livestock-DK{deck_num}"
+                table = self._table_widgets.get(tab_name)
+                if table:
+                    for row in range(table.rowCount()):
+                        name_item = table.item(row, 0)
+                        if not name_item:
+                            continue
+                        pen_id = name_item.data(Qt.ItemDataRole.UserRole)
+                        if pen_id is None:
+                            continue
+                        if "Totals" in (name_item.text() or ""):
+                            continue
+                        
+                        # Get cargo selection from combo box (column 1)
+                        cargo_combo = table.cellWidget(row, 1)
+                        if isinstance(cargo_combo, QComboBox):
+                            cargo_text = cargo_combo.currentText()
+                            if cargo_text:
+                                preserved_cargo_selections[pen_id] = cargo_text
+                        
+                        # Get head count (column 2 for decks 1-7, column 1 for deck 8)
+                        if deck_num == 8:
+                            head_item = table.item(row, 1)  # Quantity column
+                        else:
+                            head_item = table.item(row, 2)  # # Head column
+                        if head_item:
+                            try:
+                                head_count = int(float(head_item.text()))
+                                if head_count > 0:
+                                    preserved_head_counts[pen_id] = head_count
+                            except (ValueError, TypeError):
+                                pass
 
-                    # Preserve per‑head mass: DK1–DK7 AvW/Head MT (col 8); DK8 Weight per head MT (col 2)
-                    if deck_num == 8:
-                        mass_col = 2
-                    else:
-                        mass_col = 8
-                    mass_item = table.item(row, mass_col)
-                    if mass_item:
-                        try:
-                            mass_val = float((mass_item.text() or "0").strip())
-                            if mass_val > 0.0:
-                                preserved_pen_mass_per_head[int(pen_id)] = mass_val
-                        except (ValueError, TypeError):
-                            pass
+                        # Preserve per‑head mass: DK1–DK7 AvW/Head MT (col 8); DK8 Weight per head MT (col 2)
+                        if deck_num == 8:
+                            mass_col = 2
+                        else:
+                            mass_col = 8
+                        mass_item = table.item(row, mass_col)
+                        if mass_item:
+                            try:
+                                mass_val = float((mass_item.text() or "0").strip())
+                                if mass_val > 0.0:
+                                    preserved_pen_mass_per_head[int(pen_id)] = mass_val
+                            except (ValueError, TypeError):
+                                pass
 
-                    # Preserve all data columns for decks 1-7 (2,3,4,5,7,8,9,10,11,12,13) so Compute does not reset them
-                    if deck_num != 8 and table.columnCount() >= 14:
-                        row_data: Dict[int, str] = {}
-                        for col in (2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13):
-                            item = table.item(row, col)
-                            row_data[col] = (item.text() or "0").strip() if item else "0"
-                        preserved_pen_rows[pen_id] = row_data
+                        # Preserve all data columns for decks 1-7 (2,3,4,5,7,8,9,10,11,12,13) so Compute does not reset them
+                        if deck_num != 8 and table.columnCount() >= 14:
+                            row_data: Dict[int, str] = {}
+                            for col in (2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13):
+                                item = table.item(row, col)
+                                row_data[col] = (item.text() or "0").strip() if item else "0"
+                            preserved_pen_rows[pen_id] = row_data
         
         # On "New condition" (no cargo yet): if both pen loadings and tank volumes
         # are effectively zero, do NOT restore any preserved state. This ensures
@@ -1103,31 +1151,32 @@ class ConditionTableWidget(QWidget):
             preserved_pen_mass_per_head.clear()
             preserved_tank_weights.clear()
         
-        # Preserve tank weights from all tank category tables
-        tank_category_tabs = [
-            "Water Ballast", "Fresh Water", "Heavy Fuel Oil", "Diesel Oil",
-            "Lube Oil", "Misc. Tanks", "Dung", "Fodder Hold", "Spaces"
-        ]
-        for tab_name in tank_category_tabs:
-            table = self._table_widgets.get(tab_name)
-            if table:
-                for row in range(table.rowCount()):
-                    name_item = table.item(row, self.TANK_COL_NAME)
-                    if not name_item:
-                        continue
-                    tank_id = name_item.data(Qt.ItemDataRole.UserRole)
-                    if tank_id is None:
-                        continue
-                    
-                    # Get weight (column 8)
-                    weight_item = table.item(row, self.TANK_COL_WEIGHT)
-                    if weight_item:
-                        try:
-                            weight_mt = float(weight_item.text())
-                            if weight_mt > 0:
-                                preserved_tank_weights[tank_id] = weight_mt
-                        except (ValueError, TypeError):
-                            pass
+        if not skip_preserve:
+            # Preserve tank weights from all tank category tables
+            tank_category_tabs = [
+                "Water Ballast", "Fresh Water", "Heavy Fuel Oil", "Diesel Oil",
+                "Lube Oil", "Misc. Tanks", "Dung", "Fodder Hold", "Spaces"
+            ]
+            for tab_name in tank_category_tabs:
+                table = self._table_widgets.get(tab_name)
+                if table:
+                    for row in range(table.rowCount()):
+                        name_item = table.item(row, self.TANK_COL_NAME)
+                        if not name_item:
+                            continue
+                        tank_id = name_item.data(Qt.ItemDataRole.UserRole)
+                        if tank_id is None:
+                            continue
+                        
+                        # Get weight (column 8)
+                        weight_item = table.item(row, self.TANK_COL_WEIGHT)
+                        if weight_item:
+                            try:
+                                weight_mt = float(weight_item.text())
+                                if weight_mt > 0:
+                                    preserved_tank_weights[tank_id] = weight_mt
+                            except (ValueError, TypeError):
+                                pass
         
         # Clear all tables first
         for table in self._table_widgets.values():

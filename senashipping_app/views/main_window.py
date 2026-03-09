@@ -643,12 +643,6 @@ class MainWindow(QMainWindow):
         cargo_lib_action.triggered.connect(self._on_cargo_library)
         tools_menu.addAction(cargo_lib_action)
 
-        # Import STL meshes as tank objects (volume and LCG, VCG, TCG from mesh)
-        import_stl_action = QAction("Import tanks from STL...", self)
-        import_stl_action.setToolTip("Load STL file(s) and create tanks with volume and LCG/VCG/TCG from mesh")
-        import_stl_action.triggered.connect(self._on_import_tanks_from_stl)
-        tools_menu.addAction(import_stl_action)
-
         # Hydrostatic Calculator – opens dialog with current ship
         hydro_action = QAction("Hydrostatic Calculator...", self)
         hydro_action.triggered.connect(self._on_hydrostatic_calculator)
@@ -1225,72 +1219,6 @@ class MainWindow(QMainWindow):
             "Use the main Results and Curves views for stability checks."
         )
 
-    def _on_import_tanks_from_stl(self) -> None:
-        """Import STL mesh(es) as tank objects; volume and LCG, VCG, TCG from mesh."""
-        cond_editor = self._stack.widget(self._page_indexes.condition_editor)
-        if not isinstance(cond_editor, ConditionEditorView):
-            self._status_bar.showMessage("Switch to Loading Condition first")
-            return
-        ship = getattr(cond_editor, "_current_ship", None)
-        if not ship or not getattr(ship, "id", None):
-            QMessageBox.information(
-                self,
-                "Import tanks from STL",
-                "Select a ship first (Tools → Ship & data setup).",
-            )
-            return
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select STL file",
-            str(Path.home()),
-            "STL (*.stl);;All (*)",
-        )
-        if not file_path:
-            return
-        from PyQt6.QtWidgets import QInputDialog
-        deck_name, ok = QInputDialog.getItem(
-            self,
-            "Import tanks from STL",
-            "Deck name (for tank grouping):",
-            ["A", "B", "C", "D", "E", "F", "G", "H"],
-            0,
-            False,
-        )
-        if not ok:
-            return
-        try:
-            from senashipping_app.services.stl_mesh_service import create_tanks_from_stl, TRIMESH_AVAILABLE
-            if not TRIMESH_AVAILABLE:
-                QMessageBox.critical(
-                    self,
-                    "Import tanks from STL",
-                    "trimesh is required. Install with: pip install trimesh",
-                )
-                return
-            from senashipping_app.repositories import database
-            from senashipping_app.repositories.tank_repository import TankRepository
-            with database.SessionLocal() as db:
-                tank_repo = TankRepository(db)
-                created = create_tanks_from_stl(
-                    Path(file_path),
-                    ship.id,
-                    deck_name,
-                    tank_repo,
-                )
-            cond_editor._set_current_ship(ship)
-            QMessageBox.information(
-                self,
-                "Import tanks from STL",
-                f"Created {len(created)} tank(s) with volume and LCG/VCG/TCG from mesh.",
-            )
-            self._status_bar.showMessage(f"Imported {len(created)} tanks from STL")
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Import Error",
-                f"Failed to import STL:\n{str(e)}",
-            )
-
     def _on_new_condition(self) -> None:
         """Handle new condition action from toolbar."""
         # Ask if user wants to save current condition
@@ -1363,14 +1291,25 @@ class MainWindow(QMainWindow):
 
                 # Set condition name and cargo type (single-ship: user sees cargo type)
                 current_widget._condition_name_edit.setText(condition.name)
-                current_widget._set_cargo_type_text(condition.name)
+                current_widget._set_cargo_type_text(
+                    condition.cargo_type_name if condition.cargo_type_name else condition.name
+                )
+
+                # Voyage, ports, est. time
+                current_widget._voyage_name_edit.setText(getattr(condition, "voyage_name", "") or "")
+                current_widget._departure_port_edit.setText(getattr(condition, "departure_port", "") or "")
+                current_widget._arrival_port_edit.setText(getattr(condition, "arrival_port", "") or "")
+                est_days = getattr(condition, "estimated_time_days", 0.0) or 0.0
+                current_widget._estimated_time_days_edit.setText(
+                    f"{est_days:.2f}" if est_days > 0 else ""
+                )
 
                 # Load condition data into editor
                 current_widget._current_condition = condition
 
-                # Load tank volumes and pen loadings
+                # Load tank volumes and pen loadings (skip_preserve so loaded data overrides previous table state)
                 if current_widget._current_ship:
-                    current_widget._set_current_ship(current_widget._current_ship)
+                    current_widget._set_current_ship(current_widget._current_ship, skip_preserve=True)
 
                     # Update tank table with loaded volumes
                     if condition.tank_volumes_m3 and database.SessionLocal:
@@ -1513,6 +1452,18 @@ class MainWindow(QMainWindow):
         if name_from_form:
             condition.name = name_from_form
 
+        # Voyage, ports, est. time, cargo type from Loading Condition page (always from form)
+        condition.voyage_name = condition_widget._voyage_name_edit.text().strip()
+        condition.departure_port = condition_widget._departure_port_edit.text().strip()
+        condition.arrival_port = condition_widget._arrival_port_edit.text().strip()
+        try:
+            est = float((condition_widget._estimated_time_days_edit.text() or "0").strip())
+            condition.estimated_time_days = max(0.0, est)
+        except (TypeError, ValueError):
+            condition.estimated_time_days = getattr(condition, "estimated_time_days", 0.0) or 0.0
+        cargo_text = condition_widget._cargo_type_combo.currentText().strip()
+        condition.cargo_type_name = cargo_text if cargo_text and cargo_text != "-- Blank --" else ""
+
         # Build tank volumes and pen loadings from current UI state.
         # Use the condition table (new UI) as the source of truth, with the
         # legacy simple tables as a fallback, so tank and pen loadings are
@@ -1534,6 +1485,10 @@ class MainWindow(QMainWindow):
             ct_pen_loads = ct.get_pen_loadings_from_tables()
             if ct_pen_loads:
                 pen_loadings = {pid: h for pid, h in ct_pen_loads.items() if h > 0}
+
+            # Cargo per pen (Cargo + #Head are the two key columns; others derive from these)
+            pen_cargo = ct.get_cargo_selections_from_tables()
+            condition.pen_cargo = pen_cargo
 
             # Also capture detailed weights so that on load the UI can restore
             # pen and tank weights exactly as the user entered them.

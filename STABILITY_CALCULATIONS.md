@@ -97,7 +97,7 @@ The ship is assumed in **salt water (ρ = 1.025 t/m³)**. Underwater volume (m³
 The app can use:
 
 - **Formula-based curves (Path B):** Built from ship dimensions (L, B, design draft) and a block coefficient **Cb ≈ 0.78**.
-- **Curves from data (if loaded):** Draft vs displacement, KB, LCB, waterplane inertias I_T, I_L. These may come from a hydrostatic table or from a hull STL file.
+- **Curves from data (if loaded):** Draft vs displacement, KB, LCB, waterplane inertias I_T, I_L. These may come from a hydrostatic table or imported JSON.
 
 **Formula-based generation** (`hydrostatic_curves.build_curves_from_formulas`):
 

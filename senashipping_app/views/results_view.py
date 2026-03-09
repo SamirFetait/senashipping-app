@@ -7,6 +7,7 @@ text report generated from the reports module.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -733,13 +734,19 @@ class ResultsView(QWidget):
                 "Compute a condition first to export.",
             )
             return
-        default_dir = QStandardPaths.writableLocation(
-            QStandardPaths.StandardLocation.DocumentsLocation
-        ) or str(Path.home())
+        default_dir = Path(
+            QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.DocumentsLocation
+            ) or str(Path.home())
+        )
+        # Sanitize condition name for filename (remove invalid chars)
+        cond_name = (self._last_condition.name or "condition").strip()
+        safe_name = re.sub(r'[<>:"/\\|?*]', "_", cond_name).strip(" .") or "condition"
+        default_path = default_dir / f"{safe_name}.pdf"
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Export PDF",
-            default_dir,
+            str(default_path),
             "PDF (*.pdf)",
         )
         if not path:

@@ -12,6 +12,7 @@ from openpyxl.chart import LineChart, Reference
 from openpyxl.styles import Alignment, Font, PatternFill
 
 from senashipping_app.config.limits import MASS_PER_HEAD_T
+from senashipping_app.reports.equilibrium_data import build_equilibrium_data
 from senashipping_app.repositories import database
 from senashipping_app.repositories.livestock_pen_repository import LivestockPenRepository
 from senashipping_app.repositories.tank_repository import TankRepository
@@ -377,68 +378,12 @@ def export_condition_to_excel(
 
     df_summary = pd.DataFrame(summary_data)
 
-    # --- Sheet 2: equilibrium-style data (narrower, with units) ---
-    eq_rows = {
-        "Parameter": [
-            "Displacement",
-            "Draft amidships",
-            "Draft at AP",
-            "Draft at FP",
-            "Trim (stern down +ve)",
-            "Heel",
-            "GM (effective)",
-            "GM (raw)",
-            "KG",
-            "KM",
-        ],
-        "Value": [
-            _fmt(getattr(results, "displacement_t", None), ".1f"),
-            _fmt(getattr(results, "draft_m", None), ".3f"),
-            _fmt(getattr(results, "draft_aft_m", None), ".3f"),
-            _fmt(getattr(results, "draft_fwd_m", None), ".3f"),
-            _fmt(getattr(results, "trim_m", None), ".3f"),
-            _fmt(getattr(results, "heel_deg", None), ".2f"),
-            _fmt(getattr(getattr(results, "validation", None), "gm_effective", None), ".3f"),
-            _fmt(getattr(results, "gm_m", None), ".3f"),
-            _fmt(getattr(results, "kg_m", None), ".3f"),
-            _fmt(getattr(results, "km_m", None), ".3f"),
-        ],
-        "Unit": [
-            "t",
-            "m",
-            "m",
-            "m",
-            "m",
-            "deg",
-            "m",
-            "m",
-            "m",
-            "m",
-        ],
-    }
-    if strength:
-        eq_rows["Parameter"].append("SWBM approx.")
-        eq_rows["Value"].append(_fmt(getattr(strength, "still_water_bm_approx_tm", None), ".0f"))
-        eq_rows["Unit"].append("tm")
-
-    if ancillary:
-        eq_rows["Parameter"].extend(
-            [
-                "Propeller immersion",
-                "Visibility ahead",
-                "Air draft",
-            ]
-        )
-        eq_rows["Value"].extend(
-            [
-                _fmt(getattr(ancillary, "prop_immersion_pct", None), ".1f"),
-                _fmt(getattr(ancillary, "visibility_m", None), ".1f"),
-                _fmt(getattr(ancillary, "air_draft_m", None), ".2f"),
-            ]
-        )
-        eq_rows["Unit"].extend(["% dia", "m", "m"])
-
-    df_eq = pd.DataFrame(eq_rows)
+    # --- Sheet 2: EQUILIBRIUM DATA (same 4-column layout as PDF) ---
+    validation = getattr(results, "validation", None)
+    gm_eff = getattr(validation, "gm_effective", None) if validation else None
+    eq_data = build_equilibrium_data(ship, results, gm_eff)
+    eq_rows_flat = [[label1, val1, label2, val2] for label1, val1, label2, val2 in eq_data]
+    df_eq = pd.DataFrame(eq_rows_flat, columns=["Parameter 1", "Value 1", "Parameter 2", "Value 2"])
 
     # --- Sheet 3: IMO / ancillary criteria table, if available ---
     criteria = getattr(results, "criteria", None)
@@ -484,14 +429,21 @@ def export_condition_to_excel(
         _style_body_table(ws_summary, start_row=2, first_col_bold=True, stripe=True)
         ws_summary.freeze_panes = "A2"
 
-        # Sheet 2 – equilibrium data
+        # Sheet 2 – equilibrium data (4-column layout matching PDF)
         df_eq.to_excel(writer, sheet_name="Equilibrium Data", index=False)
         ws_eq = writer.sheets["Equilibrium Data"]
-        ws_eq.column_dimensions["A"].width = 32
-        ws_eq.column_dimensions["B"].width = 18
-        ws_eq.column_dimensions["C"].width = 10
+        ws_eq.column_dimensions["A"].width = 32  # Parameter 1
+        ws_eq.column_dimensions["B"].width = 18  # Value 1
+        ws_eq.column_dimensions["C"].width = 36  # Parameter 2
+        ws_eq.column_dimensions["D"].width = 18  # Value 2
         _style_header(ws_eq)
         _style_body_table(ws_eq, start_row=2, first_col_bold=True, stripe=True)
+        # Bold and left-align column C (Parameter 2) to match PDF
+        for row in ws_eq.iter_rows(min_row=2, max_row=ws_eq.max_row, min_col=3, max_col=3):
+            for cell in row:
+                if cell.value not in (None, ""):
+                    cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
         ws_eq.freeze_panes = "A2"
 
         # Sheet 3 – Weight items & FSM (optional, if we have any items)

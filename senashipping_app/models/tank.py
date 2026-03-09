@@ -63,8 +63,7 @@ def polygon_centroid_2d(points: List[Tuple[float, float]]) -> Tuple[float, float
 class Tank:
     """
     Tank with name, polygon_coordinates (for highlighting on drawings), volume,
-    lcg, vcg, tcg, max_weight, and density. Volume and LCG/VCG/TCG are set from
-    STL mesh at import (Import tanks from STL). For 2D outlines use
+    lcg, vcg, tcg, max_weight, and density. For 2D outlines use
     update_tank_centroid_from_polygon to auto-calculate lcg/tcg from polygon.
     """
     id: int | None = None
@@ -161,7 +160,7 @@ def update_tank_centroid_from_polygon(
 ) -> None:
     """
     Set tank LCG and TCG from polygon centroid; optionally set VCG to vcg_default.
-    Use when polygon_coordinates are set (e.g. when tank is selected) to auto-fill from 2D outline; for 3D use STL (volume and LCG/VCG/TCG from mesh).
+    Use when polygon_coordinates are set (e.g. when tank is selected) to auto-fill from 2D outline.
     to auto-calculate lcg, vcg, tcg.
     """
     coords = tank.polygon_coordinates

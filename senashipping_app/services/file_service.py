@@ -24,8 +24,14 @@ def save_condition_to_file(filepath: Path, condition: LoadingCondition) -> None:
     data = {
         "name": condition.name,
         "voyage_id": condition.voyage_id,
+        "voyage_name": getattr(condition, "voyage_name", "") or "",
+        "departure_port": getattr(condition, "departure_port", "") or "",
+        "arrival_port": getattr(condition, "arrival_port", "") or "",
+        "estimated_time_days": getattr(condition, "estimated_time_days", 0.0),
+        "cargo_type_name": getattr(condition, "cargo_type_name", "") or "",
         "tank_volumes_m3": condition.tank_volumes_m3,
         "pen_loadings": getattr(condition, "pen_loadings", {}) or {},
+        "pen_cargo": getattr(condition, "pen_cargo", {}) or {},
         # Optional detailed weights so that pen/tank weights are restored exactly as seen on screen
         "pen_mass_per_head_t": getattr(condition, "pen_mass_per_head_t", {}) or {},
         "tank_weights_mt": getattr(condition, "tank_weights_mt", {}) or {},
@@ -33,7 +39,6 @@ def save_condition_to_file(filepath: Path, condition: LoadingCondition) -> None:
         "draft_m": condition.draft_m,
         "trim_m": condition.trim_m,
         "gm_m": condition.gm_m,
-        "estimated_time_days": getattr(condition, "estimated_time_days", 0.0),
     }
     
     with open(filepath, "w", encoding="utf-8") as f:
@@ -55,6 +60,21 @@ def _dict_str_keys_to_int(
     return out
 
 
+def _dict_str_keys_to_int_str(
+    raw: Dict[str, str] | Dict[int, str] | None,
+) -> Dict[int, str]:
+    """Normalize dict from JSON (string keys) to int keys for pen_cargo (pen_id -> cargo_name)."""
+    if not raw:
+        return {}
+    out: Dict[int, str] = {}
+    for k, v in raw.items():
+        try:
+            out[int(k)] = str(v) if v else ""
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def load_condition_from_file(filepath: Path) -> LoadingCondition:
     """
     Load a loading condition from a JSON file.
@@ -64,6 +84,7 @@ def load_condition_from_file(filepath: Path) -> LoadingCondition:
         data = json.load(f)
     raw_volumes = data.get("tank_volumes_m3") or {}
     raw_pen = data.get("pen_loadings") or {}
+    raw_pen_cargo = data.get("pen_cargo") or {}
     raw_pen_mass = data.get("pen_mass_per_head_t") or {}
     raw_tank_w = data.get("tank_weights_mt") or {}
     tank_volumes_m3 = _dict_str_keys_to_int(
@@ -73,6 +94,9 @@ def load_condition_from_file(filepath: Path) -> LoadingCondition:
         raw_pen if isinstance(raw_pen, dict) else {}
     )
     pen_loadings = {k: int(v) for k, v in pen_loadings_raw.items()}
+    pen_cargo = _dict_str_keys_to_int_str(
+        raw_pen_cargo if isinstance(raw_pen_cargo, dict) else {}
+    )
     pen_mass_per_head = _dict_str_keys_to_int(
         raw_pen_mass if isinstance(raw_pen_mass, dict) else {}
     )
@@ -83,13 +107,18 @@ def load_condition_from_file(filepath: Path) -> LoadingCondition:
         id=None,
         voyage_id=data.get("voyage_id"),
         name=data.get("name", "Loaded Condition"),
+        voyage_name=str(data.get("voyage_name", "") or ""),
+        departure_port=str(data.get("departure_port", "") or ""),
+        arrival_port=str(data.get("arrival_port", "") or ""),
+        estimated_time_days=float(data.get("estimated_time_days", 0.0) or 0.0),
+        cargo_type_name=str(data.get("cargo_type_name", "") or ""),
         tank_volumes_m3=tank_volumes_m3,
         pen_loadings=pen_loadings,
+        pen_cargo=pen_cargo,
         pen_mass_per_head_t=pen_mass_per_head,
         tank_weights_mt=tank_weights_mt,
         displacement_t=float(data.get("displacement_t", 0.0)),
         draft_m=float(data.get("draft_m", 0.0)),
         trim_m=float(data.get("trim_m", 0.0)),
         gm_m=float(data.get("gm_m", 0.0)),
-        estimated_time_days=float(data.get("estimated_time_days", 0.0) or 0.0),
     )

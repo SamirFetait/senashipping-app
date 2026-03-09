@@ -41,6 +41,7 @@ class LoadingConditionORM(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     tank_volumes_json: Mapped[str] = mapped_column(Text, default="{}")
     pen_loadings_json: Mapped[str] = mapped_column(Text, default="{}")
+    pen_cargo_json: Mapped[str] = mapped_column(Text, default="{}")
     # Estimated voyage time in days (paired with cargo type dung weight %/day)
     estimated_time_days: Mapped[float] = mapped_column(Float, default=0.0)
     displacement_t: Mapped[float] = mapped_column(Float, default=0.0)
@@ -170,6 +171,20 @@ class ConditionRepository:
     def _serialize_pen_loadings(self, loadings: Dict[int, int]) -> str:
         return json.dumps({str(k): v for k, v in loadings.items()})
 
+    def _parse_pen_cargo(self, json_str: str) -> Dict[int, str]:
+        try:
+            if not json_str:
+                return {}
+            d = json.loads(json_str)
+            if not isinstance(d, dict):
+                return {}
+            return {int(k): str(v) for k, v in d.items() if v}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return {}
+
+    def _serialize_pen_cargo(self, cargo: Dict[int, str]) -> str:
+        return json.dumps({str(k): v for k, v in cargo.items()})
+
     def create(self, condition: LoadingCondition) -> LoadingCondition:
         if condition.voyage_id is None:
             raise ValueError("Condition.voyage_id must be set")
@@ -179,6 +194,9 @@ class ConditionRepository:
             tank_volumes_json=self._serialize_volumes(condition.tank_volumes_m3),
             pen_loadings_json=self._serialize_pen_loadings(
                 getattr(condition, "pen_loadings", {}) or {}
+            ),
+            pen_cargo_json=self._serialize_pen_cargo(
+                getattr(condition, "pen_cargo", {}) or {}
             ),
             displacement_t=condition.displacement_t,
             draft_m=condition.draft_m,
@@ -200,12 +218,16 @@ class ConditionRepository:
         pen_loadings = self._parse_pen_loadings(
             getattr(obj, "pen_loadings_json", "{}") or "{}"
         )
+        pen_cargo = self._parse_pen_cargo(
+            getattr(obj, "pen_cargo_json", "{}") or "{}"
+        )
         return LoadingCondition(
             id=obj.id,
             voyage_id=obj.voyage_id,
             name=obj.name,
             tank_volumes_m3=self._parse_volumes(obj.tank_volumes_json),
             pen_loadings=pen_loadings,
+            pen_cargo=pen_cargo,
             displacement_t=obj.displacement_t,
             draft_m=obj.draft_m,
             trim_m=obj.trim_m,
@@ -225,6 +247,9 @@ class ConditionRepository:
             pen_loadings = self._parse_pen_loadings(
                 getattr(obj, "pen_loadings_json", "{}") or "{}"
             )
+            pen_cargo = self._parse_pen_cargo(
+                getattr(obj, "pen_cargo_json", "{}") or "{}"
+            )
             conditions.append(
                 LoadingCondition(
                     id=obj.id,
@@ -232,6 +257,7 @@ class ConditionRepository:
                     name=obj.name,
                     tank_volumes_m3=self._parse_volumes(obj.tank_volumes_json),
                     pen_loadings=pen_loadings,
+                    pen_cargo=pen_cargo,
                     displacement_t=obj.displacement_t,
                     draft_m=obj.draft_m,
                     trim_m=obj.trim_m,
@@ -253,6 +279,10 @@ class ConditionRepository:
         if hasattr(obj, "pen_loadings_json"):
             obj.pen_loadings_json = self._serialize_pen_loadings(
                 getattr(condition, "pen_loadings", {}) or {}
+            )
+        if hasattr(obj, "pen_cargo_json"):
+            obj.pen_cargo_json = self._serialize_pen_cargo(
+                getattr(condition, "pen_cargo", {}) or {}
             )
         obj.displacement_t = condition.displacement_t
         obj.draft_m = condition.draft_m

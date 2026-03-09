@@ -23,6 +23,9 @@ class LoadingCondition:
     # Mapping: pen_id -> head count (Phase 2 livestock)
     pen_loadings: Dict[int, int] = field(default_factory=dict)
 
+    # Mapping: pen_id -> cargo type name (per-pen cargo selection for save/load)
+    pen_cargo: Dict[int, str] = field(default_factory=dict)
+
     # Optional detailed weights for UI/state persistence:
     # per-pen mass per head (t/head) and per-tank weight (t).
     pen_mass_per_head_t: Dict[int, float] = field(default_factory=dict)
@@ -30,6 +33,13 @@ class LoadingCondition:
 
     # Estimated voyage time in days (used together with cargo type dung weight %/day)
     estimated_time_days: float = 0.0
+
+    # Voyage display fields for save/load (when no voyage_id or for file portability)
+    voyage_name: str = ""
+    departure_port: str = ""
+    arrival_port: str = ""
+    # Cargo type combo selection from Loading Condition page header
+    cargo_type_name: str = ""
 
     # Calculated properties (simplified for MVP)
     displacement_t: float = 0.0

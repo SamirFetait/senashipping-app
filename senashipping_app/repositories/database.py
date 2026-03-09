@@ -154,6 +154,16 @@ def init_database(db_path: Path) -> sessionmaker:
         # Column may already exist; ignore migration failure
         pass
 
+    # Migration: loading_conditions pen_cargo_json (pen_id -> cargo_name for save/load)
+    try:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE loading_conditions ADD COLUMN pen_cargo_json TEXT DEFAULT '{}'"
+            ))
+            conn.commit()
+    except Exception:
+        pass  # Column already exists
+
     global SessionLocal
     SessionLocal = sessionmaker(
         bind=engine,
