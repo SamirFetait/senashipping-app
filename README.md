@@ -61,12 +61,6 @@
 
 ---
 
-## 🖼️ Screenshots
-
-*Main window: Loading Condition view (deck profile, results panel, condition table) and Results view (alarms, criteria, report).*
-
----
-
 ## 📁 Project structure
 
 ```
