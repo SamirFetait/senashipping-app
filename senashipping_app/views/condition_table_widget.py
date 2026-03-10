@@ -1299,6 +1299,7 @@ class ConditionTableWidget(QWidget):
         total_weight = 0.0
         total_area_used = 0.0
         total_area = 0.0
+        total_lcg_moment = 0.0
         
         for pen in deck_pens:
             row = table.rowCount()
@@ -1334,6 +1335,7 @@ class ConditionTableWidget(QWidget):
                 total_weight += display_weight
                 total_area_used += area_used
                 total_area += pen.area_m2
+                total_lcg_moment += lcg_moment
             else:
                 # Calculate from cargo/loadings (with optional per-pen mass overrides loaded from a saved condition)
                 if preserved_head_counts and pen_id in preserved_head_counts:
@@ -1390,16 +1392,17 @@ class ConditionTableWidget(QWidget):
                 weight_mt = heads * per_head_mass
                 display_avw = per_head_mass
                 display_weight = weight_mt
+                lcg_moment = display_weight * pen.lcg_m
                 total_weight += display_weight
                 total_area_used += area_used
                 total_area += pen.area_m2
+                total_lcg_moment += lcg_moment
                 
                 ct_sel = next((c for c in (cargo_types or []) if (getattr(c, "name", "") or "").strip() == cargo_name), None)
                 vcg_from_deck = (getattr(ct_sel, "vcg_from_deck_m", 0) or 0) if ct_sel else 0.0
                 vcg_display = pen.vcg_m + vcg_from_deck
                 lcg_display = pen.lcg_m
                 tcg_display = pen.tcg_m
-                lcg_moment = display_weight * pen.lcg_m
             
             name_item = QTableWidgetItem(pen.name)
             name_item.setData(Qt.ItemDataRole.UserRole, pen.id)
@@ -1483,8 +1486,9 @@ class ConditionTableWidget(QWidget):
         if deck_pens and cargo_types:
             table.itemChanged.connect(self._make_livestock_item_changed(table))
             
-        # Add totals row
+        # Add totals row (Total LCG = total moment / total weight)
         if deck_pens:
+            total_lcg = total_lcg_moment / total_weight if total_weight > 0 else 0.0
             row = table.rowCount()
             table.insertRow(row)
             table.setItem(row, 0, QTableWidgetItem(f"{tab_name} Totals"))
@@ -1498,9 +1502,9 @@ class ConditionTableWidget(QWidget):
             table.setItem(row, 8, QTableWidgetItem(""))
             table.setItem(row, 9, QTableWidgetItem(f"{total_weight:.2f}"))
             table.setItem(row, 10, QTableWidgetItem(""))
-            table.setItem(row, 11, QTableWidgetItem(""))
+            table.setItem(row, 11, QTableWidgetItem(f"{total_lcg:.3f}"))  # Total LCG m-[FR]
             table.setItem(row, 12, QTableWidgetItem(""))
-            table.setItem(row, 13, QTableWidgetItem(""))
+            table.setItem(row, 13, QTableWidgetItem(f"{total_lcg_moment:.2f}"))  # Total LS Moment m-MT
     
     def _populate_deck8_tab(
         self,
@@ -1573,12 +1577,15 @@ class ConditionTableWidget(QWidget):
             moment_item.setFlags(moment_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 7, moment_item)
             self._set_deck8_delete_button(table, row)
-        # Totals row (always present for deck 8) - Total Weight in MT
+        # Totals row (always present for deck 8) - Total Weight, Total Moment, Total LCG
+        total_lcg = total_ls_moment / total_weight if total_weight > 0 else 0.0
         tot_row = table.rowCount()
         table.insertRow(tot_row)
         table.setItem(tot_row, 0, QTableWidgetItem(f"{tab_name} Totals"))
-        for c in range(1, 7):
+        for c in range(1, 5):
             table.setItem(tot_row, c, QTableWidgetItem(""))
+        table.setItem(tot_row, 5, QTableWidgetItem(f"{total_lcg:.3f}"))  # Total LCG = moment/weight
+        table.setItem(tot_row, 6, QTableWidgetItem(""))
         table.setItem(tot_row, 3, QTableWidgetItem(f"{total_weight:.2f}"))
         table.setItem(tot_row, 7, QTableWidgetItem(f"{total_ls_moment:.2f}"))
         # Blank row for user entry (when filled, another blank is added)
@@ -1860,6 +1867,10 @@ class ConditionTableWidget(QWidget):
             table.item(tot_row, 3).setText(f"{total_weight_mt:.2f}")
         if table.item(tot_row, 7):
             table.item(tot_row, 7).setText(f"{total_moment:.2f}")
+        # Total LCG (col 5) = total moment / total weight
+        total_lcg = total_moment / total_weight_mt if total_weight_mt > 0 else 0.0
+        if table.item(tot_row, 5):
+            table.item(tot_row, 5).setText(f"{total_lcg:.3f}")
     
     def _make_livestock_item_changed(self, table: QTableWidget):
         """Return a handler for itemChanged: recalc row when # Head (column 2) changes."""
@@ -2291,10 +2302,12 @@ class ConditionTableWidget(QWidget):
         total_weight = 0.0
         total_area_used = 0.0
         total_area = 0.0
+        total_moment = 0.0
         for row in range(table.rowCount() - 1):
             w_item = table.item(row, 9)
             a5_item = table.item(row, 5)
             a6_item = table.item(row, 6)
+            m_item = table.item(row, 13)
             if w_item:
                 try:
                     total_weight += float(w_item.text())
@@ -2310,13 +2323,23 @@ class ConditionTableWidget(QWidget):
                     total_area += float(a6_item.text())
                 except (TypeError, ValueError):
                     pass
+            if m_item:
+                try:
+                    total_moment += float(m_item.text())
+                except (TypeError, ValueError):
+                    pass
         tot_row = table.rowCount() - 1
+        total_lcg = total_moment / total_weight if total_weight > 0 else 0.0
         if table.item(tot_row, 5):
             table.item(tot_row, 5).setText(f"{total_area_used:.2f}")
         if table.item(tot_row, 6):
             table.item(tot_row, 6).setText(f"{total_area:.2f}")
         if table.item(tot_row, 9):
             table.item(tot_row, 9).setText(f"{total_weight:.2f}")
+        if table.item(tot_row, 11):
+            table.item(tot_row, 11).setText(f"{total_lcg:.3f}")
+        if table.item(tot_row, 13):
+            table.item(tot_row, 13).setText(f"{total_moment:.2f}")
             
     def _populate_tank_tabs(
         self,
@@ -2422,9 +2445,8 @@ class ConditionTableWidget(QWidget):
                 cap_item.setFlags(cap_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_CAPACITY, cap_item)
                 
-                # %Full (col 5) - calculated from volume and capacity, read-only
+                # %Full (col 5) - editable; Volume and Weight recalc when changed
                 fill_item = QTableWidgetItem(f"{fill_pct:.3f}")
-                fill_item.setFlags(fill_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_PCT_FULL, fill_item)
                 
                 # Volume (col 6) - calculated from weight and density, but capped at capacity, read-only
@@ -2486,22 +2508,22 @@ class ConditionTableWidget(QWidget):
             )
     
     def _on_tank_cell_leave(self, table: QTableWidget, prev_row: int, prev_col: int) -> None:
-        """When leaving a cell, if it was Weight or Dens, recalc that row so VCG/LCG/TCG update on tab/click away."""
-        if prev_row < 0 or prev_col not in (self.TANK_COL_WEIGHT, self.TANK_COL_DENS):
+        """When leaving a cell, if it was Weight, Dens or %Full, recalc that row so VCG/LCG/TCG update on tab/click away."""
+        if prev_row < 0 or prev_col not in (self.TANK_COL_WEIGHT, self.TANK_COL_DENS, self.TANK_COL_PCT_FULL):
             return
         if prev_row >= table.rowCount():
             return
         name_it = table.item(prev_row, self.TANK_COL_NAME)
         if not name_it or "Totals" in (name_it.text() or ""):
             return
-        self._recalculate_tank_row(table, prev_row)
+        self._recalculate_tank_row(table, prev_row, prev_col)
     
     def _make_tank_item_changed(self, table: QTableWidget):
-        """Return a handler for tank table itemChanged: recalc Volume and %Full when Weight or Dens changes."""
+        """Return a handler for tank table itemChanged: recalc Volume/%Full/Weight when Weight, Dens or %Full changes."""
         def on_item(item: QTableWidgetItem) -> None:
             if self._skip_item_changed:
                 return
-            if item.column() not in (self.TANK_COL_WEIGHT, self.TANK_COL_DENS):
+            if item.column() not in (self.TANK_COL_WEIGHT, self.TANK_COL_DENS, self.TANK_COL_PCT_FULL):
                 return
             row = item.row()
             # Skip totals row
@@ -2511,12 +2533,13 @@ class ConditionTableWidget(QWidget):
             if not name_it or "Totals" in (name_it.text() or ""):
                 return
             # Recalc as soon as you leave the cell (itemChanged fires when edit is committed)
-            self._recalculate_tank_row(table, row)
+            self._recalculate_tank_row(table, row, item.column())
         return on_item
     
-    def _recalculate_tank_row(self, table: QTableWidget, row: int) -> None:
-        """Recalculate Volume and %Full from Weight and Density for a tank row.
-        Volume is constrained to not exceed capacity; if it would, weight is adjusted accordingly."""
+    def _recalculate_tank_row(self, table: QTableWidget, row: int, changed_col: Optional[int] = None) -> None:
+        """Recalculate Volume, %Full and Weight for a tank row.
+        When changed_col is TANK_COL_PCT_FULL: derive Volume and Weight from %Full and Capacity.
+        Otherwise: derive Volume and %Full from Weight and Density. Volume is constrained to capacity."""
         if row < 0 or row >= table.rowCount():
             return
         # Skip totals row
@@ -2527,13 +2550,9 @@ class ConditionTableWidget(QWidget):
         weight_item = table.item(row, self.TANK_COL_WEIGHT)
         dens_item = table.item(row, self.TANK_COL_DENS)
         cap_item = table.item(row, self.TANK_COL_CAPACITY)
-        if not weight_item or not dens_item or not cap_item:
+        pct_item = table.item(row, self.TANK_COL_PCT_FULL)
+        if not dens_item or not cap_item:
             return
-        try:
-            weight_text = (weight_item.text() or "").strip()
-            weight_mt = float(weight_text) if weight_text else 0.0
-        except (TypeError, ValueError):
-            weight_mt = 0.0
         try:
             dens_text = (dens_item.text() or "").strip()
             dens = float(dens_text) if dens_text else 1.025
@@ -2544,26 +2563,37 @@ class ConditionTableWidget(QWidget):
             capacity = float(cap_text) if cap_text else 0.0
         except (TypeError, ValueError):
             capacity = 0.0
-        # Calculate Volume = Weight / Density
-        if dens > 0:
-            vol = weight_mt / dens
+
+        if changed_col == self.TANK_COL_PCT_FULL and pct_item:
+            # User edited %Full: derive Volume and Weight from it
+            try:
+                pct_text = (pct_item.text() or "").strip()
+                fill_pct = float(pct_text) if pct_text else 0.0
+            except (TypeError, ValueError):
+                fill_pct = 0.0
+            fill_pct = max(0.0, min(100.0, fill_pct))
+            vol = (fill_pct / 100.0) * capacity if capacity > 0 else 0.0
+            weight_mt = vol * dens if dens > 0 else 0.0
+            weight_adjusted = True  # We're updating weight from %Full
         else:
-            vol = 0.0
-        
-        # Constraint: Volume cannot exceed Capacity
-        # If volume would exceed capacity, cap it and adjust weight accordingly
-        weight_adjusted = False
-        if capacity > 0 and vol > capacity:
-            vol = capacity
-            # Adjust weight to match the capped volume
-            weight_mt = vol * dens
-            weight_adjusted = True
-        
-        # Calculate %Full = (Volume / Capacity) * 100
-        if capacity > 0:
-            fill_pct = (vol / capacity) * 100.0
-        else:
-            fill_pct = 0.0
+            # User edited Weight or Dens (or recalc from set_fill): derive Volume and %Full
+            if not weight_item:
+                return
+            try:
+                weight_text = (weight_item.text() or "").strip()
+                weight_mt = float(weight_text) if weight_text else 0.0
+            except (TypeError, ValueError):
+                weight_mt = 0.0
+            if dens > 0:
+                vol = weight_mt / dens
+            else:
+                vol = 0.0
+            weight_adjusted = False
+            if capacity > 0 and vol > capacity:
+                vol = capacity
+                weight_mt = vol * dens
+                weight_adjusted = True
+            fill_pct = (vol / capacity * 100.0) if capacity > 0 else 0.0
         
         self._skip_item_changed = True
         try:
@@ -2582,12 +2612,11 @@ class ConditionTableWidget(QWidget):
                 vol_item = QTableWidgetItem(f"{vol:.3f}")
                 vol_item.setFlags(vol_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_VOLUME, vol_item)
-            # Update %Full (col 5)
+            # Update %Full (col 5) - editable
             if table.item(row, self.TANK_COL_PCT_FULL):
                 table.item(row, self.TANK_COL_PCT_FULL).setText(f"{fill_pct:.3f}")
             else:
                 fill_item = QTableWidgetItem(f"{fill_pct:.3f}")
-                fill_item.setFlags(fill_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 table.setItem(row, self.TANK_COL_PCT_FULL, fill_item)
             # On weight/volume change: update LCG, VCG, TCG (from sounding or tank default) and UII/Snd, FSt (from cache)
             tank_id_val = name_item.data(Qt.ItemDataRole.UserRole)
