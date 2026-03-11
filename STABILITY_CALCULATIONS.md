@@ -129,7 +129,7 @@ Result: **mean draft** (m) at the LCF (simplified as amidships). Aft and forward
 Trim (m) is **positive = stern down**. It is found from longitudinal equilibrium: **LCG** vs **LCB**.
 
 **Loading Manual formula:**
-**t = Δ × (LCB − LCG) / MTC** (with sign convention so that trim direction matches LCG/LCB).
+**t = Δ × (LCB − LCG) / MTC** (positive = stern down when LCB > LCG).
 
 - **LCG** (m from AP) = **LCG_norm × L** (from weight moments).
 - **LCB** (m from AP) = from curves at current draft, or **0.5×L** if not available.
@@ -137,7 +137,7 @@ Trim (m) is **positive = stern down**. It is found from longitudinal equilibrium
   **BM_L = I_L / V**, **MTC = Δ × BM_L / (L × 100)** (with appropriate factor for 1 m trim).
   **I_L** = longitudinal waterplane inertia (from curves or **B×L³/12**), **V** = Δ/ρ.
 
-Then: **trim_m = (LCG_m − LCB_m) × Δ / MTC** (with correct sign so stern goes down when LCG is aft of LCB).
+Then: **trim_m = (LCB_m − LCG_m) × Δ / MTC** (stern down when LCB > LCG).
 
 So: **trim** is fully determined by **displacement**, **LCG**, **LCB**, and **MTC** at the solved draft.
 

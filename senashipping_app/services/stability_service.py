@@ -31,6 +31,8 @@ from senashipping_app.services.gz_curve_plot import (
 from senashipping_app.services.hydrostatic_curves import (
     build_curves_from_formulas,
     get_lcb_norm,
+    get_lcf_norm,
+    load_curves_from_file,
     HydrostaticCurves,
 )
 from senashipping_app.config.stability_manual_ref import (
@@ -44,6 +46,10 @@ from senashipping_app.config.stability_manual_ref import (
     REF_LIGHTSHIP_KG_M,
     REF_LIGHTSHIP_LCG_NORM,
     REF_LIGHTSHIP_TCG_M,
+    HYDROSTATIC_CURVES_PATH,
+    USE_LIGHTSHIP_LCG_ALIGNMENT,
+    TRIM_CORRECTION_FACTOR,
+    TRIM_GM_CORRECTION_DISPLACEMENT_RANGE,
 )
 from senashipping_app.services.longitudinal_strength import compute_strength, StrengthResult
 from senashipping_app.services.ancillary_calculations import compute_ancillary, AncillaryResults
@@ -68,6 +74,8 @@ class ConditionResults:
     validation: object = None  # ValidationResult from validation.validate_condition
     criteria: object = None  # CriteriaEvaluation from criteria_rules.evaluate_all_criteria
     snapshot: object = None  # CalculationSnapshot from traceability.create_snapshot
+    # Trim (m) used to select Excel hydrostatics sheet; equals trim_m when not using trim sheets.
+    trim_for_hydrostatics_m: float = 0.0
 
 
 def _pen_mass_and_moments(
@@ -199,32 +207,62 @@ def compute_condition(
     B = max(1e-6, B)
     design_draft = max(0.0, getattr(ship, "design_draft_m", 0.0)) or REF_DESIGN_DRAFT_M
 
-    # Hydrostatic curves: formula-based when no table loaded (Path B)
-    curves: HydrostaticCurves | None = build_curves_from_formulas(
-        L, B, design_draft, cb=DEFAULT_CB, rho=RHO_SEA
+    # Hydrostatic curves: load from file when HYDROSTATIC_CURVES_PATH is set, else formula-based.
+    # For Excel hydrostatics (sheets by trim), iterate: compute trim, reload sheet for that trim, recompute.
+    curves: HydrostaticCurves | None = None
+    trim_guess = 0.0
+    use_excel_trim_sheets = (
+        HYDROSTATIC_CURVES_PATH
+        and str(HYDROSTATIC_CURVES_PATH).lower().endswith((".xlsx", ".xls"))
     )
+    max_trim_iterations = 3
 
-    # Align lightship LCG with solver LCB at lightship draft so lightship alone gives ~zero trim;
-    # only cargo then causes trim. Use real LCG (REF_LIGHTSHIP_LCG_NORM) for strength/KG.
     lightship_draft = max(0.0, getattr(ship, "lightship_draft_m", 0.0)) or REF_LIGHTSHIP_DRAFT_M
-    _lcb = get_lcb_norm(lightship_draft, curves) if curves and curves.is_valid() else None
-    lcb_norm_ls = _lcb if _lcb is not None else 0.5
-    total_lcg_moment_trim = total_lcg_moment + lightship_mass_t * (lcb_norm_ls - REF_LIGHTSHIP_LCG_NORM)
-
-    # Draft and trim from iterative solver (lightship + tanks + pens).
-    # We clamp LCG to [0,1] to avoid pathological inputs (e.g. tank positions saved in metres).
-    lcg_norm = total_lcg_moment_trim / total_mass_t
-    lcg_norm = max(0.001, min(0.999, float(lcg_norm)))
-    draft_m, trim_m = solve_draft_from_displacement(
-        displacement_t, L, B, lcg_norm, RHO_SEA, DEFAULT_CB, curves
-    )
-
-    # When condition is lightship (displacement ≈ lightship only), use manual lightship draft
-    # and GM so the displayed values match the Loading Manual (Load Case NO.01).
     is_lightship = abs(displacement_t - lightship_mass_t) < 0.01 * max(lightship_mass_t, 1.0)
-    if is_lightship:
-        draft_m = lightship_draft
-        trim_m = 0.0
+
+    for _ in range(max_trim_iterations):
+        if HYDROSTATIC_CURVES_PATH:
+            from pathlib import Path
+            base = Path(__file__).resolve().parents[2]
+            curves = load_curves_from_file(HYDROSTATIC_CURVES_PATH, base, trim_m=trim_guess)
+        if not curves or not curves.is_valid():
+            curves = build_curves_from_formulas(
+                L, B, design_draft, cb=DEFAULT_CB, rho=RHO_SEA
+            )
+            break  # Formula curves don't depend on trim
+
+        # Optionally align lightship LCG with LCB at lightship draft so lightship alone gives ~zero trim.
+        if USE_LIGHTSHIP_LCG_ALIGNMENT and curves.is_valid():
+            _lcb = get_lcb_norm(lightship_draft, curves)
+            lcb_norm_ls = _lcb if _lcb is not None else 0.5
+            total_lcg_moment_trim = total_lcg_moment + lightship_mass_t * (lcb_norm_ls - REF_LIGHTSHIP_LCG_NORM)
+        else:
+            total_lcg_moment_trim = total_lcg_moment
+
+        # Draft and trim from iterative solver (lightship + tanks + pens).
+        lcg_norm = total_lcg_moment_trim / total_mass_t
+        lcg_norm = max(0.001, min(0.999, float(lcg_norm)))
+        draft_m, trim_m = solve_draft_from_displacement(
+            displacement_t, L, B, lcg_norm, RHO_SEA, DEFAULT_CB, curves
+        )
+
+        # When condition is lightship, use manual draft and zero trim.
+        if is_lightship:
+            draft_m = lightship_draft
+            trim_m = 0.0
+            break
+
+        # For Excel trim sheets: reload with computed trim if it changed significantly.
+        # Use raw trim for sheet selection (before calibration factor).
+        if not use_excel_trim_sheets or abs(trim_m - trim_guess) < 0.05:
+            break
+        trim_guess = trim_m
+
+    # Apply trim calibration factor after convergence (for display/validation).
+    if not is_lightship and TRIM_CORRECTION_FACTOR is not None:
+        lo, hi = TRIM_GM_CORRECTION_DISPLACEMENT_RANGE
+        if lo <= displacement_t <= hi:
+            trim_m *= TRIM_CORRECTION_FACTOR
 
     # KG = total VCG moment / total mass (lightship + tanks + pens)
     kg_m = total_vcg_moment / total_mass_t
@@ -296,10 +334,21 @@ def compute_condition(
         lightship_lcg_norm=REF_LIGHTSHIP_LCG_NORM,
     )
 
-    # Draft at marks (trim +ve = stern down). Use the raw solver trim/draft
-    # without capping, so forward and aft marks move freely with the condition.
-    draft_aft_m = draft_m + trim_m / 2.0
-    draft_fwd_m = draft_m - trim_m / 2.0
+    # Draft at marks (trim +ve = stern down). Use LCF from curves when available
+    # (PDF: df = dLCF - t*(LBP-LCF)/LBP, da = df + t); else simplified (LCF at mid).
+    if curves and curves.is_valid():
+        lcf_norm = get_lcf_norm(draft_m, curves)
+        if lcf_norm is not None:
+            # da = draft at AP, df = draft at FP. t = trim. LBP ≈ L for this formula.
+            # dLCF = mean draft at LCF. da = dLCF + t*(LCF/L), df = dLCF - t*(1-LCF/L)
+            draft_aft_m = draft_m + trim_m * lcf_norm
+            draft_fwd_m = draft_m - trim_m * (1.0 - lcf_norm)
+        else:
+            draft_aft_m = draft_m + trim_m / 2.0
+            draft_fwd_m = draft_m - trim_m / 2.0
+    else:
+        draft_aft_m = draft_m + trim_m / 2.0
+        draft_fwd_m = draft_m - trim_m / 2.0
 
     # Heel from TCG (lightship + tanks + pens)
     tcg_m = total_tcg_moment / total_mass_t
@@ -309,6 +358,8 @@ def compute_condition(
     ancillary = compute_ancillary(
         ship, draft_m, draft_aft_m, draft_fwd_m, trim_m, gm_m, heel_deg
     )
+
+    trim_for_hydrostatics = trim_guess if use_excel_trim_sheets else trim_m
 
     return ConditionResults(
         displacement_t=displacement_t,
@@ -322,4 +373,5 @@ def compute_condition(
         heel_deg=heel_deg,
         strength=strength,
         ancillary=ancillary,
+        trim_for_hydrostatics_m=trim_for_hydrostatics,
     )

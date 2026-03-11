@@ -35,6 +35,8 @@ def save_condition_to_file(filepath: Path, condition: LoadingCondition) -> None:
         # Optional detailed weights so that pen/tank weights are restored exactly as seen on screen
         "pen_mass_per_head_t": getattr(condition, "pen_mass_per_head_t", {}) or {},
         "tank_weights_mt": getattr(condition, "tank_weights_mt", {}) or {},
+        "tank_cog_override": getattr(condition, "tank_cog_override", {}) or {},
+        "tank_fsm_mt": getattr(condition, "tank_fsm_mt", {}) or {},
         "displacement_t": condition.displacement_t,
         "draft_m": condition.draft_m,
         "trim_m": condition.trim_m,
@@ -103,6 +105,22 @@ def load_condition_from_file(filepath: Path) -> LoadingCondition:
     tank_weights_mt = _dict_str_keys_to_int(
         raw_tank_w if isinstance(raw_tank_w, dict) else {}
     )
+    # tank_cog_override: tank_id -> [vcg, lcg, tcg]
+    raw_cog = data.get("tank_cog_override") or {}
+    tank_cog_override: Dict[int, tuple] = {}
+    if isinstance(raw_cog, dict):
+        for k, v in raw_cog.items():
+            try:
+                tid = int(k)
+                arr = v if isinstance(v, (list, tuple)) else []
+                if len(arr) >= 3:
+                    tank_cog_override[tid] = (float(arr[0]), float(arr[1]), float(arr[2]))
+            except (TypeError, ValueError):
+                continue
+    raw_fsm = data.get("tank_fsm_mt") or {}
+    tank_fsm_mt = _dict_str_keys_to_int(
+        raw_fsm if isinstance(raw_fsm, dict) else {}
+    )
     return LoadingCondition(
         id=None,
         voyage_id=data.get("voyage_id"),
@@ -117,6 +135,8 @@ def load_condition_from_file(filepath: Path) -> LoadingCondition:
         pen_cargo=pen_cargo,
         pen_mass_per_head_t=pen_mass_per_head,
         tank_weights_mt=tank_weights_mt,
+        tank_cog_override=tank_cog_override,
+        tank_fsm_mt=tank_fsm_mt,
         displacement_t=float(data.get("displacement_t", 0.0)),
         draft_m=float(data.get("draft_m", 0.0)),
         trim_m=float(data.get("trim_m", 0.0)),

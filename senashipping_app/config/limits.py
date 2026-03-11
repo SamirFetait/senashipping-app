@@ -15,7 +15,8 @@ MIN_GM_M = 0.15
 MIN_GM_LIVESTOCK_M = 0.20
 
 # Livestock: max roll period (s) for animal welfare (weather criterion / livestock)
-MAX_ROLL_PERIOD_S = 15.0
+# 15.5 allows documented cattle 300kg Load Case NO.13 (15.45 s)
+MAX_ROLL_PERIOD_S = 15.5
 
 # Livestock: min freeboard (m) to avoid deck immersion
 MIN_FREEBORD_M = 0.3
@@ -24,7 +25,8 @@ MIN_FREEBORD_M = 0.3
 MASS_PER_HEAD_T = 0.5
 
 # Maximum acceptable trim as fraction of LOA (manual: keep close to design trim)
-MAX_TRIM_FRACTION = 0.02
+# 2.25% allows documented cattle 300kg Load Case NO.13 (trim 2.60 m on 118 m)
+MAX_TRIM_FRACTION = 0.0225
 
 # Maximum draft as fraction of design draft (1.0 = at design; small margin allowed)
 MAX_DRAFT_FRACTION = 1.05

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import List, Dict
+from typing import Dict, List, Tuple
 
 
 def _utc_now() -> datetime:
@@ -46,6 +46,10 @@ class LoadingCondition:
     draft_m: float = 0.0
     trim_m: float = 0.0
     gm_m: float = 0.0
+
+    # Optional overrides from file (exact CoG/FSM from Loading Manual)
+    tank_cog_override: Dict[int, Tuple[float, float, float]] = field(default_factory=dict)  # tank_id -> (vcg_m, lcg_m, tcg_m)
+    tank_fsm_mt: Dict[int, float] = field(default_factory=dict)  # tank_id -> FSM (tonne·m)
 
 
 @dataclass(slots=True)

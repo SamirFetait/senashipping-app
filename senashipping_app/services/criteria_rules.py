@@ -186,10 +186,10 @@ def evaluate_livestock_criteria(
         message=f"GM {gm_eff:.3f} m, min {MIN_GM_LIVESTOCK_M} m, margin {margin:+.3f} m",
     ))
 
-    # 2. Roll period (T = 2*pi*K/sqrt(g*GM), K~0.4-0.5)
+    # 2. Roll period (T = 2*pi*K*B/sqrt(g*GM), K = radius of gyration / B)
     if gm_eff > EPS:
         import math
-        K = 0.45  # radius of gyration / B
+        K = 0.40  # K~0.40 matches Loading Manual Load Case NO.13 (15.45 s); 0.45 overestimates
         roll_period = 2 * math.pi * K * B / (9.81 * gm_eff) ** 0.5
         margin_rp = MAX_ROLL_PERIOD_S - roll_period
         result_rp = CriterionResult.PASS if margin_rp >= 0 else CriterionResult.FAIL

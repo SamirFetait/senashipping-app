@@ -105,26 +105,30 @@ def compute_trim(
     breadth_m: float,
     draft_m: float,
     lcb_norm: float = 0.5,
+    length_trim_m: float | None = None,
 ) -> float:
     """
     Approximate trim (m, positive = stern down) from LCG vs LCB.
 
-    trim ≈ (LCG - LCB) * disp / MTC
+    Loading Manual: t = Disp × (LCB − LCG) / MTC  [positive = stern down]
     MTC uses longitudinal BM (I_L = B*L³/12), not transverse.
+    length_trim_m: length for MTC (default length_m). Use LBP when available.
     """
     if displacement_t <= 0 or length_m <= 0:
         return 0.0
+    L_trim = length_trim_m if length_trim_m is not None and length_trim_m > 0 else length_m
     # Longitudinal BM for trim: I_L = B*L³/12, BM_L = I_L/V
     bm_l = compute_bm_l(displacement_t, length_m, breadth_m, RHO_SEA)
     if bm_l <= 0:
         return 0.0
-    # MTC in tm/m (moment to change trim 1 m)
-    mtc = displacement_t * bm_l / (length_m * 100)
-    if mtc <= 0:
+    # MTC = moment to change trim 1 m (tonne·m/m): Δ × BML / L_trim
+    # Trim (m) = (LCB − LCG) × Δ / MTC = (LCB − LCG) × L_trim / BML
+    mtc_per_m = displacement_t * bm_l / L_trim
+    if mtc_per_m <= 0:
         return 0.0
     lcg_m = lcg_norm * length_m
     lcb_m = lcb_norm * length_m
-    trim_m = (lcg_m - lcb_m) * displacement_t / mtc
+    trim_m = (lcb_m - lcg_m) * displacement_t / mtc_per_m
     return trim_m
 
 
@@ -190,17 +194,21 @@ def solve_draft_from_displacement(
     rho: float = RHO_SEA,
     cb: float = DEFAULT_CB,
     curves: HydrostaticCurves | None = None,
+    length_trim_m: float | None = None,
 ) -> tuple[float, float]:
     """
     Step 2 — Draft solver: solve Displacement(draft) = total weight (via curve or formula).
     Step 3 — Trim solver: longitudinal balance so trim is realistic (LCG vs LCB, MTC).
     Returns (draft_m, trim_m). When curves is None, uses formula and LCB=0.5.
+    Loading Manual (PDF p.11) uses LBP for trim: t = Disp*(LCB-LCG)/MT1*100.
+    length_trim_m: length for trim/MTC (default length_m). Use LBP when available.
     """
     if displacement_t <= 0 or length_m <= 0 or breadth_m <= 0:
         return 0.0, 0.0
+    L_trim = length_trim_m if length_trim_m is not None and length_trim_m > 0 else length_m
     if curves is None or not curves.is_valid():
         draft_m = displacement_to_draft(displacement_t, length_m, breadth_m, cb, rho)
-        trim_m = compute_trim(displacement_t, lcg_norm, length_m, breadth_m, draft_m, lcb_norm=0.5)
+        trim_m = compute_trim(displacement_t, lcg_norm, length_m, breadth_m, draft_m, lcb_norm=0.5, length_trim_m=L_trim)
         return draft_m, trim_m
     draft_m = _curve_draft_from_disp(displacement_t, curves)
     if draft_m <= 0:
@@ -214,13 +222,14 @@ def solve_draft_from_displacement(
         v = displacement_t / rho
         if v > EPS and i_l > 0:
             bm_l = i_l / v
-            mtc = displacement_t * bm_l / (length_m * 100)
-            if mtc > EPS:
+            # MTC per m: Disp * BML / L_trim. Trim (m) = (LCB − LCG) × L_trim / BML (Loading Manual uses LBP)
+            mtc_per_m = displacement_t * bm_l / L_trim
+            if mtc_per_m > EPS:
                 lcg_m = lcg_norm * length_m
                 lcb_m = lcb_norm * length_m
-                trim_m = (lcg_m - lcb_m) * displacement_t / mtc
+                trim_m = (lcb_m - lcg_m) * displacement_t / mtc_per_m
                 return draft_m, trim_m
-    trim_m = compute_trim(displacement_t, lcg_norm, length_m, breadth_m, draft_m, lcb_norm=lcb_norm)
+    trim_m = compute_trim(displacement_t, lcg_norm, length_m, breadth_m, draft_m, lcb_norm=lcb_norm, length_trim_m=L_trim)
     return draft_m, trim_m
 
 

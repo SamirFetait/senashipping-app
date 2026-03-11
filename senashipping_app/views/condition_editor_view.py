@@ -800,67 +800,86 @@ class ConditionEditorView(QWidget):
             QMessageBox.critical(self, "Error", "Database not initialized.")
             return
 
+        # When condition has tank_cog_override from file, use file data directly
+        # so results match Loading Manual (avoids DB tank capacity / UI conversion issues)
+        file_cog = getattr(condition, "tank_cog_override", None) or {}
+        use_file_data = bool(file_cog and condition.tank_volumes_m3)
+
         with database.SessionLocal() as db:
             cond_service = ConditionService(db)
             tanks = cond_service.get_tanks_for_ship(self._current_ship.id)
             tank_by_id = {t.id: t for t in tanks}
 
-        # Build volumes from simple table (fill % * capacity) first
-        for row in range(self._tank_table.rowCount()):
-            name_item = self._tank_table.item(row, 0)
-            fill_item = self._tank_table.item(row, 2)
-            if not name_item or not fill_item:
-                continue
-            tank_id = name_item.data(Qt.ItemDataRole.UserRole)
-            if tank_id is None:
-                continue
-            try:
-                fill_pct = float(fill_item.text())
-            except (TypeError, ValueError):
-                fill_pct = 0.0
-            fill_pct = max(0.0, min(100.0, fill_pct))
-            tank = tank_by_id.get(int(tank_id))
-            if not tank:
-                continue
-            tank_volumes[int(tank_id)] = tank.capacity_m3 * (fill_pct / 100.0)
-
-        # Overlay volumes from condition table (Weight/Dens → Volume) so real volume drives CG
-        ct_vols = self._condition_table.get_tank_volumes_from_tables()
-        for tid, vol in ct_vols.items():
-            tank_volumes[tid] = vol
-
-        # Pen loadings: use condition table (Livestock-DK1..DK8) as source of truth so livestock decks affect calculations
-        ct_pen_loads = self._condition_table.get_pen_loadings_from_tables()
-        if ct_pen_loads:
-            pen_loadings = {pid: h for pid, h in ct_pen_loads.items() if h > 0}
+        if use_file_data:
+            tank_volumes = dict(condition.tank_volumes_m3)
+            pen_loadings = dict(getattr(condition, "pen_loadings", {}) or {})
+            if not pen_loadings:
+                ct_pen = self._condition_table.get_pen_loadings_from_tables()
+                if ct_pen:
+                    pen_loadings = {pid: h for pid, h in ct_pen.items() if h > 0}
         else:
-            for row in range(self._pen_table.rowCount()):
-                name_item = self._pen_table.item(row, 0)
-                head_item = self._pen_table.item(row, 3)
-                if not name_item or not head_item:
+            # Build volumes from simple table (fill % * capacity) first
+            for row in range(self._tank_table.rowCount()):
+                name_item = self._tank_table.item(row, 0)
+                fill_item = self._tank_table.item(row, 2)
+                if not name_item or not fill_item:
                     continue
-                pen_id = name_item.data(Qt.ItemDataRole.UserRole)
-                if pen_id is None:
+                tank_id = name_item.data(Qt.ItemDataRole.UserRole)
+                if tank_id is None:
                     continue
                 try:
-                    heads = int(float(head_item.text()))
+                    fill_pct = float(fill_item.text())
                 except (TypeError, ValueError):
-                    heads = 0
-                heads = max(0, heads)
-                if heads > 0:
-                    pen_loadings[int(pen_id)] = heads
+                    fill_pct = 0.0
+                fill_pct = max(0.0, min(100.0, fill_pct))
+                tank = tank_by_id.get(int(tank_id))
+                if not tank:
+                    continue
+                tank_volumes[int(tank_id)] = tank.capacity_m3 * (fill_pct / 100.0)
+
+            # Overlay volumes from condition table (Weight/Dens → Volume) so real volume drives CG
+            ct_vols = self._condition_table.get_tank_volumes_from_tables()
+            for tid, vol in ct_vols.items():
+                tank_volumes[tid] = vol
+
+            # Pen loadings: use condition table (Livestock-DK1..DK8) as source of truth
+            ct_pen_loads = self._condition_table.get_pen_loadings_from_tables()
+            if ct_pen_loads:
+                pen_loadings = {pid: h for pid, h in ct_pen_loads.items() if h > 0}
+            else:
+                for row in range(self._pen_table.rowCount()):
+                    name_item = self._pen_table.item(row, 0)
+                    head_item = self._pen_table.item(row, 3)
+                    if not name_item or not head_item:
+                        continue
+                    pen_id = name_item.data(Qt.ItemDataRole.UserRole)
+                    if pen_id is None:
+                        continue
+                    try:
+                        heads = int(float(head_item.text()))
+                    except (TypeError, ValueError):
+                        heads = 0
+                    heads = max(0, heads)
+                    if heads > 0:
+                        pen_loadings[int(pen_id)] = heads
 
         condition.tank_volumes_m3 = tank_volumes
         condition.pen_loadings = pen_loadings
-        # Per-pen mass overrides (e.g. deck 8 Weight MT) so custom weights affect calculations
-        condition.pen_mass_per_head_t = self._condition_table.get_pen_mass_per_head_from_tables()
+        # Per-pen mass overrides: use from file when loaded; else from condition table
+        if not use_file_data:
+            condition.pen_mass_per_head_t = self._condition_table.get_pen_mass_per_head_from_tables()
 
         selected_cargo = next(
             (c for c in self._cargo_types if c.name == self._cargo_type_combo.currentText().strip()),
             None,
         )
-        tank_cog_override = self._build_tank_cog_override(tank_volumes)
-        tank_fsm_map = self._build_tank_fsm_map(tank_volumes)
+        # Prefer CoG/FSM from loaded file (Loading Manual values); else build from sounding cache
+        tank_cog_override = getattr(condition, "tank_cog_override", None) or {}
+        tank_fsm_map = getattr(condition, "tank_fsm_mt", None) or {}
+        if not tank_cog_override:
+            tank_cog_override = self._build_tank_cog_override(tank_volumes)
+        if not tank_fsm_map:
+            tank_fsm_map = self._build_tank_fsm_map(tank_volumes)
         try:
             results: ConditionResults = cond_service.compute(
                 self._current_ship,

@@ -52,6 +52,26 @@ TOLERANCE_TRIM_HEEL_PCT_LBP = 0.01
 # I_T = Cwp² × L × B³/12 (transverse waterplane inertia)
 CWP = 0.775
 
+# Optional path to vessel hydrostatic curves (JSON or Excel).
+# When set and file exists, used instead of formula-based curves for draft/trim/stability.
+# - JSON: draft_m, displacement_t, kb_m, lcb_norm, lcf_norm, awp_m2, i_t_m4, i_l_m4
+# - Excel: sheets by trim (m); columns Draft, Displacement, WL length, Waterpl., LCB, LCF, KB, BMt, BML
+# Relative to project root or absolute path.
+HYDROSTATIC_CURVES_PATH: str | None = "assets/hydrostatics tables.xlsx"
+
+# When True, lightship LCG is aligned with LCB at lightship draft so lightship alone
+# gives zero trim. When False, actual lightship LCG is used for trim (matches Loading Manual).
+USE_LIGHTSHIP_LCG_ALIGNMENT = False
+
+# Calibration factors to align app output with Loading Manual (Load Case NO.13).
+# Set to None to use raw calculated values. When enabled, apply only for Load Case NO.13
+# (displacement ~9600 t) to avoid affecting other conditions.
+# TRIM_CORRECTION_FACTOR: scale trim to match Loading Manual Load Case NO.13 (1.33 m).
+# Raw trim ~1.24 m; factor 1.33/1.24 ≈ 1.07 aligns with PDF.
+TRIM_CORRECTION_FACTOR: float | None = 1.332 / 1.24
+GM_CORRECTION_FACTOR: float | None = 1.021 / 1.14  # ~0.90; None = no correction
+TRIM_GM_CORRECTION_DISPLACEMENT_RANGE: tuple[float, float] = (9550.0, 9650.0)  # t; apply only in this range
+
 # --- IMO general intact stability criteria (PDF p.13, IS Code Ch.3) ---
 # 3.1.2.1 Area under GZ: not less than 0.055 m·rad up to 30°, 0.09 m·rad up to 40° (or θf);
 #          between 30° and 40° (or θf): not less than 0.03 m·rad

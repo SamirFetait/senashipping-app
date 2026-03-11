@@ -11,3 +11,5 @@ build/
 SenaShipping.spec
 .tests/
 senashipping_app_data/
+.README.md
+load_case_13_items.json

@@ -56,16 +56,19 @@ def _interpolate_inverse(y: float, x_list: List[float], y_list: List[float]) -> 
 @dataclass
 class HydrostaticCurves:
     """
-    Hydrostatic data as curves: draft (m) vs displacement, KB, LCB, etc.
+    Hydrostatic data as curves: draft (m) vs displacement, KB, LCB, LCF, etc.
     All lists are keyed by the same draft values (draft_m).
+    wl_length_m: waterline length at each draft (from Excel); used for LCB/LCF and display.
     """
     draft_m: List[float] = field(default_factory=list)
     displacement_t: List[float] = field(default_factory=list)
     kb_m: List[float] = field(default_factory=list)
     lcb_norm: List[float] = field(default_factory=list)  # 0..1, 0.5 = amidships
+    lcf_norm: List[float] = field(default_factory=list)  # 0..1, LCF for draft at marks
     awp_m2: List[float] = field(default_factory=list)
     i_t_m4: List[float] = field(default_factory=list)   # transverse waterplane inertia
     i_l_m4: List[float] = field(default_factory=list)   # longitudinal waterplane inertia
+    wl_length_m: List[float] = field(default_factory=list)  # WL length at each draft (Excel)
 
     def is_valid(self) -> bool:
         """True if we have at least draft and displacement for interpolation."""
@@ -118,6 +121,13 @@ def get_lcb_norm(draft_m: float, curves: HydrostaticCurves) -> Optional[float]:
     return _interpolate(draft_m, curves.draft_m, curves.lcb_norm)
 
 
+def get_lcf_norm(draft_m: float, curves: HydrostaticCurves) -> Optional[float]:
+    """Get LCF (0..1) at given draft from curves. Returns None if not available."""
+    if not curves.lcf_norm or len(curves.lcf_norm) != len(curves.draft_m):
+        return None
+    return _interpolate(draft_m, curves.draft_m, curves.lcf_norm)
+
+
 def get_i_t_i_l(draft_m: float, curves: HydrostaticCurves) -> Optional[Tuple[float, float]]:
     """Get (I_T, I_L) in m⁴ at given draft. Returns None if not available."""
     if not curves.i_t_m4 or len(curves.i_t_m4) != len(curves.draft_m):
@@ -127,6 +137,20 @@ def get_i_t_i_l(draft_m: float, curves: HydrostaticCurves) -> Optional[Tuple[flo
     i_t = _interpolate(draft_m, curves.draft_m, curves.i_t_m4)
     i_l = _interpolate(draft_m, curves.draft_m, curves.i_l_m4)
     return (i_t, i_l)
+
+
+def get_wl_length(draft_m: float, curves: HydrostaticCurves) -> Optional[float]:
+    """Get waterline length (m) at given draft. Returns None if not available."""
+    if not curves.wl_length_m or len(curves.wl_length_m) != len(curves.draft_m):
+        return None
+    return _interpolate(draft_m, curves.draft_m, curves.wl_length_m)
+
+
+def get_awp_at_draft(draft_m: float, curves: HydrostaticCurves) -> Optional[float]:
+    """Get waterplane area (m²) at given draft. Returns None if not available."""
+    if not curves.awp_m2 or len(curves.awp_m2) != len(curves.draft_m):
+        return None
+    return _interpolate(draft_m, curves.draft_m, curves.awp_m2)
 
 
 def build_curves_from_formulas(
@@ -251,7 +275,8 @@ def load_sectional_area_from_dict(data: dict) -> Optional[SectionalAreaCurve]:
 def load_curves_from_dict(data: dict) -> HydrostaticCurves:
     """
     Build HydrostaticCurves from a dict (e.g. JSON loaded).
-    Expected keys: draft_m, displacement_t, and optionally kb_m, lcb_norm, awp_m2, i_t_m4, i_l_m4.
+    Expected keys: draft_m, displacement_t, and optionally kb_m, lcb_norm, lcf_norm,
+    awp_m2, i_t_m4, i_l_m4.
     """
     draft = list(data.get("draft_m", []))
     disp = list(data.get("displacement_t", []))
@@ -262,10 +287,236 @@ def load_curves_from_dict(data: dict) -> HydrostaticCurves:
         curves.kb_m = list(data["kb_m"])
     if "lcb_norm" in data and len(data["lcb_norm"]) == len(draft):
         curves.lcb_norm = list(data["lcb_norm"])
+    if "lcf_norm" in data and len(data["lcf_norm"]) == len(draft):
+        curves.lcf_norm = list(data["lcf_norm"])
     if "awp_m2" in data and len(data["awp_m2"]) == len(draft):
         curves.awp_m2 = list(data["awp_m2"])
     if "i_t_m4" in data and len(data["i_t_m4"]) == len(draft):
         curves.i_t_m4 = list(data["i_t_m4"])
     if "i_l_m4" in data and len(data["i_l_m4"]) == len(draft):
         curves.i_l_m4 = list(data["i_l_m4"])
+    if "wl_length_m" in data and len(data["wl_length_m"]) == len(draft):
+        curves.wl_length_m = list(data["wl_length_m"])
     return curves
+
+
+def _normalize_excel_column(name: str) -> str:
+    """Normalize Excel column header for flexible matching."""
+    return str(name).replace("\n", " ").strip().lower()
+
+
+def _load_one_sheet_from_excel(p: "Path", sheet_name: str) -> HydrostaticCurves:
+    """Load a single trim sheet from Excel into HydrostaticCurves."""
+    import pandas as pd
+
+    df = pd.read_excel(p, sheet_name=sheet_name)
+    if df.empty:
+        return HydrostaticCurves()
+
+    col_map: dict[str, str] = {}
+    for c in df.columns:
+        col_map[_normalize_excel_column(c)] = c
+
+    def _get_col(*candidates: str) -> str | None:
+        for c in candidates:
+            if c in col_map:
+                return col_map[c]
+        return None
+
+    draft_col = _get_col("draft")
+    disp_col = _get_col("displacement")
+    if not draft_col or not disp_col:
+        return HydrostaticCurves()
+
+    draft_m = df[draft_col].dropna().astype(float).tolist()
+    displacement_t = df[disp_col].dropna().astype(float).tolist()
+    if len(draft_m) != len(displacement_t) or len(draft_m) < 2:
+        return HydrostaticCurves()
+
+    curves = HydrostaticCurves(draft_m=draft_m, displacement_t=displacement_t)
+
+    kb_col = _get_col("kb")
+    if kb_col:
+        curves.kb_m = df[kb_col].dropna().astype(float).tolist()
+        if len(curves.kb_m) != len(draft_m):
+            curves.kb_m = []
+
+    wp_col = _get_col("waterpl.", "waterpl", "waterplane", "awp")
+    if wp_col:
+        awp = df[wp_col].dropna().astype(float).tolist()
+        if len(awp) == len(draft_m):
+            curves.awp_m2 = awp
+
+    wl_col = _get_col("wl length", "wl length m", "wl length")
+    if wl_col:
+        wl = df[wl_col].dropna().astype(float).tolist()
+        if len(wl) == len(draft_m):
+            curves.wl_length_m = wl
+
+    # LCB/LCF in m from AP; normalize by LOA for solver (matches LCG coordinate system).
+    from senashipping_app.config.stability_manual_ref import REF_LOA_M
+
+    lcb_col = _get_col("lcb")
+    lcf_col = _get_col("lcf")
+    if lcb_col:
+        lcb_m = df[lcb_col].dropna().astype(float).tolist()
+        if len(lcb_m) == len(draft_m) and REF_LOA_M > 0:
+            curves.lcb_norm = [lcb / REF_LOA_M for lcb in lcb_m]
+    if lcf_col:
+        lcf_m = df[lcf_col].dropna().astype(float).tolist()
+        if len(lcf_m) == len(draft_m) and REF_LOA_M > 0:
+            curves.lcf_norm = [lcf / REF_LOA_M for lcf in lcf_m]
+
+    bmt_col = _get_col("bmt")
+    bml_col = _get_col("bml")
+    if bmt_col and bml_col:
+        bmt = df[bmt_col].dropna().astype(float).tolist()
+        bml = df[bml_col].dropna().astype(float).tolist()
+        if len(bmt) == len(draft_m) and len(bml) == len(draft_m):
+            rho = RHO_SEA
+            curves.i_t_m4 = [
+                bm * (d / rho) if d > 0 else 0.0
+                for bm, d in zip(bmt, displacement_t)
+            ]
+            curves.i_l_m4 = [
+                bm * (d / rho) if d > 0 else 0.0
+                for bm, d in zip(bml, displacement_t)
+            ]
+    return curves
+
+
+def _merge_curves_by_trim(
+    curves_lo: HydrostaticCurves,
+    curves_hi: HydrostaticCurves,
+    trim_m: float,
+    lower_trim: float,
+    upper_trim: float,
+) -> HydrostaticCurves:
+    """Interpolate between two trim sheets to produce merged curves at trim_m."""
+    if not curves_lo.is_valid():
+        return curves_hi
+    if not curves_hi.is_valid():
+        return curves_lo
+    if abs(upper_trim - lower_trim) < 1e-9:
+        return curves_lo
+
+    t = (trim_m - lower_trim) / (upper_trim - lower_trim)
+    t = max(0.0, min(1.0, t))
+
+    # Use draft grid from lower sheet
+    draft_m = list(curves_lo.draft_m)
+    n = len(draft_m)
+
+    def _interp_list(lo_list: List[float], hi_list: List[float]) -> List[float]:
+        if not lo_list or len(lo_list) != n:
+            return lo_list or hi_list
+        if not hi_list or len(hi_list) != len(curves_hi.draft_m):
+            return lo_list
+        out: List[float] = []
+        for i, d in enumerate(draft_m):
+            v_lo = _interpolate(d, curves_lo.draft_m, lo_list)
+            v_hi = _interpolate(d, curves_hi.draft_m, hi_list)
+            out.append((1.0 - t) * v_lo + t * v_hi)
+        return out
+
+    return HydrostaticCurves(
+        draft_m=draft_m,
+        displacement_t=_interp_list(curves_lo.displacement_t, curves_hi.displacement_t),
+        kb_m=_interp_list(curves_lo.kb_m, curves_hi.kb_m) if curves_lo.kb_m else [],
+        lcb_norm=_interp_list(curves_lo.lcb_norm, curves_hi.lcb_norm) if curves_lo.lcb_norm else [],
+        lcf_norm=_interp_list(curves_lo.lcf_norm, curves_hi.lcf_norm) if curves_lo.lcf_norm else [],
+        awp_m2=_interp_list(curves_lo.awp_m2, curves_hi.awp_m2) if curves_lo.awp_m2 else [],
+        wl_length_m=_interp_list(curves_lo.wl_length_m, curves_hi.wl_length_m) if curves_lo.wl_length_m else [],
+        i_t_m4=_interp_list(curves_lo.i_t_m4, curves_hi.i_t_m4) if curves_lo.i_t_m4 else [],
+        i_l_m4=_interp_list(curves_lo.i_l_m4, curves_hi.i_l_m4) if curves_lo.i_l_m4 else [],
+    )
+
+
+def load_curves_from_excel(
+    path: str | None,
+    trim_m: float = 0.0,
+    base_path: Any = None,
+) -> HydrostaticCurves:
+    """
+    Load HydrostaticCurves from an Excel hydrostatics table.
+
+    Expected Excel structure:
+    - Sheets named by trim in metres (e.g. "0.00", "-0.50", "1.00")
+    - Columns: Draft, Displacement, WL length, Waterpl., LCB, LCF, KB, BMt, BML, TPc, MTc
+
+    trim_m: trim (m); interpolates between bracketing sheets (matches Maxsurf).
+    path: relative or absolute. If relative, resolved against base_path.
+    Returns empty HydrostaticCurves if path is None, file not found, or invalid.
+    """
+    if not path:
+        return HydrostaticCurves()
+    from pathlib import Path
+
+    p = Path(path)
+    if not p.is_absolute() and base_path is not None:
+        p = Path(base_path) / path
+    p = p.resolve()
+    if not p.exists():
+        return HydrostaticCurves()
+    try:
+        import pandas as pd
+
+        xl = pd.ExcelFile(p)
+        trim_to_sheet: dict[float, str] = {}
+        for name in xl.sheet_names:
+            try:
+                t = float(str(name).strip())
+                trim_to_sheet[t] = name
+            except ValueError:
+                continue
+        if not trim_to_sheet:
+            return HydrostaticCurves()
+        available_trims = sorted(trim_to_sheet.keys())
+
+        trim_val = trim_m
+        if trim_val <= available_trims[0]:
+            return _load_one_sheet_from_excel(p, trim_to_sheet[available_trims[0]])
+        if trim_val >= available_trims[-1]:
+            return _load_one_sheet_from_excel(p, trim_to_sheet[available_trims[-1]])
+
+        lower_trim = max(t for t in available_trims if t <= trim_val)
+        upper_trim = min(t for t in available_trims if t >= trim_val)
+        curves_lo = _load_one_sheet_from_excel(p, trim_to_sheet[lower_trim])
+        curves_hi = _load_one_sheet_from_excel(p, trim_to_sheet[upper_trim])
+        return _merge_curves_by_trim(
+            curves_lo, curves_hi, trim_val, lower_trim, upper_trim
+        )
+    except Exception:
+        return HydrostaticCurves()
+
+
+def load_curves_from_file(
+    path: str | None,
+    base_path: Any = None,
+    trim_m: float = 0.0,
+) -> HydrostaticCurves:
+    """
+    Load HydrostaticCurves from a JSON or Excel file.
+    path: relative or absolute path. If relative, resolved against base_path.
+    trim_m: for Excel files, selects the sheet closest to this trim (m). Ignored for JSON.
+    Returns empty HydrostaticCurves if path is None, file not found, or invalid.
+    """
+    if not path:
+        return HydrostaticCurves()
+    import json
+    from pathlib import Path
+
+    p = Path(path)
+    if not p.is_absolute() and base_path is not None:
+        p = Path(base_path) / path
+    p = p.resolve()
+    if not p.exists():
+        return HydrostaticCurves()
+    try:
+        if p.suffix.lower() in (".xlsx", ".xls"):
+            return load_curves_from_excel(str(p), trim_m=trim_m, base_path=None)
+        with open(p, encoding="utf-8") as f:
+            data = json.load(f)
+        return load_curves_from_dict(data)
+    except Exception:
+        return HydrostaticCurves()

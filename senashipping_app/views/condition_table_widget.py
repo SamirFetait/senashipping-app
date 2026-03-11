@@ -1080,6 +1080,7 @@ class ConditionTableWidget(QWidget):
         preserved_pen_rows: Dict[int, Dict[int, str]] = {}  # pen_id -> {col_index: cell_text} for cols 2,3,4,5,7,8,9,10,11,12,13
         preserved_pen_mass_per_head: Dict[int, float] = dict(pen_mass_per_head or {})  # pen_id -> mass/head (t)
         preserved_tank_weights: Dict[int, float] = dict(initial_tank_weights or {})  # tank_id -> weight_mt
+        preserved_tank_densities: Dict[int, float] = {}  # tank_id -> density (t/m³)
         
         if not skip_preserve:
             # Preserve livestock pen data (cargo, head counts, and full row for decks 1-7)
@@ -1150,6 +1151,7 @@ class ConditionTableWidget(QWidget):
             preserved_pen_rows.clear()
             preserved_pen_mass_per_head.clear()
             preserved_tank_weights.clear()
+            preserved_tank_densities.clear()
         
         if not skip_preserve:
             # Preserve tank weights from all tank category tables
@@ -1175,6 +1177,18 @@ class ConditionTableWidget(QWidget):
                                 weight_mt = float(weight_item.text())
                                 if weight_mt > 0:
                                     preserved_tank_weights[tank_id] = weight_mt
+                            except (ValueError, TypeError):
+                                pass
+                        
+                        # Get density (column 7) so Compute does not reset user-edited Dens
+                        dens_item = table.item(row, self.TANK_COL_DENS)
+                        if dens_item:
+                            try:
+                                dens_text = (dens_item.text() or "").strip()
+                                if dens_text:
+                                    d = float(dens_text)
+                                    if d > 0:
+                                        preserved_tank_densities[tank_id] = d
                             except (ValueError, TypeError):
                                 pass
         
@@ -1242,6 +1256,7 @@ class ConditionTableWidget(QWidget):
         self._populate_tank_tabs(
             tanks, tank_volumes,
             preserved_tank_weights=preserved_tank_weights,
+            preserved_tank_densities=preserved_tank_densities,
             tank_ullage_fsm=self._tank_ullage_fsm,
         )
         
@@ -2346,12 +2361,15 @@ class ConditionTableWidget(QWidget):
         tanks: List[Tank],
         tank_volumes: Dict[int, float],
         preserved_tank_weights: Optional[Dict[int, float]] = None,
+        preserved_tank_densities: Optional[Dict[int, float]] = None,
         tank_ullage_fsm: Optional[Dict[int, Tuple[float, float]]] = None,
     ) -> None:
         """Populate each tank category tab by tank category (Storing dropdown in Ship Manager).
         tank_ullage_fsm: tank_id -> (ullage_m, fsm_mt) from Excel for Ull/Snd and FSt columns.
+        preserved_tank_densities: tank_id -> density (t/m³) so Compute does not reset user-edited Dens.
         """
         tank_ullage_fsm = tank_ullage_fsm or {}
+        preserved_tank_densities = preserved_tank_densities or {}
         for cat in TANK_CATEGORY_NAMES:
             table = self._table_widgets.get(cat)
             if not table:
@@ -2383,7 +2401,7 @@ class ConditionTableWidget(QWidget):
                 if preserved_tank_weights and tank_id in preserved_tank_weights:
                     # Use preserved weight and calculate volume from it
                     weight_mt = preserved_tank_weights[tank_id]
-                    dens = getattr(tank, "density_t_per_m3", 1.025) or 1.025
+                    dens = preserved_tank_densities.get(tank_id) or getattr(tank, "density_t_per_m3", 1.025) or 1.025
                     vol = weight_mt / dens if dens > 0 else 0.0
                     # Constraint: Volume cannot exceed Capacity
                     if tank.capacity_m3 > 0 and vol > tank.capacity_m3:
@@ -2391,7 +2409,7 @@ class ConditionTableWidget(QWidget):
                         weight_mt = vol * dens  # Recalculate weight if volume was capped
                 else:
                     vol = tank_volumes.get(tank_id, 0.0)
-                    dens = getattr(tank, "density_t_per_m3", 1.025) or 1.025
+                    dens = preserved_tank_densities.get(tank_id) or getattr(tank, "density_t_per_m3", 1.025) or 1.025
                     # Constraint: Volume cannot exceed Capacity
                     if tank.capacity_m3 > 0 and vol > tank.capacity_m3:
                         vol = tank.capacity_m3
