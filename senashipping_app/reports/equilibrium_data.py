@@ -145,7 +145,7 @@ def build_equilibrium_data(
         ("Wetted Area m²", _fmt(wetted_area, ".3f"), "KML m", _fmt(km_l, ".3f")),
         ("Waterpl. Area m²", _fmt(awp, ".3f"), "Immersion (TPC) tonne/cm", _fmt(tpc, ".3f")),
         ("Prismatic coeff. (Cp)", _fmt(cp, ".3f"), "MTc tonne.m", _fmt(mtc, ".3f")),
-        ("Block coeff. (Cb)", _fmt(cb, ".3f"), "RM at 1deg = GMt.Disp.sin(1) tonne.m", _fmt(rm_1deg, ".3f")),
+        ("Block coeff. (Cb)", _fmt(cb, ".3f"), "RM at 1deg = GMt.Disp.sin(1) \n tonne.m", _fmt(rm_1deg, ".3f")),
         ("Max Sect. area coeff. (Cm)", _fmt(cm, ".3f"), "Max deck inclination deg", _fmt(trim_angle_deg, ".4f")),
         ("Waterpl. area coeff. (Cwp)", _fmt(cwp, ".3f"), "Trim angle (+ve by stern) deg", _fmt(trim_angle_deg, ".4f")),
     ]

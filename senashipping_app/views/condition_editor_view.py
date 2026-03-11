@@ -879,7 +879,12 @@ class ConditionEditorView(QWidget):
         if not tank_cog_override:
             tank_cog_override = self._build_tank_cog_override(tank_volumes)
         if not tank_fsm_map:
+            # Build FSM map from sounding / ullage tables for the current volumes.
             tank_fsm_map = self._build_tank_fsm_map(tank_volumes)
+        # Persist the CoG and FSM maps on the condition so reports (PDF/Excel)
+        # can reuse the exact values seen in the condition table.
+        condition.tank_cog_override = tank_cog_override or {}
+        condition.tank_fsm_mt = tank_fsm_map or {}
         try:
             results: ConditionResults = cond_service.compute(
                 self._current_ship,

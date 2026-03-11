@@ -26,6 +26,12 @@ from reportlab.platypus import (
 from reportlab.graphics.shapes import Drawing, Line, String, PolyLine
 
 from senashipping_app.config.limits import MASS_PER_HEAD_T
+from senashipping_app.config.stability_manual_ref import (
+    REF_LIGHTSHIP_DISPLACEMENT_T,
+    REF_LIGHTSHIP_KG_M,
+    REF_LIGHTSHIP_LCG_NORM,
+    REF_LIGHTSHIP_TCG_M,
+)
 from senashipping_app.reports.equilibrium_data import build_equilibrium_data
 from senashipping_app.repositories import database
 from senashipping_app.repositories.tank_repository import TankRepository
@@ -82,16 +88,68 @@ def _build_items_table(ship, condition, results) -> list[list[str]] | None:
         Long. arm (m) | Vert. arm (m) | Total FSM (t·m) | FSM Type
     """
     pen_loadings = getattr(condition, "pen_loadings", None) or {}
+    pen_mass_per_head_overrides = getattr(condition, "pen_mass_per_head_t", None) or {}
     tank_volumes = getattr(condition, "tank_volumes_m3", None) or {}
+    raw_tank_fsm_map = getattr(condition, "tank_fsm_mt", None) or {}
+    # Normalise tank FSM map so keys are integers and values are floats.
+    tank_fsm_map: dict[int, float] = {}
+    for key, value in raw_tank_fsm_map.items():
+        try:
+            tid_key = int(key)
+        except (TypeError, ValueError):
+            # If key is already an int or cannot be parsed, skip non-int keys.
+            if isinstance(key, int):
+                tid_key = key
+            else:
+                continue
+        try:
+            fsm_val = float(value)
+        except (TypeError, ValueError):
+            continue
+        tank_fsm_map[tid_key] = fsm_val
     if not pen_loadings and not tank_volumes:
-        return None
+        # Lightship-only condition: still show a single Lightship row.
+        lightship_mass_t = max(
+            0.0,
+            float(getattr(ship, "lightship_displacement_t", 0.0) or 0.0),
+        ) or REF_LIGHTSHIP_DISPLACEMENT_T
+        L = float(getattr(ship, "length_overall_m", 0.0) or 0.0)
+        lcg_m = REF_LIGHTSHIP_LCG_NORM * L if L > 0.0 else 0.0
+        tcg_m = REF_LIGHTSHIP_TCG_M
+        vcg_m = REF_LIGHTSHIP_KG_M
+        headers = [
+            "Item",
+            "Quantity",
+            "Unit mass (t)",
+            "Total mass (t)",
+            "Long. arm (m)",
+            "Trans. arm (m)",
+            "Vert. arm (m)",
+            "Total FSM (t·m)",
+            "FSM Type",
+        ]
+        return [
+            headers,
+            [
+                "Lightship",
+                "1",
+                _fmt(lightship_mass_t, ".1f"),
+                _fmt(lightship_mass_t, ".1f"),
+                _fmt(lcg_m, ".3f") if lcg_m else "",
+                _fmt(tcg_m, ".3f") if tcg_m else "",
+                _fmt(vcg_m, ".3f") if vcg_m else "",
+                "",
+                "User Specified",
+            ],
+        ]
 
     headers = [
         "Item",
-        "Quantity / Fill",
+        "Quantity",
         "Unit mass (t)",
         "Total mass (t)",
         "Long. arm (m)",
+        "Trans. arm (m)",
         "Vert. arm (m)",
         "Total FSM (t·m)",
         "FSM Type",
@@ -107,10 +165,34 @@ def _build_items_table(ship, condition, results) -> list[list[str]] | None:
             pens = LivestockPenRepository(db).list_for_ship(ship.id)
             tanks = TankRepository(db).list_for_ship(ship.id)
 
-    # --- Pens (livestock) rows by deck (DECK A, DECK B, ...) ------------------
+    # --- Lightship row (always first) -----------------------------------------
+    lightship_mass_t = max(
+        0.0,
+        float(getattr(ship, "lightship_displacement_t", 0.0) or 0.0),
+    ) or REF_LIGHTSHIP_DISPLACEMENT_T
+    L_ship = float(getattr(ship, "length_overall_m", 0.0) or 0.0)
+    lightship_lcg_m = REF_LIGHTSHIP_LCG_NORM * L_ship if L_ship > 0.0 else 0.0
+    lightship_vcg_m = REF_LIGHTSHIP_KG_M
+    lightship_tcg_m = REF_LIGHTSHIP_TCG_M
+    rows.append(
+        [
+            "Lightship",
+            "1",
+            _fmt(lightship_mass_t, ".1f"),
+            _fmt(lightship_mass_t, ".1f"),
+            _fmt(lightship_lcg_m, ".3f"),
+            _fmt(lightship_tcg_m if lightship_tcg_m is not None else 0.0, ".3f"),
+            _fmt(lightship_vcg_m, ".3f"),
+            "",
+            "User Specified",
+        ]
+    )
+
+    # --- Pens (livestock) rows -----------------------------------------------
     if pens and pen_loadings:
         pen_by_id = {p.id: p for p in pens if p.id is not None}
         deck_groups: dict[str, dict[str, float]] = {}
+        deck_h_rows: list[list[str]] = []
         for pen_id, heads in pen_loadings.items():
             try:
                 heads_int = int(heads)
@@ -124,50 +206,79 @@ def _build_items_table(ship, condition, results) -> list[list[str]] | None:
             deck_letter = _deck_to_letter(getattr(pen, "deck", "") or "") or (getattr(pen, "deck", "") or "")
             if not deck_letter:
                 continue
-            grp = deck_groups.setdefault(
-                deck_letter,
-                {"heads": 0.0, "mass": 0.0, "lcg_moment": 0.0, "vcg_moment": 0.0},
-            )
-            mass = heads_int * MASS_PER_HEAD_T
-            grp["heads"] += heads_int
-            grp["mass"] += mass
-            grp["lcg_moment"] += mass * float(getattr(pen, "lcg_m", 0.0) or 0.0)
-            grp["vcg_moment"] += mass * float(getattr(pen, "vcg_m", 0.0) or 0.0)
+            per_head_mass = pen_mass_per_head_overrides.get(pen_id, MASS_PER_HEAD_T)
+            mass = heads_int * per_head_mass
+            long_arm_pen = float(getattr(pen, "lcg_m", 0.0) or 0.0)
+            trans_arm_pen = float(getattr(pen, "tcg_m", 0.0) or 0.0)
+            vert_arm_pen = float(getattr(pen, "vcg_m", 0.0) or 0.0)
+            if deck_letter == "H":
+                # Deck H (8): show each item as its own row directly under Lightship.
+                deck_h_rows.append(
+                    [
+                        getattr(pen, "name", f"Deck H item {pen_id}"),
+                        "1",
+                        _fmt(mass, ".2f"),  # Unit mass column shows total weight for deck items
+                        _fmt(mass, ".2f"),
+                        _fmt(long_arm_pen, ".2f") if long_arm_pen else "",
+                        _fmt(trans_arm_pen if trans_arm_pen is not None else 0.0, ".3f"),
+                        _fmt(vert_arm_pen, ".2f") if vert_arm_pen else "",
+                        "0.000",
+                        "User Specified",
+                    ]
+                )
+            else:
+                grp = deck_groups.setdefault(
+                    deck_letter,
+                    {"heads": 0.0, "mass": 0.0, "lcg_moment": 0.0, "vcg_moment": 0.0},
+                )
+                grp["heads"] += heads_int
+                grp["mass"] += mass
+                grp["lcg_moment"] += mass * long_arm_pen
+                grp["vcg_moment"] += mass * vert_arm_pen
 
-        for deck_key in sorted(deck_groups):
+        # Insert Deck H item rows directly after Lightship.
+        rows.extend(sorted(deck_h_rows, key=lambda r: r[0]))
+
+        # Then append aggregated rows for all other decks.
+        for deck_key in sorted(k for k in deck_groups.keys() if k != "H"):
             grp = deck_groups[deck_key]
             mass = grp["mass"]
             heads_total = int(grp["heads"])
             if heads_total <= 0:
                 continue
             long_arm = grp["lcg_moment"] / mass if mass > 0 else 0.0
+            # For aggregated decks, transverse arm is not stored; show 0.000.
+            trans_arm = 0.0
             vert_arm = grp["vcg_moment"] / mass if mass > 0 else 0.0
             rows.append(
                 [
                     f"DECK {deck_key}",
-                    str(heads_total),
-                    _fmt(MASS_PER_HEAD_T, ".2f"),
+                    "1",
+                    _fmt(mass, ".2f"),  # Unit mass column shows total weight for deck items
                     _fmt(mass, ".2f"),
                     _fmt(long_arm, ".2f") if mass > 0 else "",
+                    _fmt(trans_arm if trans_arm is not None else 0.0, ".3f"),
                     _fmt(vert_arm, ".2f") if mass > 0 else "",
-                    "",
-                    "N/A (pens)",
+                    "0.000",
+                    "User Specified",
                 ]
             )
     elif pen_loadings:
         # Fallback: aggregate pens when we cannot resolve decks (no DB).
         total_heads = sum(max(0, int(h)) for h in pen_loadings.values())
         if total_heads > 0:
+            total_mass = total_heads * MASS_PER_HEAD_T
             rows.append(
                 [
                     "Livestock (pens)",
-                    str(total_heads),
-                    _fmt(MASS_PER_HEAD_T, ".2f"),
-                    _fmt(total_heads * MASS_PER_HEAD_T, ".2f"),
+                    "1",
+                    _fmt(total_mass, ".2f"),  # Unit mass column shows total weight for deck items
+                    _fmt(total_mass, ".2f"),
+                    "0.000",
                     "",
                     "",
                     "",
-                    "N/A (pens)",
+                    "User Specified",
                 ]
             )
 
@@ -179,6 +290,7 @@ def _build_items_table(ship, condition, results) -> list[list[str]] | None:
     total_tank_mass = 0.0
     total_tank_lcg_moment = 0.0
     total_tank_vcg_moment = 0.0
+    total_tank_tcg_moment = 0.0
     if tanks and tank_volumes:
         tank_by_id = {t.id: t for t in tanks if t.id is not None}
         L = float(getattr(ship, "length_overall_m", 0.0) or 0.0)
@@ -206,52 +318,112 @@ def _build_items_table(ship, condition, results) -> list[list[str]] | None:
             else:
                 lcg_m = 0.0
             vcg_m = float(getattr(tank, "kg_m", 0.0) or 0.0) if tank else 0.0
+            tcg_m = float(getattr(tank, "tcg_m", 0.0) or 0.0) if tank else 0.0
             total_tank_lcg_moment += mass_t * lcg_m
             total_tank_vcg_moment += mass_t * vcg_m
+            total_tank_tcg_moment += mass_t * tcg_m
+
+            # Quantity / Fill: show percentage fill when capacity is known, otherwise volume.
+            if tank and getattr(tank, "capacity_m3", None):
+                try:
+                    cap_m3 = float(getattr(tank, "capacity_m3", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    cap_m3 = 0.0
+            else:
+                cap_m3 = 0.0
+            if cap_m3 > 0.0:
+                fill_pct = max(0.0, min(200.0, (vol / cap_m3) * 100.0))
+                quantity_cell = f"{fill_pct:.0f}%"
+            else:
+                quantity_cell = _fmt(vol, ".1f") + " m³"
+
+            # Unit mass column: show tank capacity (in tonnes) when known, otherwise current mass.
+            if cap_m3 > 0.0:
+                unit_mass_t = cap_m3 * cargo_density
+            else:
+                unit_mass_t = mass_t
+
+            # Per-tank FSM: use exact value from condition when available; otherwise 0.000.
+            fsm_val = tank_fsm_map.get(tid, 0.0)
 
             rows.append(
                 [
                     item_label,
-                    _fmt(vol, ".1f") + " m³",
-                    _fmt(cargo_density, ".3f"),
+                    quantity_cell,
+                    _fmt(unit_mass_t, ".2f"),
                     _fmt(mass_t, ".2f"),
                     _fmt(lcg_m, ".2f") if lcg_m else "",
+                    _fmt(tcg_m if tcg_m is not None else 0.0, ".3f"),
                     _fmt(vcg_m, ".2f") if vcg_m else "",
-                    "",
-                    "N/A (tanks)",
+                    _fmt(fsm_val, ".3f"),
+                    "Maximum",
                 ]
             )
 
-    # --- Aggregate FSM row (all tanks) ---------------------------------------
-    if tank_volumes:
-        gm_raw = getattr(results, "gm_m", None)
-        validation = getattr(results, "validation", None)
-        gm_eff = getattr(validation, "gm_effective", None) if validation else None
-        total_fsm = ""
-        fsm_type = "N/A"
-        try:
-            if gm_raw is not None and gm_eff is not None and float(gm_raw) > 0:
-                fsc = float(gm_raw) - float(gm_eff)
-                if fsc > 0 and getattr(results, "displacement_t", None):
-                    total_fsm_val = fsc * float(results.displacement_t)
-                    total_fsm = _fmt(total_fsm_val, ".1f")
-                    fsm_type = "Aggregate FSM (from GM eff.)"
-        except (TypeError, ValueError):
-            total_fsm = ""
-            fsm_type = "N/A"
+    # --- Summary rows: totals for tanks and full loadcase ---------------------
+    # Compute overall totals for tanks (using accumulated mass and moments).
+    total_fsm_tanks = sum(tank_fsm_map.values()) if tank_fsm_map else 0.0
+    if total_tank_mass > 0.0:
+        tanks_lcg = total_tank_lcg_moment / total_tank_mass
+        tanks_tcg = total_tank_tcg_moment / total_tank_mass if total_tank_tcg_moment else 0.0
+        tanks_vcg = total_tank_vcg_moment / total_tank_mass
+    else:
+        tanks_lcg = tanks_tcg = tanks_vcg = 0.0
 
-        rows.append(
-            [
-                "FSM total (all tanks)",
-                "",
-                "",
-                "",
-                "",
-                "",
-                total_fsm,
-                fsm_type,
-            ]
-        )
+    # Approximate livestock totals from the table rows (all non-tank, non-header rows).
+    livestock_mass = 0.0
+    livestock_lcg_moment = 0.0
+    livestock_tcg_moment = 0.0
+    livestock_vcg_moment = 0.0
+    for row in rows[1:]:
+        label = str(row[0])
+        if "Tank" in label or label in ("FSM total (all tanks)",):
+            continue
+        try:
+            mass_val = float(row[3]) if row[3] not in ("", None) else 0.0
+            lcg_val = float(row[4]) if row[4] not in ("", None) else 0.0
+            tcg_val = float(row[5]) if row[5] not in ("", None) else 0.0
+            vcg_val = float(row[6]) if row[6] not in ("", None) else 0.0
+        except (TypeError, ValueError):
+            continue
+        livestock_mass += mass_val
+        livestock_lcg_moment += mass_val * lcg_val
+        livestock_tcg_moment += mass_val * tcg_val
+        livestock_vcg_moment += mass_val * vcg_val
+
+    if livestock_mass > 0.0:
+        livestock_lcg = livestock_lcg_moment / livestock_mass
+        livestock_tcg = livestock_tcg_moment / livestock_mass if livestock_tcg_moment else 0.0
+        livestock_vcg = livestock_vcg_moment / livestock_mass
+    else:
+        livestock_lcg = livestock_tcg = livestock_vcg = 0.0
+
+    # Total loadcase: use displacement so Total Mass equals reported displacement.
+    table_mass = livestock_mass + total_tank_mass
+    displacement_t = float(getattr(results, "displacement_t", 0.0) or 0.0)
+    total_mass = displacement_t if displacement_t > 0.0 else table_mass
+    if total_mass > 0.0:
+        total_lcg = (livestock_lcg_moment + total_tank_lcg_moment) / table_mass if table_mass > 0.0 else 0.0
+        total_tcg = (livestock_tcg_moment + total_tank_tcg_moment) / table_mass if table_mass > 0.0 and (livestock_tcg_moment + total_tank_tcg_moment) else 0.0
+        total_vcg = (livestock_vcg_moment + total_tank_vcg_moment) / table_mass if table_mass > 0.0 else 0.0
+    else:
+        total_lcg = total_tcg = total_vcg = 0.0
+    total_fsm_loadcase = total_fsm_tanks
+
+    # Append summary row at the end (overall loadcase totals).
+    rows.append(
+        [
+            "Total Loadcase",
+            "",
+            "",
+            _fmt(total_mass, ".2f"),
+            _fmt(total_lcg, ".2f") if total_mass > 0.0 else "",
+            _fmt(total_tcg, ".3f") if total_mass > 0.0 else "0.000",
+            _fmt(total_vcg, ".2f") if total_mass > 0.0 else "",
+            _fmt(total_fsm_loadcase, ".3f"),
+            "",
+        ]
+    )
 
     return rows if len(rows) > 1 else None
 
@@ -735,8 +907,7 @@ def export_condition_to_pdf(
                 ("BACKGROUND", (0, 1), (-1, -1), "#F5F5F5"),
                 ("GRID", (0, 0), (-1, -1), 0.5, "#333333"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("ALIGN", (0, 0), (0, -1), "LEFT"),
-                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 8),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 8),
                 ("TOPPADDING", (0, 0), (-1, -1), cell_pad),
@@ -808,8 +979,8 @@ def export_condition_to_pdf(
         items_header_style = ParagraphStyle(
             "ItemsHeader",
             parent=styles["Heading4"],
-            fontSize=11,
-            leading=13,
+            fontSize=10,
+            leading=11,
             alignment=1,  # center
             spaceBefore=0,
             spaceAfter=0,
@@ -817,8 +988,8 @@ def export_condition_to_pdf(
         items_cell_style = ParagraphStyle(
             "ItemsCell",
             parent=styles["Normal"],
-            fontSize=10,
-            leading=12,
+            fontSize=9,
+            leading=10,
             spaceBefore=0,
             spaceAfter=0,
         )
@@ -835,9 +1006,21 @@ def export_condition_to_pdf(
             wrapped_items_rows.append(wrapped_row)
 
         # Column widths tuned to span the printable width nicely
+        items_page_width = A4[0] - doc.leftMargin - doc.rightMargin
+        items_col_widths = [
+            items_page_width * 0.15,  # Item (slightly narrower)
+            items_page_width * 0.10,  # Quantity
+            items_page_width * 0.11,  # Unit mass
+            items_page_width * 0.12,  # Total mass
+            items_page_width * 0.11,  # Long. arm
+            items_page_width * 0.11,  # Trans. arm
+            items_page_width * 0.11,  # Vert. arm
+            items_page_width * 0.07,  # Total FSM
+            items_page_width * 0.12,  # FSM Type (wider)
+        ]
         items_table = Table(
             wrapped_items_rows,
-            colWidths=[3.5 * cm, 1.7 * cm, 1.7 * cm, 1.9 * cm, 1.9 * cm, 1.9 * cm, 1.9 * cm, 1.9 * cm],
+            colWidths=items_col_widths,
             repeatRows=1,
         )
         items_table.setStyle(
@@ -846,15 +1029,18 @@ def export_condition_to_pdf(
                     ("BACKGROUND", (0, 0), (-1, 0), "#4472C4"),
                     ("TEXTCOLOR", (0, 0), (-1, 0), "black"),
                     ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-                    ("FONTSIZE", (0, 0), (-1, 0), 13),
-                    ("FONTSIZE", (0, 1), (-1, -1), 11),
+                    ("FONTSIZE", (0, 0), (-1, 0), 11),
+                    ("FONTSIZE", (0, 1), (-1, -1), 9),
                     ("BACKGROUND", (0, 1), (-1, -1), "#F5F5F5"),
                     ("GRID", (0, 0), (-1, -1), 0.5, "#333333"),
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-                    ("TOPPADDING", (0, 0), (-1, -1), 2),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 1),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+                    # Make the final summary row taller for emphasis.
+                    ("TOPPADDING", (0, -1), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, -1), (-1, -1), 3),
                     ("WORDWRAP", (0, 0), (-1, -1), "CJK"),
                 ]
             )
@@ -915,8 +1101,8 @@ def export_condition_to_pdf(
         crit_header_style = ParagraphStyle(
             "CriteriaHeader",
             parent=styles["Heading4"],
-            fontSize=11,
-            leading=13,
+            fontSize=10,
+            leading=11,
             alignment=1,  # center
             spaceBefore=0,
             spaceAfter=0,
@@ -924,8 +1110,8 @@ def export_condition_to_pdf(
         crit_cell_style = ParagraphStyle(
             "CriteriaCell",
             parent=styles["Normal"],
-            fontSize=10,
-            leading=12,
+            fontSize=9,
+            leading=10,
             spaceBefore=0,
             spaceAfter=0,
         )
@@ -958,14 +1144,14 @@ def export_condition_to_pdf(
             ("BACKGROUND", (0, 0), (-1, 0), "#4472C4"),
             ("TEXTCOLOR", (0, 0), (-1, 0), "black"),
             ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-            ("FONTSIZE", (0, 0), (-1, 0), 13),
-            ("FONTSIZE", (0, 1), (-1, -1), 11),
+            ("FONTSIZE", (0, 0), (-1, 0), 11),
+            ("FONTSIZE", (0, 1), (-1, -1), 9),
             ("ALIGN", (0, 0), (-1, 0), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-            ("TOPPADDING", (0, 0), (-1, -1), 6),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
             ("BACKGROUND", (0, 1), (-1, -1), "#F5F5F5"),
             ("GRID", (0, 0), (-1, -1), 0.5, "#333333"),
             ("WORDWRAP", (0, 0), (-1, -1), "CJK"),
