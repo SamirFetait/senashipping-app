@@ -51,6 +51,7 @@ from senashipping_app.reports import (
     build_condition_summary_text,
     export_condition_to_pdf,
     export_condition_to_excel,
+    export_life_weight_report,
 )
 from senashipping_app.services.stability_service import ConditionResults
 from senashipping_app.services.validation import ValidationResult
@@ -280,8 +281,9 @@ class ResultsView(QWidget):
         manual_layout = QVBoxLayout()
         manual_layout.addWidget(self._manual_ref_text)
         self._manual_ref_group.setLayout(manual_layout)
-        
+
         self._export_pdf_btn = QPushButton("Export PDF", self)
+        self._export_life_weight_btn = QPushButton("Export Life-Weight PDF", self)
         self._export_excel_btn = QPushButton("Export Excel", self)
 
         self._last_results: ConditionResults | None = None
@@ -382,17 +384,16 @@ class ResultsView(QWidget):
         r_layout.setContentsMargins(6, 6, 6, 6)
         r_layout.addWidget(self._report_view, 1)
         export_row = QHBoxLayout()
-        # Make both buttons expand and share the full width (50/50)
-        self._export_pdf_btn.setSizePolicy(
-            QSizePolicy.Policy.Expanding, self._export_pdf_btn.sizePolicy().verticalPolicy()
-        )
-        self._export_excel_btn.setSizePolicy(
-            QSizePolicy.Policy.Expanding, self._export_excel_btn.sizePolicy().verticalPolicy()
-        )
-        export_row.addWidget(self._export_pdf_btn)
-        export_row.addWidget(self._export_excel_btn)
+        # Make all export buttons expand and share the full width
+        for btn in (self._export_pdf_btn, self._export_life_weight_btn, self._export_excel_btn):
+            btn.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                btn.sizePolicy().verticalPolicy(),
+            )
+            export_row.addWidget(btn)
         export_row.setStretch(0, 1)
         export_row.setStretch(1, 1)
+        export_row.setStretch(2, 1)
         r_layout.addLayout(export_row)
         grid.addWidget(report_group, 1, 1)
 
@@ -406,6 +407,7 @@ class ResultsView(QWidget):
 
     def _connect_signals(self) -> None:
         self._export_pdf_btn.clicked.connect(self._on_export_pdf)
+        self._export_life_weight_btn.clicked.connect(self._on_export_life_weight_pdf)
         self._export_excel_btn.clicked.connect(self._on_export_excel)
     def _populate_alarms_table(
         self,
@@ -769,6 +771,50 @@ class ResultsView(QWidget):
                 self,
                 "Export Error",
                 f"Could not save PDF:\n{e}\n\nPath: {filepath}",
+            )
+
+    def _on_export_life_weight_pdf(self) -> None:
+        if not all([self._last_results, self._last_ship, self._last_condition, self._last_voyage]):
+            QMessageBox.information(
+                self,
+                "Export",
+                "Compute a condition first to export.",
+            )
+            return
+        default_dir = Path(
+            QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.DocumentsLocation
+            ) or str(Path.home())
+        )
+        cond_name = (self._last_condition.name or "condition").strip()
+        safe_name = re.sub(r'[<>:"/\\|?*]', "_", cond_name).strip(" .") or "condition"
+        default_path = default_dir / f"{safe_name}_life_weight.pdf"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Life-Weight PDF",
+            str(default_path),
+            "PDF (*.pdf)",
+            )
+        if not path:
+            return
+        path = str(path).replace("file:///", "").replace("file://", "").strip()
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        filepath = Path(path).resolve()
+        try:
+            export_life_weight_report(
+                filepath,
+                self._last_ship,
+                self._last_voyage,
+                self._last_condition,
+                self._last_results,
+            )
+            QMessageBox.information(self, "Export", f"Saved to {filepath}")
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Export Error",
+                f"Could not save Life-Weight PDF:\n{e}\n\nPath: {filepath}",
             )
 
 
