@@ -1,3 +1,5 @@
+.venv
+venv/
 .env
 .pytest_cache
 temp_*.py

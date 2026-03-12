@@ -783,11 +783,12 @@ def export_condition_to_pdf(
         leading=22,
         spaceAfter=8,
     )
-    # Make section headers larger and with a bit more spacing
+    # Make section headers larger, centered, and with a bit more spacing
     styles["Heading3"].fontSize = 13
     styles["Heading3"].leading = 16
     styles["Heading3"].spaceBefore = 8
     styles["Heading3"].spaceAfter = 4
+    styles["Heading3"].alignment = 1  # center
     styles["Normal"].spaceAfter = 2
 
     def _draw_page_frame(canvas, _doc) -> None:
@@ -918,7 +919,115 @@ def export_condition_to_pdf(
     story.append(summary_table)
     story.append(Spacer(1, 0.5 * cm))
 
-    # --- Section 2: EQUILIBRIUM DATA on separate page (Loading Manual style) ---
+    # Force the Weight Items and Free Surface Summary onto a fresh page
+    # so it is visually separated from the condition summary.
+    story.append(PageBreak())
+
+    # --- Section 2: Items / FSM-style summary ---
+    items_rows = _build_items_table(ship, condition, results)
+    if items_rows:
+        story.append(_section_title("Weight Items and Free Surface Summary", styles))
+        story.append(Spacer(1, 0.2 * cm))
+
+        # Wrap cell contents so long text stays within column width.
+        items_header_style = ParagraphStyle(
+            "ItemsHeader",
+            parent=styles["Heading4"],
+            fontSize=10,
+            leading=11,
+            alignment=1,  # center
+            spaceBefore=0,
+            spaceAfter=0,
+        )
+        items_cell_style = ParagraphStyle(
+            "ItemsCell",
+            parent=styles["Normal"],
+            fontSize=9,
+            leading=10,
+            alignment=1,  # center
+            spaceBefore=0,
+            spaceAfter=0,
+        )
+
+        wrapped_items_rows: list[list[object]] = []
+        for r, row in enumerate(items_rows):
+            wrapped_row: list[object] = []
+            for cell in row:
+                text = "" if cell is None else str(cell)
+                if r == 0:
+                    wrapped_row.append(Paragraph(text, items_header_style))
+                else:
+                    wrapped_row.append(Paragraph(text, items_cell_style))
+            wrapped_items_rows.append(wrapped_row)
+
+        # Column widths tuned to span the printable width nicely
+        items_page_width = A4[0] - doc.leftMargin - doc.rightMargin
+        items_col_widths = [
+            items_page_width * 0.15,  # Item (slightly narrower)
+            items_page_width * 0.10,  # Quantity
+            items_page_width * 0.11,  # Unit mass
+            items_page_width * 0.12,  # Total mass
+            items_page_width * 0.11,  # Long. arm
+            items_page_width * 0.11,  # Trans. arm
+            items_page_width * 0.11,  # Vert. arm
+            items_page_width * 0.07,  # Total FSM
+            items_page_width * 0.12,  # FSM Type (wider)
+        ]
+        # Increase the row height specifically for tank rows in the
+        # "Weight Items and Free Surface Summary" table so they stand
+        # out more and occupy more vertical space. We treat any row
+        # whose first cell label contains "Tank" as a tank row and
+        # give it 25% extra height compared to the base height. Also
+        # make the header row a little taller for readability.
+        base_row_height = 0.7 * cm
+        row_heights: list[float] = []
+        for idx in range(len(wrapped_items_rows)):
+            if idx == 0:
+                # Header row slightly taller than body rows.
+                row_heights.append(base_row_height * 1.35)
+                continue
+            label = ""
+            if idx < len(items_rows) and items_rows[idx]:
+                label = str(items_rows[idx][0])
+            if "Tank" in label:
+                row_heights.append(base_row_height * 1.25)
+            else:
+                row_heights.append(base_row_height)
+
+        items_table = Table(
+            wrapped_items_rows,
+            colWidths=items_col_widths,
+            rowHeights=row_heights,
+            repeatRows=1,
+            hAlign="LEFT",
+        )
+        items_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), "#4472C4"),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), "black"),
+                    ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 11),
+                    ("FONTSIZE", (0, 1), (-1, -1), 9),
+                    ("BACKGROUND", (0, 1), (-1, -1), "#F5F5F5"),
+                    ("GRID", (0, 0), (-1, -1), 0.5, "#333333"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                    ("TOPPADDING", (0, 0), (-1, -1), 1),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+                    # Make the final summary row taller for emphasis.
+                    ("TOPPADDING", (0, -1), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, -1), (-1, -1), 3),
+                    ("WORDWRAP", (0, 0), (-1, -1), "CJK"),
+                ]
+            )
+        )
+        story.append(items_table)
+        story.append(Spacer(1, 0.6 * cm))
+
+    # --- Section 3: EQUILIBRIUM DATA on separate page (Loading Manual style) ---
     story.append(NextPageTemplate("Portrait"))
     story.append(PageBreak())
     story.append(Paragraph("<b>EQUILIBRIUM DATA</b>", ParagraphStyle(
@@ -967,86 +1076,6 @@ def export_condition_to_pdf(
     )
     story.append(eq_table)
     story.append(Spacer(1, 0.5 * cm))
-    story.append(PageBreak())
-
-    # --- Section 3: Items / FSM-style summary ---
-    items_rows = _build_items_table(ship, condition, results)
-    if items_rows:
-        story.append(_section_title("Weight Items and Free Surface Summary", styles))
-        story.append(Spacer(1, 0.2 * cm))
-
-        # Wrap cell contents so long text stays within column width.
-        items_header_style = ParagraphStyle(
-            "ItemsHeader",
-            parent=styles["Heading4"],
-            fontSize=10,
-            leading=11,
-            alignment=1,  # center
-            spaceBefore=0,
-            spaceAfter=0,
-        )
-        items_cell_style = ParagraphStyle(
-            "ItemsCell",
-            parent=styles["Normal"],
-            fontSize=9,
-            leading=10,
-            spaceBefore=0,
-            spaceAfter=0,
-        )
-
-        wrapped_items_rows: list[list[object]] = []
-        for r, row in enumerate(items_rows):
-            wrapped_row: list[object] = []
-            for cell in row:
-                text = "" if cell is None else str(cell)
-                if r == 0:
-                    wrapped_row.append(Paragraph(text, items_header_style))
-                else:
-                    wrapped_row.append(Paragraph(text, items_cell_style))
-            wrapped_items_rows.append(wrapped_row)
-
-        # Column widths tuned to span the printable width nicely
-        items_page_width = A4[0] - doc.leftMargin - doc.rightMargin
-        items_col_widths = [
-            items_page_width * 0.15,  # Item (slightly narrower)
-            items_page_width * 0.10,  # Quantity
-            items_page_width * 0.11,  # Unit mass
-            items_page_width * 0.12,  # Total mass
-            items_page_width * 0.11,  # Long. arm
-            items_page_width * 0.11,  # Trans. arm
-            items_page_width * 0.11,  # Vert. arm
-            items_page_width * 0.07,  # Total FSM
-            items_page_width * 0.12,  # FSM Type (wider)
-        ]
-        items_table = Table(
-            wrapped_items_rows,
-            colWidths=items_col_widths,
-            repeatRows=1,
-        )
-        items_table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), "#4472C4"),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), "black"),
-                    ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-                    ("FONTSIZE", (0, 0), (-1, 0), 11),
-                    ("FONTSIZE", (0, 1), (-1, -1), 9),
-                    ("BACKGROUND", (0, 1), (-1, -1), "#F5F5F5"),
-                    ("GRID", (0, 0), (-1, -1), 0.5, "#333333"),
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 4),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-                    ("TOPPADDING", (0, 0), (-1, -1), 1),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
-                    # Make the final summary row taller for emphasis.
-                    ("TOPPADDING", (0, -1), (-1, -1), 3),
-                    ("BOTTOMPADDING", (0, -1), (-1, -1), 3),
-                    ("WORDWRAP", (0, 0), (-1, -1), "CJK"),
-                ]
-            )
-        )
-        story.append(items_table)
-        story.append(Spacer(1, 0.6 * cm))
 
     # --- Section 4: IMO / ancillary criteria table (if available) ---
     criteria = getattr(results, "criteria", None)
@@ -1112,6 +1141,7 @@ def export_condition_to_pdf(
             parent=styles["Normal"],
             fontSize=9,
             leading=10,
+            alignment=1,  # 
             spaceBefore=0,
             spaceAfter=0,
         )
@@ -1133,11 +1163,35 @@ def export_condition_to_pdf(
         width_fractions = [0.09, 0.13, 0.28, 0.15, 0.07, 0.09, 0.09, 0.10]
         col_widths = [f * available_width for f in width_fractions]
 
+        # Make the IMO / Livestock / Ancillary Criteria rows tall enough to
+        # visually occupy (almost) the full landscape page height.
+        #
+        # We approximate the vertical space already used on this page
+        # (section title + spacers) and distribute the remaining height
+        # evenly across all table rows.
+        criteria_frame_height = landscape_size[1] - doc.topMargin - doc.bottomMargin
+        # Spacers on the page: 0.3 cm (before title) + 0.2 cm (after title),
+        # plus an extra ~0.7 cm to account for the title line itself.
+        approx_used_height = (0.3 + 0.2 + 0.7) * cm
+        available_height_for_table = max(
+            4 * cm,  # sensible minimum so rows never collapse
+            criteria_frame_height - approx_used_height,
+        )
+        row_count = max(1, len(crit_rows_wrapped))
+        # Slightly reduce the theoretical height so that, once padding and
+        # grid lines are taken into account, the full table is more likely
+        # to fit on a single page.
+        base_row_height = (available_height_for_table / row_count) * 0.95
+        # Do not let excessively small row heights slip through.
+        base_row_height = max(0.65 * cm, base_row_height)
+        row_heights = [base_row_height for _ in range(row_count)]
+
         crit_table = Table(
             crit_rows_wrapped,
             colWidths=col_widths,
+            rowHeights=row_heights,
             repeatRows=1,
-            hAlign="LEFT",
+            hAlign="CENTER",
         )
         # Header and grid (same style as equilibrium table)
         base_style = [
@@ -1147,6 +1201,7 @@ def export_condition_to_pdf(
             ("FONTSIZE", (0, 0), (-1, 0), 11),
             ("FONTSIZE", (0, 1), (-1, -1), 9),
             ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+            ("ALIGN", (0, 1), (-1, -1), "CENTER"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("LEFTPADDING", (0, 0), (-1, -1), 4),
             ("RIGHTPADDING", (0, 0), (-1, -1), 4),
