@@ -64,13 +64,10 @@ HYDROSTATIC_CURVES_PATH: str | None = "assets/hydrostatics tables.xlsx"
 USE_LIGHTSHIP_LCG_ALIGNMENT = False
 
 # Calibration factors to align app output with Loading Manual (Load Case NO.13).
-# Set to None to use raw calculated values. When enabled, apply only for Load Case NO.13
-# (displacement ~9600 t) to avoid affecting other conditions.
-# TRIM_CORRECTION_FACTOR: scale trim to match Loading Manual Load Case NO.13 (1.33 m).
-# Raw trim ~1.24 m; factor 1.33/1.24 ≈ 1.07 aligns with PDF.
-TRIM_CORRECTION_FACTOR: float | None = 1.332 / 1.24
-GM_CORRECTION_FACTOR: float | None = 1.021 / 1.14  # ~0.90; None = no correction
-TRIM_GM_CORRECTION_DISPLACEMENT_RANGE: tuple[float, float] = (9550.0, 9650.0)  # t; apply only in this range
+# Set to None to use raw calculated values with no artificial scaling.
+TRIM_CORRECTION_FACTOR: float | None = None
+GM_CORRECTION_FACTOR: float | None = None
+TRIM_GM_CORRECTION_DISPLACEMENT_RANGE: tuple[float, float] = (9550.0, 9650.0)
 
 # --- IMO general intact stability criteria (PDF p.13, IS Code Ch.3) ---
 # 3.1.2.1 Area under GZ: not less than 0.055 m·rad up to 30°, 0.09 m·rad up to 40° (or θf);
