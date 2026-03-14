@@ -75,8 +75,23 @@ class ConditionService:
         self._validate_tank_limits(tanks, tank_fill_volumes)
 
         if cargo_type:
-            mass_per_head_t = (getattr(cargo_type, "avg_weight_per_head_kg", 520.0) or 520.0) / 1000.0
+            # Base live cargo mass per head (t/head)
+            base_mass_per_head_t = (
+                getattr(cargo_type, "avg_weight_per_head_kg", 520.0) or 520.0
+            ) / 1000.0
             vcg_from_deck_m = getattr(cargo_type, "vcg_from_deck_m", 0.0) or 0.0
+
+            # Dung weight %/day: convert to additional mass per head over the voyage
+            est_days = getattr(condition, "estimated_time_days", 0.0) or 0.0
+            dung_pct_per_day = (
+                getattr(cargo_type, "dung_weight_pct_per_day", 0.0) or 0.0
+            )
+            if est_days > 0.0 and dung_pct_per_day > 0.0:
+                # Total dung over voyage (fraction of live mass): pct_per_day * days / 100
+                dung_fraction = (dung_pct_per_day / 100.0) * est_days
+                mass_per_head_t = base_mass_per_head_t * (1.0 + dung_fraction)
+            else:
+                mass_per_head_t = base_mass_per_head_t
         else:
             mass_per_head_t = MASS_PER_HEAD_T
             vcg_from_deck_m = 0.0
