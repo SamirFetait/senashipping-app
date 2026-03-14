@@ -74,6 +74,7 @@ class ConditionService:
         pens = self._pen_repo.list_for_ship(ship.id)
         self._validate_tank_limits(tanks, tank_fill_volumes)
 
+        dung_fraction = 0.0
         if cargo_type:
             # Base live cargo mass per head (t/head)
             base_mass_per_head_t = (
@@ -95,6 +96,13 @@ class ConditionService:
         else:
             mass_per_head_t = MASS_PER_HEAD_T
             vcg_from_deck_m = 0.0
+
+        # When explicit per-pen mass overrides are provided, apply the same dung fraction
+        # so dung weight %/day still contributes to total mass and moments.
+        if pen_mass_per_head and dung_fraction > 0.0:
+            pen_mass_per_head = {
+                pid: (m or 0.0) * (1.0 + dung_fraction) for pid, m in pen_mass_per_head.items()
+            }
 
         condition.tank_volumes_m3 = tank_fill_volumes
         results = compute_condition(
